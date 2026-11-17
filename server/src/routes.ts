@@ -30,8 +30,10 @@ import { ProService } from './pro';
 import type { ProRepository } from './proRepo';
 import { accountVoter } from './proPrice';
 import { registerProRoutes } from './proRoutes';
-import { MoyasarClient, type MoyasarApi } from './moyasar';
-import { PaymentService, moyasarKeyKind, payLegal, paymentsPublic } from './payments';
+import { MOYASAR_API, MoyasarClient, type MoyasarApi } from './moyasar';
+import { readProxyUrl, tunnelFetch } from './moyasarProxy';
+import { cancelUrlOf, renewEmail } from './payRenewMail';
+import { PaymentService, moyasarKeyKind, payLegal, paymentsPublic, verifyMode } from './payments';
 import type { PaymentRepository } from './payRepo';
 import { receiptEmail } from './payReceipt';
 import { registerPayRoutes } from './payRoutes';
@@ -307,6 +309,12 @@ export interface AppOptions {
   payments?: PaymentRepository;
   /** Moyasar, for the tests. Otherwise made from MOYASAR_SECRET_KEY when it is a secret key. */
   moyasar?: MoyasarApi;
+  /**
+   * Run the renewals job (payments v2 auto-renew) on a timer: the real server
+   * sets it, the tests call PaymentService.runRenewals() themselves. The job
+   * does nothing while PRO_AUTORENEW is off.
+   */
+  renewalsTimer?: boolean;
   aiEvents?: AiEventsRepository;
   /** Where the daily AI budget survives a restart (memory only when absent). */
   aiBudget?: AiBudgetRepository;
@@ -680,6 +688,42 @@ export async function buildApp(
   app.addHook('onRequest', (req, reply, done) => {
     securityHeaders(req.raw, reply.raw, (err?: unknown) => done(err as Error | undefined));
   });
+
+  /**
+   * The policy for /pro while Moyasar's payment form is the checkout (payments
+   * v2; PRO_CHECKOUT=form or MOYASAR_VERIFY=webhook). The same policy as every
+   * other page plus exactly what the form needs, and sent for /pro alone: every
+   * other page, and /pro itself while the form is off, keeps the policy above
+   * byte for byte.
+   *
+   *  - script-src stays 'self' for the form itself: its script is Moyasar's
+   *    npm package (moyasar-payment-form), pinned and bundled into /assets,
+   *    not loaded from a CDN. With Apple Pay on, the form loads Apple's own
+   *    SDK from applepay.cdn-apple.com, which is the one script origin added,
+   *    and only then.
+   *  - connect-src adds https://api.moyasar.com: the form sends the card (or
+   *    the wallet's token) from the browser straight to Moyasar. It never
+   *    comes here.
+   *  - Nothing is framed: 3-D Secure is a full-page visit to the bank and
+   *    back, so there is no frame-src to open. The form's error reporting
+   *    (appsignal-endpoint.net) is not allowed and simply does not send.
+   */
+  const proFormCsp = (methods: readonly string[]): string =>
+    [
+      "default-src 'self'",
+      `script-src 'self'${methods.includes('applepay') ? ' https://applepay.cdn-apple.com' : ''}${methods.includes('samsungpay') ? ' https://img.mpay.samsung.com' : ''}`,
+      "style-src 'self' 'unsafe-inline'",
+      // Apple's SDK draws its button with Apple's own font, from the same origin as the SDK.
+      `font-src 'self'${methods.includes('applepay') ? ' https://applepay.cdn-apple.com' : ''}`,
+      "img-src 'self' data:",
+      "connect-src 'self' https://api.moyasar.com",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "script-src-attr 'none'",
+      'upgrade-insecure-requests',
+    ].join(';');
 
   /**
    * The static file routes under /assets, as registered by @fastify/static
@@ -1491,29 +1535,102 @@ export async function buildApp(
   // Buying Pro (payments.ts): built whenever there is somewhere to keep
   // orders; it sells nothing until PRO_PAYMENTS=on and a Moyasar key are set.
   const moyasarKey = (process.env.MOYASAR_SECRET_KEY ?? '').trim();
+  // A stand-in Moyasar for the browser tests (e2e-pay.mjs); never in production.
+  const moyasarBase = process.env.NODE_ENV !== 'production' ? process.env.MOYASAR_API_BASE || undefined : undefined;
+  // MOYASAR_PROXY_URL (payments v2, 1a): the calls to Moyasar, and no others,
+  // leave through a fixed-IP proxy (moyasarProxy.ts). The URL holds a password:
+  // it is parsed here once and never logged; a value that is not a proxy URL
+  // is reported by name only, and the calls then fail closed rather than go
+  // out directly from an address Moyasar would refuse anyway.
+  const proxyRaw = (process.env.MOYASAR_PROXY_URL ?? '').trim();
+  const proxy = readProxyUrl(proxyRaw);
+  if (proxyRaw && !proxy) console.error('[tifo] payments: MOYASAR_PROXY_URL is set but is not an http(s) proxy URL; calls to Moyasar will fail until it is fixed');
+  const moyasarFetch: typeof fetch | undefined = proxy
+    ? tunnelFetch(proxy, { allowHosts: [new URL(moyasarBase ?? MOYASAR_API).hostname] })
+    : proxyRaw
+      ? ((async () => { const e = new Error('proxy'); e.name = 'ProxyError'; throw e; }) as unknown as typeof fetch)
+      : undefined;
+  const payBase = (options.publicUrl || CANONICAL_ORIGIN).replace(/\/+$/, '');
+  /**
+   * Apple Pay's domain file (payments v2). Moyasar gives it out when the
+   * domain is added in its dashboard (Settings -> Apple Pay Domains ->
+   * Download Association), and Apple fetches it from
+   * /.well-known/apple-developer-merchantid-domain-association, with no
+   * extension. Its text comes from APPLE_PAY_DOMAIN_ASSOCIATION, or from the
+   * file of that name in public/.well-known/ when it was committed. Until one
+   * of them is there the route answers 404 and the form does not offer Apple
+   * Pay.
+   */
+  const APPLE_PAY_PATH = '/.well-known/apple-developer-merchantid-domain-association';
+  const applePayFile = ((): string | null => {
+    const ok = (t: string): string | null => {
+      const v = t.trim();
+      // Printable text only (Apple's file is one long hex string), and nothing that could be a page.
+      return v.length >= 32 && v.length <= 65_536 && /^[\x20-\x7e\r\n]+$/.test(v) && !/[<>]/.test(v) ? v : null;
+    };
+    const fromEnv = ok(process.env.APPLE_PAY_DOMAIN_ASSOCIATION ?? '');
+    if (fromEnv) return fromEnv;
+    if (!options.staticDir) return null;
+    try {
+      return ok(readFileSync(join(options.staticDir, '.well-known', 'apple-developer-merchantid-domain-association'), 'utf8'));
+    } catch {
+      return null;
+    }
+  })();
+  app.get(APPLE_PAY_PATH, async (_req, reply) => {
+    if (!applePayFile) return reply.code(404).send({ error: 'not found' });
+    return reply.header('cache-control', 'no-cache').type('text/plain; charset=utf-8').send(applePayFile);
+  });
   const payService = proService && options.payments
     ? new PaymentService(
       options.payments,
       proService,
-      options.moyasar ?? (moyasarKeyKind() ? new MoyasarClient(moyasarKey, {
-        // A stand-in Moyasar for the browser tests (e2e-pay.mjs); never in production.
-        base: process.env.NODE_ENV !== 'production' ? process.env.MOYASAR_API_BASE || undefined : undefined,
-      }) : null),
+      // The webhook-only mode (MOYASAR_VERIFY=webhook) runs with no secret key on the server: no client is made.
+      options.moyasar ?? (moyasarKeyKind() && verifyMode() === 'api' ? new MoyasarClient(moyasarKey, { base: moyasarBase, fetch: moyasarFetch }) : null),
       {
-        onPaid: async (order, endsAt) => {
+        base: payBase,
+        applePayReady: () => applePayFile !== null,
+        onPaid: async (order, endsAt, sub) => {
           if (!options.emailSender || !order.userId) return;
           const u = await auth.getUserById(order.userId);
           if (!u?.email) return;
-          const base = (options.publicUrl ?? CANONICAL_ORIGIN).replace(/\/+$/, '');
-          await options.emailSender.send(receiptEmail({ order, to: u.email, endsAt, base, contact: 'osamah9070@gmail.com' }));
+          // Auto-renew is on for this order's account: the receipt says when it renews and how to stop it.
+          const renew = sub && sub.status === 'active' && endsAt ? { nextAt: endsAt, cancelUrl: cancelUrlOf(payBase, sub) } : null;
+          await options.emailSender.send(receiptEmail({ order, to: u.email, endsAt, base: payBase, contact: 'osamah9070@gmail.com', renew }));
+        },
+        // A renewal email (payRenewMail.ts). True only when it was handed to the mail service: a
+        // reminder that could not be sent is owed again, and no renewal is charged without one.
+        notify: async (n) => {
+          if (!options.emailSender) return false;
+          const u = await auth.getUserById(n.sub.userId);
+          if (!u?.email) return false;
+          await options.emailSender.send(renewEmail({ notice: n, to: u.email, base: payBase, contact: 'osamah9070@gmail.com' }));
+          return true;
         },
       },
     )
     : null;
+  if (payService && options.renewalsTimer) {
+    // Every 15 minutes, and once a minute after boot: a renewal is charged within minutes of
+    // its month ending. Off (PRO_AUTORENEW unset) the job only retries deleting saved cards
+    // that are no longer wanted, which is nothing.
+    const run = (): void => void payService.runRenewals().catch((e) => console.error(`[tifo] payments: the renewals job failed (${(e as Error).message})`));
+    const first = setTimeout(run, 60_000);
+    const every = setInterval(run, 15 * 60_000);
+    first.unref();
+    every.unref();
+    app.addHook('onClose', async () => {
+      clearTimeout(first);
+      clearInterval(every);
+    });
+  }
   if (proService) {
     registerProRoutes(app, {
       paymentsOpenFor: (username) => payService?.openFor(username) ?? false,
       paymentsPublic: () => !!payService?.on() && paymentsPublic(),
+      checkoutKind: () => payService?.checkoutKind() ?? 'invoice',
+      autoRenew: () => payService?.renewOn() ?? false,
+      hasRenewal: async (userId) => (payService ? (await payService.renewalFor(userId)) !== null : false),
       pro: proService,
       userOf,
       requireUser,
@@ -3079,8 +3196,11 @@ export async function buildApp(
     let price: Awaited<ReturnType<ProRepository['priceAnswer']>> = null;
     // What they bought (payments v1): none while payments were never on.
     let orders: Awaited<ReturnType<PaymentRepository['recentFor']>> = [];
+    // Auto-renew (payments v2): whether a card is saved for it, and which.
+    let renewal: Awaited<ReturnType<PaymentRepository['subFor']>> = null;
     try {
       orders = payService ? await payService.repo.recentFor(userId, new Date(0)) : [];
+      renewal = payService ? await payService.repo.subFor(userId) : null;
       [user, designs, passes, gift, price] = await Promise.all([
         accountOf(req, userId),
         repo.listByOwner(userId),
@@ -3117,7 +3237,19 @@ export async function buildApp(
         orders: orders.map((o) => ({
           reference: o.invoiceId ?? o.id, amount: o.amount / 100, currency: o.currency, status: o.status === 'review' ? 'pending' : o.status,
           method: o.method, createdAt: o.createdAt, paidAt: o.paidAt, refundedAt: o.refundedAt, test: o.testMode,
+          renewal: o.kind === 'renewal', askedToRenew: o.keep,
         })),
+        // "Keep Pro on". The saved card is a token held by Moyasar, the payment company: this site
+        // has only Moyasar's reference to it (not exported: it is of no use to anyone but this
+        // server), the card's brand, last four digits and expiry.
+        autoRenew: renewal
+          ? {
+            status: renewal.status, cardSaved: renewal.token !== null, method: renewal.method, brand: renewal.brand,
+            lastFour: renewal.lastFour, expiryMonth: renewal.expMonth, expiryYear: renewal.expYear,
+            amount: renewal.amount / 100, currency: 'SAR', everyDays: renewal.days,
+            agreedAt: renewal.optedInAt, nextRenewalAt: renewal.nextChargeAt, stoppedAt: renewal.cancelledAt, test: renewal.testMode,
+          }
+          : null,
       },
     });
   });
@@ -3142,6 +3274,9 @@ export async function buildApp(
     // designs behind with no owner. Now a failure stops here and says so;
     // nothing is half done that a retry cannot finish (P1.26 review).
     try {
+      // Auto-renew first (payments v2): the saved card comes off the account and is deleted at
+      // Moyasar, so nothing can be charged to an account that no longer exists. A failure stops here.
+      if (payService) await payService.forgetAccount(userId);
       await repo.deleteByOwner(userId);
     } catch {
       return reply.code(503).send({ error: 'your account was not deleted, please try again', code: 'retry' });
@@ -5331,9 +5466,11 @@ export async function buildApp(
     try {
       // The payment terms appear once Pro is on sale to everyone (payments.ts payLegal); read at boot like the page.
       const onSale = !!payService?.on() && paymentsPublic();
-      const legalHtml = payLegal(readFileSync(join(staticDir, 'legal.html'), 'utf8'), onSale);
+      // The auto-renew terms only where auto-renew is on (payments v2).
+      const renewTerms = onSale && !!payService?.renewOn();
+      const legalHtml = payLegal(readFileSync(join(staticDir, 'legal.html'), 'utf8'), onSale, renewTerms);
       for (const [lang, raw] of pagesOf('legal.html', legalHtml, '/legal')) {
-        const html = lang === 'en' ? raw : payLegal(raw, onSale);
+        const html = lang === 'en' ? raw : payLegal(raw, onSale, renewTerms);
         const legalShell = htmlShell(routeIn('/legal', lang), html, {
           title: pageText('meta.legal.title', lang),
           description: pageText('meta.legal.desc', lang),
@@ -5389,8 +5526,12 @@ export async function buildApp(
     try {
       const proHtml = readFileSync(join(staticDir, 'pro.html'), 'utf8');
       for (const [lang, page] of pagesOf('pro.html', proHtml)) {
-        app.get(routeIn('/pro', lang), async (req, reply) =>
-          reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/pro', lang, false)));
+        app.get(routeIn('/pro', lang), async (req, reply) => {
+          // Moyasar's payment form (payments v2), and only on this page, and only while
+          // the form is the checkout: see proFormCsp above the security headers.
+          if (payService?.on() && payService.checkoutKind() === 'form') void reply.header('content-security-policy', proFormCsp(payService.status().methods));
+          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/pro', lang, false));
+        });
       }
     } catch {
       /* pro page optional in API-only builds */

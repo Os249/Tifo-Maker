@@ -705,6 +705,73 @@ CREATE TABLE IF NOT EXISTS pro_orders (
 CREATE INDEX IF NOT EXISTS pro_orders_user_idx ON pro_orders (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS pro_orders_created_idx ON pro_orders (created_at DESC);
 
+-- Payments v2 (16 Nov 2026; payRepo.ts, payments.ts). Nothing here is read or
+-- written until its switch is set (PRO_CHECKOUT=form, MOYASAR_VERIFY=webhook,
+-- PRO_AUTORENEW=on); until then every order is kind 'invoice', as before.
+--
+-- Auto-renew ("Keep Pro on"): at most one row per account. token is Moyasar's
+-- name for the card it keeps (never a card number); with it are the card's
+-- brand, last four digits and expiry. A row that renews (active, failing)
+-- always has a token; one that does not never has. Deleting the account
+-- deletes the row (the code puts the token in pro_token_trash first).
+-- amount is halalas. Each statement is safe to run again.
+CREATE TABLE IF NOT EXISTS pro_subscriptions (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL CHECK (status IN ('active', 'failing', 'cancelled', 'ended')),
+  token          TEXT CHECK (token IS NULL OR token ~ '^token_[A-Za-z0-9]{8,100}$'),
+  method         TEXT CHECK (method IS NULL OR char_length(method) <= 32),
+  brand          TEXT CHECK (brand IS NULL OR char_length(brand) <= 32),
+  last_four      TEXT CHECK (last_four IS NULL OR last_four ~ '^[0-9]{4}$'),
+  exp_month      INT CHECK (exp_month IS NULL OR exp_month BETWEEN 1 AND 12),
+  exp_year       INT CHECK (exp_year IS NULL OR exp_year BETWEEN 2000 AND 2100),
+  amount         INT NOT NULL CHECK (amount >= 100),
+  days           INT NOT NULL CHECK (days BETWEEN 1 AND 400),
+  lang           TEXT NOT NULL CHECK (lang IN ('en', 'ar')),
+  test_mode      BOOLEAN NOT NULL,
+  cycle          INT NOT NULL DEFAULT 1 CHECK (cycle >= 1),
+  opted_in_at    TIMESTAMPTZ NOT NULL,
+  next_charge_at TIMESTAMPTZ,
+  reminded_for   TIMESTAMPTZ,
+  reminded_at    TIMESTAMPTZ,
+  attempts       INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  last_error     TEXT CHECK (last_error IS NULL OR char_length(last_error) <= 60),
+  cancel_token   TEXT NOT NULL UNIQUE CHECK (char_length(cancel_token) >= 24),
+  cancelled_at   TIMESTAMPTZ,
+  end_reason     TEXT CHECK (end_reason IS NULL OR char_length(end_reason) <= 60),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Never chargeable without a card, and never a card kept once it no longer renews.
+  CHECK ((status IN ('active', 'failing')) = (token IS NOT NULL)),
+  CHECK (status NOT IN ('active', 'failing') OR next_charge_at IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS pro_subscriptions_due_idx ON pro_subscriptions (next_charge_at) WHERE status IN ('active', 'failing');
+
+-- Tokens Moyasar must still be asked to delete (cancelled, replaced, or their
+-- account deleted). A token goes in here in the same transaction that takes
+-- it off its subscription, and comes out once Moyasar has deleted it.
+CREATE TABLE IF NOT EXISTS pro_token_trash (
+  token      TEXT PRIMARY KEY CHECK (token ~ '^token_[A-Za-z0-9]{8,100}$'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Orders: how each is paid, the "Keep Pro on" choice made with it, and for a
+-- renewal whose it is and which one. For 'form' and 'renewal' orders
+-- payment_id is chosen by this server when the order is made (Moyasar creates
+-- the payment under it), so it is unique among them; and a subscription has
+-- at most one order per cycle that is not a failed try, which is what stops a
+-- renewal being charged twice.
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'invoice' CHECK (kind IN ('invoice', 'form', 'renewal'));
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS keep BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS keep_at TIMESTAMPTZ;
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS attempted_at TIMESTAMPTZ;
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS subscription_id UUID REFERENCES pro_subscriptions(id) ON DELETE SET NULL;
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS cycle INT CHECK (cycle IS NULL OR cycle >= 1);
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS fail TEXT CHECK (fail IS NULL OR char_length(fail) <= 24);
+CREATE UNIQUE INDEX IF NOT EXISTS pro_orders_payment_idx ON pro_orders (payment_id) WHERE kind <> 'invoice';
+CREATE UNIQUE INDEX IF NOT EXISTS pro_orders_cycle_idx ON pro_orders (subscription_id, cycle)
+  WHERE kind = 'renewal' AND status IN ('pending', 'paid', 'refunded', 'review');
+
 -- Tifo events (15 Nov 2026; server/src/eventRepo.ts, tifoEvents.ts,
 -- eventRoutes.ts). A themed contest the admin makes on /admin: announced, open
 -- for entries, in voting, then closed and confirmed by hand. The stage is

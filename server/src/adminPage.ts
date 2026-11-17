@@ -458,13 +458,15 @@ async function loadAll(){
     api('/api/admin/queue'),
     api('/api/admin/pro'),
     api('/api/admin/pro/prices'),
-    api('/api/admin/pro/orders')
+    api('/api/admin/pro/orders'),
+    api('/api/admin/pro/subscriptions')
   ]);
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
   QUEUE = results[8].ok && results[8].data ? results[8].data : { error: results[8].status };
   PRO = results[9].ok && results[9].data ? results[9].data : { error: results[9].status };
   PRICES = results[10].ok && results[10].data ? results[10].data : { error: results[10].status };
   ORDERS = results[11].ok && results[11].data ? results[11].data : { error: results[11].status };
+  SUBS = results[12].ok && results[12].data ? results[12].data : { error: results[12].status };
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
@@ -1828,6 +1830,7 @@ function proTab(){
   html += kpi('Said what Pro is worth', (PRICES && PRICES.total) || 0, 'on the coming-soon page', true);
   html += '</div>';
   html += ordersHtml();
+  html += subsHtml();
   html += pricesHtml();
 
   html += '<h2 class="sec">An account</h2>';
@@ -1868,8 +1871,10 @@ async function proReload(){
   var both = await Promise.all([
     api('/api/admin/pro' + (PRO_LOOKUP ? '?username=' + encodeURIComponent(PRO_LOOKUP) : '')),
     api('/api/admin/pro/prices'),
-    api('/api/admin/pro/orders')
+    api('/api/admin/pro/orders'),
+    api('/api/admin/pro/subscriptions')
   ]);
+  SUBS = both[3].ok && both[3].data ? both[3].data : { error: both[3].status };
   PRO = both[0].ok && both[0].data ? both[0].data : { error: both[0].status };
   PRICES = both[1].ok && both[1].data ? both[1].data : { error: both[1].status };
   ORDERS = both[2].ok && both[2].data ? both[2].data : { error: both[2].status };
@@ -1903,6 +1908,14 @@ function ordersHtml(){
     html += '<p class="lede">' + (st.key === 'test'
       ? 'On, with TEST keys: only the accounts in PRO_PREVIEW_USERS can buy, with Moyasar\\'s test cards. No real money moves.'
       : st.public ? 'On, with LIVE keys, for everyone: real money.' : 'On, with LIVE keys, for the accounts Pro is on for (PRO_MODE): real money.') + '</p>';
+    html += '<p class="note">How it is set up: ' + esc(
+      (st.checkout === 'form' ? 'the payment form on /pro (' + (st.methods || []).join(', ') + ')' : 'the hosted invoice page')
+      + '; ' + (st.verify === 'webhook' ? 'NO secret key on the server: Pro is given from the webhook alone, and refunds are made in the Moyasar dashboard' : 'every payment is read back from Moyasar with the secret key')
+      + (st.proxy ? '; calls to Moyasar go through the fixed-IP proxy' : '')
+      + '; auto-renew is ' + (st.autoRenew ? 'ON' + (st.autoRenewMada ? ' (mada included)' : ' (mada excluded)') : 'off') + '.') + '</p>';
+    if (st.formRefused) html += '<div class="callout warn"><b>PRO_CHECKOUT=form is set but not in use.</b> MOYASAR_PUBLISHABLE_KEY is missing, or is a test key beside a live secret key (or the reverse). Get Pro still goes to the hosted page.</div>';
+    if (st.autoRenewAsked && !st.autoRenew) html += '<div class="callout warn"><b>PRO_AUTORENEW=on is set but not in use.</b> It needs the payment form (PRO_CHECKOUT=form with a matching publishable key) and the secret key.</div>';
+    if (st.checkout === 'form' && (st.methods || []).indexOf('applepay') < 0 && !st.applePayFile) html += '<p class="note">Apple Pay is not offered: add it to MOYASAR_METHODS and set APPLE_PAY_DOMAIN_ASSOCIATION once the domain is registered with Moyasar.</p>';
     if (ORDERS.verification) html += '<div class="callout"><b>Moyasar\\'s webhook code: ' + esc(ORDERS.verification.code) + '</b>. Type it in Moyasar\\'s dashboard (Settings, Webhooks, Verify Webhook) within 30 minutes of ' + esc(String(ORDERS.verification.at).slice(11, 16)) + ' UTC.</div>';
     if (!st.webhook) html += '<div class="callout warn"><b>No webhook secret.</b> Payments still arrive through the fan\\'s return and the invoice\\'s callback, but a refund made in Moyasar\\'s dashboard is only noticed when someone opens that order. Set MOYASAR_WEBHOOK_SECRET to the secret you type in Moyasar\\'s webhook settings, pointing at /api/pro/pay/webhook.</div>';
   }
@@ -1927,7 +1940,8 @@ function ordersHtml(){
       + (o.username ? '@' + esc(o.username) : '<span class="dim">account deleted</span>') + '</td><td>SAR ' + esc(String(o.amount))
       + (o.refunded ? ' <span class="dim">(' + esc(String(o.refunded)) + ' back)</span>' : '') + '</td><td>'
       + (lab[1] ? '<span class="' + lab[1] + '">' + esc(lab[0]) + '</span>' : esc(lab[0]))
-      + (o.note ? '<br><span class="dim">' + esc(o.note) + '</span>' : '') + '</td><td>' + esc(ORDER_METHOD[o.method] || o.method || '') + '</td><td>'
+      + (o.note ? '<br><span class="dim">' + esc(o.note) + '</span>' : '') + '</td><td>' + esc(ORDER_METHOD[o.method] || o.method || '')
+      + (o.kind === 'renewal' ? ' <span class="dim">renewal</span>' : o.keep ? ' <span class="dim">asked to renew</span>' : '') + '</td><td>'
       + (o.used == null ? '<span class="dim">no pass</span>' : o.used ? '<b>' + fmt(o.used) + ' uses</b>' : 'not yet') + '</td><td>' + act + '</td></tr>';
   }
   html += '</tbody></table>';
@@ -1955,7 +1969,72 @@ function wireOrders(){
       b.removeAttribute('data-sure');
       b.textContent = 'Refund';
       el('order-out').innerHTML = '<b class="warn">Not refunded.</b> ' + esc((r.data && (r.data.reason || r.data.error)) || ('HTTP ' + r.status))
+        + (r.data && r.data.reason === 'dashboard' ? ': this server has no secret key (MOYASAR_VERIFY=webhook). Refund it in the Moyasar dashboard; the webhook then ends the pass here.' : '')
         + (r.data && r.data.reason === 'failed' ? ': Moyasar refused it. Try once more, or refund from Moyasar\\'s dashboard (this page notices it).' : '');
+    });
+  }
+}
+
+/* ---- auto-renew ("Keep Pro on", payments v2): who renews, who is failing, who stopped ----
+   server/src/payments.ts runRenewals. Switching one off deletes its saved card
+   at Moyasar; the Pro already paid for runs to its end. The switch for all of
+   it is PRO_AUTORENEW in the server variables: unset, nothing is charged. */
+var SUBS = null;
+var SUB_MSG = '';
+var SUB_STATUS = { active: ['Renewing', ''], failing: ['Failing: retrying', 'warn'], cancelled: ['Cancelled', 'dim'], ended: ['Ended by itself', 'dim'] };
+function subsHtml(){
+  if (!SUBS || SUBS.error) return '';
+  var rows = SUBS.subscriptions || [];
+  if (!SUBS.on && !rows.length) return '';
+  var html = '<h2 class="sec">Auto-renew</h2>';
+  var live = rows.filter(function(x){ return x.status === 'active' || x.status === 'failing'; });
+  html += '<p class="lede">' + (SUBS.on
+    ? 'On: fans who ticked Keep Pro on are charged every 30 days, 3 days after a reminder email.'
+    : 'OFF (PRO_AUTORENEW is not on): nothing is offered and nothing is charged.' + (live.length ? ' ' + fmt(live.length) + ' subscription' + (live.length === 1 ? ' is' : 's are') + ' waiting, and will not be charged while it is off.' : '')) + '</p>';
+  if (SUBS.tokensToDelete) html += '<div class="callout warn"><b>' + fmt(SUBS.tokensToDelete) + ' saved card' + (SUBS.tokensToDelete === 1 ? '' : 's') + ' still to delete at Moyasar.</b> Moyasar could not be reached when ' + (SUBS.tokensToDelete === 1 ? 'it was' : 'they were') + ' cancelled; the server tries again every hour.</div>';
+  html += '<div class="grid">';
+  html += kpi('Renewing', rows.filter(function(x){ return x.status === 'active'; }).length, 'will be charged on their date', true);
+  html += kpi('Failing', rows.filter(function(x){ return x.status === 'failing'; }).length, 'a renewal did not go through', true);
+  html += kpi('Cancelled', rows.filter(function(x){ return x.status === 'cancelled'; }).length, 'by the fan, a refund or you', true);
+  html += kpi('Ended', rows.filter(function(x){ return x.status === 'ended'; }).length, 'retries ran out, or the card expired', true);
+  html += '</div>';
+  if (!rows.length) return html + '<p class="empty">Nobody has turned auto-renew on yet.</p>';
+  var soon = live.slice().sort(function(a, b){ return String(a.nextAt).localeCompare(String(b.nextAt)); });
+  html += '<table class="tbl"><thead><tr><th>Who</th><th>Status</th><th>Next renewal (UTC)</th><th>Amount</th><th>Card</th><th>Since</th><th></th></tr></thead><tbody>';
+  var all = soon.concat(rows.filter(function(x){ return x.status !== 'active' && x.status !== 'failing'; }));
+  for (var i = 0; i < all.length; i++){
+    var x = all[i], lab = SUB_STATUS[x.status] || [x.status, ''];
+    var on = x.status === 'active' || x.status === 'failing';
+    html += '<tr><td>' + (x.username ? '@' + esc(x.username) : '<span class="dim">?</span>') + (x.test ? ' <b class="dim">TEST</b>' : '') + '</td><td>'
+      + (lab[1] ? '<span class="' + lab[1] + '">' + esc(lab[0]) + '</span>' : esc(lab[0]))
+      + (x.status === 'failing' ? '<br><span class="dim">' + fmt(x.attempts) + ' failed: ' + esc(x.lastError || '') + '</span>' : '')
+      + (!on && x.reason ? '<br><span class="dim">' + esc(x.reason) + '</span>' : '') + '</td><td>'
+      + (on ? esc(String(x.nextAt || '').slice(0, 16).replace('T', ' ')) + (x.status === 'active' ? '<br><span class="dim">' + (x.remindedAt ? 'reminded ' + esc(String(x.remindedAt).slice(0, 10)) : 'reminder not sent yet') + '</span>' : '') : '<span class="dim">' + esc(String(x.stoppedAt || '').slice(0, 10)) + '</span>')
+      + '</td><td>SAR ' + esc(String(x.amount)) + ' / ' + esc(String(x.days)) + ' days</td><td>'
+      + esc((ORDER_METHOD[x.method] || x.method || '') + (x.brand ? ' ' + x.brand : '') + (x.lastFour ? ' ..' + x.lastFour : '')) + '</td><td>'
+      + esc(String(x.since || '').slice(0, 10)) + ' <span class="dim">#' + esc(String(x.cycle)) + '</span></td><td>'
+      + (on ? '<button type="button" class="sub-off" data-sub="' + esc(x.id) + '">Switch off</button>' : '') + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  html += '<p class="note">Switch off stops the renewals for that account and deletes its saved card at Moyasar; the fan is emailed, and keeps Pro until the paid days end. Refunding an order does the same.</p>';
+  html += '<p id="sub-out" class="note" role="status" aria-live="polite">' + esc(SUB_MSG) + '</p>';
+  return html;
+}
+function wireSubs(){
+  var btns = document.querySelectorAll('.sub-off');
+  for (var i = 0; i < btns.length; i++){
+    btns[i].addEventListener('click', async function(e){
+      var b = e.currentTarget;
+      /* Two presses: the first asks, the second switches it off. */
+      if (b.getAttribute('data-sure') !== '1'){
+        b.setAttribute('data-sure', '1');
+        b.textContent = 'Sure? Switch off';
+        return;
+      }
+      b.disabled = true;
+      var r = await post('/api/admin/pro/subscription/cancel', { id: b.getAttribute('data-sub') });
+      SUB_MSG = r.ok ? 'Switched off. The saved card is deleted at Moyasar and the fan has been emailed.' : 'Not switched off (' + ((r.data && r.data.error) || ('HTTP ' + r.status)) + ').';
+      proReload();
     });
   }
 }
@@ -2063,6 +2142,7 @@ async function downloadPricesCsv(){
 }
 function wirePro(){
   wireOrders();
+  wireSubs();
   var csv = el('price-csv');
   if (csv) csv.addEventListener('click', function(){ void downloadPricesCsv(); });
   var find = el('pro-find');

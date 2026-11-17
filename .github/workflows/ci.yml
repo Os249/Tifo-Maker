@@ -81,6 +81,15 @@ jobs:
       - name: Pro tests (Postgres)
         run: npm run test:pro
 
+      # Buying Pro: v1 (the hosted invoice), then v2 (the proxy, the payment
+      # form, the webhook-only mode, auto-renew and its races). Both against a
+      # fake Moyasar; the stores' locks run on the Postgres service above.
+      - name: Payment tests (Postgres)
+        run: npm run test:payments
+
+      - name: Payment tests v2 (Postgres)
+        run: npm run test:payments2
+
       - name: Club kit tests (Postgres)
         run: npx tsx server/test/kits.test.mts
 

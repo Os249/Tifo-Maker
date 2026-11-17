@@ -62,14 +62,46 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
   // Buying Pro (payments.ts): a switch with no key behind it, or a key that
   // is not a secret key, is a buy button that never appears and no word why.
   const payKey = env.MOYASAR_SECRET_KEY?.trim();
+  // Payments v2: the webhook-only mode runs without a secret key, on a publishable key and the webhook's secret.
+  const hookOnly = (env.MOYASAR_VERIFY ?? '').trim().toLowerCase() === 'webhook';
+  const pubKey = env.MOYASAR_PUBLISHABLE_KEY?.trim();
+  const pubOk = !!pubKey && /^pk_(test|live)_[A-Za-z0-9]{8,}$/.test(pubKey);
+  const wantsForm = hookOnly || (env.PRO_CHECKOUT ?? '').trim().toLowerCase() === 'form';
   if ((env.PRO_PAYMENTS ?? '').trim().toLowerCase() === 'on') {
-    if (!payKey) {
+    if (hookOnly) {
+      if (!pubOk) out.push({ key: 'MOYASAR_PUBLISHABLE_KEY', effect: 'is not set (or is not a pk_test_/pk_live_ key) while MOYASAR_VERIFY=webhook, so Pro cannot be bought: the payment form needs it.', state: 'wrong' });
+      if (!(env.MOYASAR_WEBHOOK_SECRET ?? '').trim()) out.push({ key: 'MOYASAR_WEBHOOK_SECRET', effect: 'is not set while MOYASAR_VERIFY=webhook, so Pro cannot be bought: in this mode a payment is only ever seen through Moyasar\'s webhook.', state: 'wrong' });
+      if (payKey) out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is set but not used: MOYASAR_VERIFY=webhook runs without a secret key. Remove one of the two; with the key and without MOYASAR_VERIFY, every payment is read back from Moyasar, which is the safer mode.' });
+      if ((env.PRO_AUTORENEW ?? '').trim().toLowerCase() === 'on') out.push({ key: 'PRO_AUTORENEW', effect: 'is on but cannot work with MOYASAR_VERIFY=webhook: charging a saved card needs the secret key. Auto-renew stays off.', state: 'wrong' });
+    } else if (!payKey) {
       out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is not set while PRO_PAYMENTS=on, so Pro cannot be bought and /pro stays the coming-soon page. Copy the secret key (sk_test_... or sk_live_...) from Moyasar\'s dashboard.', state: 'wrong' });
     } else if (!/^sk_(test|live)_[A-Za-z0-9]{8,}$/.test(payKey)) {
       out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is not a Moyasar secret key (it starts sk_test_ or sk_live_; a pk_ key is the publishable one), so Pro cannot be bought.', state: 'wrong' });
     }
     if (prod && !env.PUBLIC_URL) {
       out.push({ key: 'PUBLIC_URL', effect: 'is not set while payments are on: Moyasar is told to send fans back to an address built from the request. Set PUBLIC_URL=https://tifomaker.org.' });
+    }
+    if (!hookOnly && wantsForm && payKey) {
+      if (!pubOk) out.push({ key: 'MOYASAR_PUBLISHABLE_KEY', effect: 'is not set (or is not a pk_test_/pk_live_ key) while PRO_CHECKOUT=form, so "Get Pro" still goes to Moyasar\'s hosted page.', state: 'wrong' });
+      else if (pubKey!.slice(3, 7) !== payKey.slice(3, 7)) out.push({ key: 'MOYASAR_PUBLISHABLE_KEY', effect: 'is a test key beside a live secret key (or the reverse), so the payment form is not used and "Get Pro" still goes to Moyasar\'s hosted page. Use the two keys of the same mode.', state: 'wrong' });
+    }
+    if ((env.PRO_AUTORENEW ?? '').trim().toLowerCase() === 'on' && !hookOnly && !wantsForm) {
+      out.push({ key: 'PRO_AUTORENEW', effect: 'is on but PRO_CHECKOUT is not "form": a card can only be saved on the payment form, so "Keep Pro on" is not offered and nothing renews.', state: 'wrong' });
+    }
+    const proxyUrl = env.MOYASAR_PROXY_URL?.trim();
+    if (proxyUrl) {
+      let proxyOk = false;
+      try {
+        const u = new URL(proxyUrl);
+        proxyOk = (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname;
+      } catch { /* not a URL */ }
+      // Named only: the value holds the proxy's password.
+      if (!proxyOk) out.push({ key: 'MOYASAR_PROXY_URL', effect: 'is not an http:// or https:// proxy address, so every call to Moyasar fails and Pro cannot be bought. It looks like http://user:password@host:port.', state: 'wrong' });
+      if (hookOnly) out.push({ key: 'MOYASAR_PROXY_URL', effect: 'is set but not used: with MOYASAR_VERIFY=webhook the server makes no calls to Moyasar.' });
+    }
+    const methods = (env.MOYASAR_METHODS ?? '').toLowerCase();
+    if (wantsForm && methods.includes('applepay') && !(env.APPLE_PAY_DOMAIN_ASSOCIATION ?? '').trim()) {
+      out.push({ key: 'APPLE_PAY_DOMAIN_ASSOCIATION', effect: 'is not set while MOYASAR_METHODS includes applepay: unless the file was committed to public/.well-known/, the form does not offer Apple Pay. Paste the contents of the file from Moyasar\'s dashboard (Settings, Apple Pay Domains, Download Association).' });
     }
     const hook = env.MOYASAR_WEBHOOK_SECRET?.trim();
     if (hook && hook.length < 16) {

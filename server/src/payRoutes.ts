@@ -9,10 +9,23 @@
  *   POST /api/pro/pay/webhook         Moyasar: an event (checked by its secret)
  *   GET  /api/admin/pro/orders        admin: the orders, newest first
  *   POST /api/admin/pro/refund        admin: refund an order in full
+ *
+ * Payments v2 (the payment form, auto-renew; each off until its variable is set):
+ *
+ *   POST /api/pro/pay/keep            signed in: "Keep Pro on" ticked or unticked on an open order
+ *   POST /api/pro/pay/attempt         signed in: the form sent a payment for an order
+ *   GET  /api/pro/renew               signed in: this account's auto-renew, if any
+ *   POST /api/pro/renew/cancel        signed in: turn auto-renew off
+ *   POST /api/pro/renew/stop          the email's one-click link: turn auto-renew off
+ *   GET  /api/admin/pro/subscriptions admin: who renews, who is failing, who stopped
+ *   POST /api/admin/pro/subscription/cancel   admin: switch one off
+ *
+ * Turning auto-renew OFF works whatever the switches say, for as long as a
+ * subscription exists: nobody is ever left unable to stop a charge.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { REFUND_DAYS, paymentsStatus, type PaymentService } from './payments';
-import type { ProOrder } from './payRepo';
+import { REFUND_DAYS, type PaymentService } from './payments';
+import type { ProOrder, ProSubscription } from './payRepo';
 import type { UserRow } from './repo';
 
 export interface PayRouteDeps {
@@ -30,8 +43,28 @@ export interface PayRouteDeps {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** An order as its owner sees it. */
-const ownView = (o: ProOrder, endsAt: string | null) => ({ id: o.id, status: o.status === 'review' ? 'pending' : o.status, endsAt });
+/**
+ * An order as its owner sees it. `why` is the kind of failure, for the page's
+ * words; `kept` whether "Keep Pro on" was asked with it and `renews` whether
+ * that took (a method that cannot renew leaves a one-time pass).
+ */
+const ownView = (o: ProOrder, endsAt: string | null, renews: boolean) => ({
+  id: o.id, status: o.status === 'review' ? 'pending' : o.status, endsAt,
+  why: o.status === 'failed' ? o.fail : null, kept: o.keep, renews,
+});
+
+/** Auto-renew as its owner sees it: never the token. */
+const subView = (s: ProSubscription) => ({
+  status: s.status,
+  amount: s.amount / 100,
+  days: s.days,
+  nextAt: s.status === 'active' || s.status === 'failing' ? s.nextChargeAt : null,
+  method: s.method,
+  brand: s.brand,
+  lastFour: s.lastFour,
+  since: s.optedInAt,
+  stoppedAt: s.cancelledAt,
+});
 
 export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): void {
   const { pay } = deps;
@@ -50,7 +83,7 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
       lang,
       deps.baseOf(req),
     );
-    if (r.ok) return { ok: true, order: r.orderId, url: r.url };
+    if (r.ok) return 'url' in r ? { ok: true, order: r.orderId, url: r.url } : { ok: true, order: r.orderId, form: r.form };
     const status = r.reason === 'off' ? 404 : r.reason === 'verify' ? 403 : r.reason === 'held' ? 409 : r.reason === 'busy' ? 429 : 503;
     return reply.code(status).send({ error: 'Pro cannot be bought right now', reason: r.reason, endsAt: r.endsAt });
   });
@@ -66,7 +99,64 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
     // Someone else's order is no order at all.
     if (!o) return notFound(reply);
     const pass = o.passId ? (await pay.pro.repo.allPasses(userId)).find((p) => p.id === o.passId) ?? null : null;
-    return ownView(o, pass && !pass.revokedAt ? pass.endsAt : null);
+    const sub = o.keep && o.status === 'paid' ? await pay.renewalFor(userId).catch(() => null) : null;
+    return ownView(o, pass && !pass.revokedAt ? pass.endsAt : null, sub?.status === 'active');
+  });
+
+  // "Keep Pro on": the box on the form, ticked or unticked. Nothing asks for
+  // auto-renew but this, from the order's own account, while the order is open.
+  app.post('/api/pro/pay/keep', deps.hookConfig ?? {}, async (req, reply) => {
+    if (!pay.on()) return notFound(reply);
+    const userId = await deps.requireUser(req, reply);
+    if (!userId) return;
+    const b = (req.body ?? {}) as { order?: unknown; keep?: unknown };
+    if (typeof b.order !== 'string' || !UUID.test(b.order) || typeof b.keep !== 'boolean') return reply.code(400).send({ error: 'an order and a choice are required' });
+    if (!(await pay.setKeep(userId, b.order, b.keep))) return reply.code(409).send({ error: 'not changed' });
+    return { ok: true, keep: b.keep };
+  });
+
+  // The form sent a payment for this order (its on_completed). The browser's
+  // word, and it gives nothing: the order is simply not offered again.
+  app.post('/api/pro/pay/attempt', deps.hookConfig ?? {}, async (req, reply) => {
+    if (!pay.on()) return notFound(reply);
+    const userId = await deps.requireUser(req, reply);
+    if (!userId) return;
+    const id = (req.body as { order?: unknown } | null)?.order;
+    if (typeof id !== 'string' || !UUID.test(id)) return notFound(reply);
+    await pay.attempted(userId, id);
+    return { ok: true };
+  });
+
+  // ----------------------------------------------------------- auto-renew ---
+
+  app.get('/api/pro/renew', deps.hookConfig ?? {}, async (req, reply) => {
+    void reply.header('cache-control', 'no-store');
+    const userId = await deps.requireUser(req, reply);
+    if (!userId) return;
+    const sub = await pay.renewalFor(userId);
+    // Nothing to say to an account that never had it while it is switched off.
+    if (!sub && !pay.renewOn()) return notFound(reply);
+    const renewing = !!sub && (sub.status === 'active' || sub.status === 'failing');
+    return { offered: pay.renewOn(), paused: renewing && !pay.renewOn(), sub: sub ? subView(sub) : null };
+  });
+
+  app.post('/api/pro/renew/cancel', deps.checkoutConfig ?? {}, async (req, reply) => {
+    const userId = await deps.requireUser(req, reply);
+    if (!userId) return;
+    await pay.stopRenewing(userId, 'account page');
+    const sub = await pay.renewalFor(userId);
+    return { ok: true, sub: sub ? subView(sub) : null };
+  });
+
+  // The link in the reminder: no sign-in, because the link can only turn
+  // renewal off. A POST from the page it opens, never the GET itself, so a
+  // mail scanner that follows links does not cancel anything.
+  app.post('/api/pro/renew/stop', deps.checkoutConfig ?? {}, async (req, reply) => {
+    void reply.header('cache-control', 'no-store');
+    const t = (req.body as { t?: unknown } | null)?.t;
+    const r = typeof t === 'string' ? await pay.cancelByLink(t) : { ok: false as const };
+    if (!r.ok) return notFound(reply);
+    return { ok: true, endsAt: r.endsAt };
   });
 
   // Moyasar's POST when an invoice is paid. Nothing in it is believed: only
@@ -107,6 +197,8 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
         method: o.method,
         invoiceId: o.invoiceId,
         note: o.note,
+        kind: o.kind,
+        keep: o.keep,
         createdAt: o.createdAt,
         paidAt: o.paidAt,
         refundedAt: o.refundedAt,
@@ -118,7 +210,7 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
     );
     // The webhook's verification code, while Moyasar still takes it (30 minutes).
     const v = pay.verification && now - Date.parse(pay.verification.at) < 30 * 60_000 ? pay.verification : null;
-    return { status: paymentsStatus(), stats: await pay.repo.stats(), refundDays: REFUND_DAYS, verification: v, orders };
+    return { status: pay.status(), stats: await pay.repo.stats(), refundDays: REFUND_DAYS, verification: v, orders };
   });
 
   app.post('/api/admin/pro/refund', async (req, reply) => {
@@ -129,6 +221,31 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
     if (r.ok) return { ok: true, status: r.order.status };
     const status = r.reason === 'none' ? 404 : r.reason === 'off' ? 409 : r.reason === 'failed' ? 502 : 409;
     return reply.code(status).send({ error: 'not refunded', reason: r.reason });
+  });
+
+  app.get('/api/admin/pro/subscriptions', async (req, reply) => {
+    if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+    void reply.header('cache-control', 'no-store');
+    const { rows, trash } = await pay.subscriptions();
+    return {
+      on: pay.renewOn(),
+      // Saved cards still waiting to be deleted at Moyasar (it could not be reached yet).
+      tokensToDelete: trash,
+      subscriptions: rows.map((x) => ({
+        id: x.id, username: x.username, status: x.status, amount: x.amount / 100, days: x.days, test: x.testMode,
+        method: x.method, brand: x.brand, lastFour: x.lastFour, cycle: x.cycle, since: x.optedInAt,
+        nextAt: x.nextChargeAt, remindedAt: x.remindedFor && x.remindedFor === x.nextChargeAt ? x.remindedAt : null,
+        attempts: x.attempts, lastError: x.lastError, stoppedAt: x.cancelledAt, reason: x.endReason,
+      })),
+    };
+  });
+
+  app.post('/api/admin/pro/subscription/cancel', async (req, reply) => {
+    if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+    const id = (req.body as { id?: unknown } | null)?.id;
+    if (typeof id !== 'string' || !UUID.test(id)) return reply.code(400).send({ error: 'a subscription id is required' });
+    if (!(await pay.adminCancel(id))) return reply.code(409).send({ error: 'it was not renewing' });
+    return { ok: true };
   });
 
 }

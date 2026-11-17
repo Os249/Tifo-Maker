@@ -5,7 +5,7 @@
  * Shown only where /api/pro says Pro is on for this account; with Pro off the
  * page is exactly what it was. Every number here is the server's.
  */
-import { fetchMeOnce, fetchPro, type Allowance, type AllowanceKind, type ProState } from '../net/api';
+import { cancelRenewal, fetchMeOnce, fetchPro, fetchRenewal, type Allowance, type AllowanceKind, type ProState, type RenewalView } from '../net/api';
 import { escapeHtml } from '../core/escape';
 import { CROWN_SVG, backWhen, endsText, kindName, proChipHtml, whenDay } from './pro';
 import { onLangChange, t, tv } from './i18n';
@@ -24,6 +24,38 @@ function meter(a: Allowance): string {
   );
 }
 
+/** "Visa ending 1111", "Apple Pay · Visa ending 1111", or just "your card". */
+function cardText(s: RenewalView): string {
+  const wallet = s.method === 'applepay' ? 'Apple Pay' : s.method === 'samsungpay' ? 'Samsung Pay' : '';
+  const brand = s.brand ? s.brand.charAt(0).toUpperCase() + s.brand.slice(1) : '';
+  const name = [wallet, brand].filter(Boolean).join(' · ');
+  return s.lastFour ? tv('pr.ac.cardEnding', { brand: name || t('pr.ac.theCard'), last: s.lastFour }) : name || t('pr.ac.card');
+}
+
+/**
+ * "Keep Pro on" (auto-renew, payments v2): when the next renewal is and from
+ * which card, with the one button that turns it off. Shown only to an account
+ * that has (or had) it; turning it off is one click and needs no reason.
+ */
+function renewHtml(r: { paused: boolean; sub: RenewalView | null } | null, note: string): string {
+  const s = r?.sub;
+  if (!s) return '';
+  const renewing = s.status === 'active' || s.status === 'failing';
+  // Stopped long ago and nothing to say now: only a renewal that is running, or was just turned off, is shown.
+  if (!renewing && !note) return '';
+  const line = !renewing
+    ? ''
+    : r.paused
+      ? t('pr.ac.paused')
+      : tv(s.status === 'failing' ? 'pr.ac.failing' : 'pr.ac.active', { date: s.nextAt ? whenDay(s.nextAt) : '', price: s.amount, card: cardText(s) });
+  return (
+    `<div class="pro-renew"><h3 class="pro-ac-h">${escapeHtml(t('pr.ac.title'))}</h3>` +
+    (line ? `<p class="ac-note">${escapeHtml(line)}</p>` : '') +
+    (renewing ? `<button type="button" class="ac-btn" data-act="renew-off">${escapeHtml(t('pr.ac.cancel'))}</button>` : '') +
+    `<p class="ac-note" id="pro-renew-msg" role="status" aria-live="polite">${escapeHtml(note)}</p></div>`
+  );
+}
+
 /** Put the section first among the account's sections, and keep it current. */
 export function mountProAccount(sections: HTMLElement): void {
   const sec = document.createElement('section');
@@ -33,6 +65,9 @@ export function mountProAccount(sections: HTMLElement): void {
   sec.setAttribute('aria-labelledby', 'pro-ac-h');
   sections.prepend(sec);
   let state: ProState | null = null;
+  let renewal: Awaited<ReturnType<typeof fetchRenewal>> = null;
+  /** What turning auto-renew off last said, kept across repaints as a key. */
+  let renewNote = '';
 
   const paint = (): void => {
     const st = state;
@@ -67,7 +102,21 @@ export function mountProAccount(sections: HTMLElement): void {
       : !paid && g?.state !== 'offered'
         ? `<button type="button" class="ac-btn" data-act="what">${escapeHtml(t('pro.sheet.whatTitle'))}</button>`
         : '';
-    sec.innerHTML = head + gift + meters + foot;
+    sec.innerHTML = head + gift + renewHtml(renewal, renewNote ? t(renewNote) : '') + meters + foot;
+    const off = sec.querySelector<HTMLButtonElement>('[data-act="renew-off"]');
+    off?.addEventListener('click', async () => {
+      off.disabled = true;
+      off.textContent = t('pr.ac.cancelling');
+      const r = await cancelRenewal();
+      if (r) {
+        renewal = { offered: renewal?.offered ?? false, paused: false, sub: r.sub };
+        renewNote = 'pr.ac.cancelled';
+      } else {
+        renewNote = 'pr.ac.cancelFailed';
+      }
+      paint();
+      sec.querySelector<HTMLElement>('#pro-renew-msg')?.focus?.();
+    });
     for (const bar of Array.from(sec.querySelectorAll<HTMLElement>('.pro-meter-bar > span'))) {
       bar.style.inlineSize = `${Math.round(Math.max(0, Math.min(1, Number(bar.dataset.frac))) * 100)}%`;
     }
@@ -83,6 +132,8 @@ export function mountProAccount(sections: HTMLElement): void {
   const load = async (fresh = false): Promise<void> => {
     const [st, me] = await Promise.all([fetchPro(fresh).catch(() => null), fetchMeOnce().catch(() => null)]);
     state = st;
+    // Asked for only when the server says this account has auto-renew: nothing new is fetched otherwise.
+    renewal = st?.live && st.renewal ? await fetchRenewal() : null;
     username = me?.username ?? '';
     paint();
     // Arrived from the header chip (/account#pro): bring the section into view.

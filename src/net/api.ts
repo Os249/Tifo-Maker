@@ -1948,6 +1948,10 @@ export interface ProOffer {
   monthly: { price: number; days: number };
   gift: { days: number };
   paymentsOpen: boolean;
+  /** Present ('form') when Pro is paid on Moyasar's form on /pro rather than its hosted page (payments v2). */
+  checkout?: 'form';
+  /** "Keep Pro on" (auto-renew) is offered at checkout (payments v2). */
+  autoRenew?: boolean;
 }
 
 /**
@@ -1968,6 +1972,8 @@ export interface ProState {
   plan?: ProPlan;
   pass?: { plan: ProPlan; startsAt: string; endsAt: string } | null;
   supporter?: boolean;
+  /** This account has (or had) auto-renew: the account page shows it (payments v2). */
+  renewal?: boolean;
   allowances?: Record<AllowanceKind, Allowance>;
   gift?: GiftState;
   notified?: boolean;
@@ -2018,12 +2024,39 @@ export async function acceptProGift(): Promise<{ ok: true; endsAt: string } | { 
 
 export type CheckoutRefusal = 'off' | 'verify' | 'held' | 'busy' | 'unavailable' | 'signin' | 'offline';
 
-export async function startCheckout(lang: 'en' | 'ar'): Promise<{ ok: true; url: string; order: string } | { ok: false; reason: CheckoutRefusal; endsAt?: string }> {
+/**
+ * What Moyasar's payment form needs for an order (server/src/payments.ts
+ * FormConfig). The publishable key is public by design; the amount shown here
+ * is only what the form displays and asks for: the server gives Pro for the
+ * order's own amount, read back from Moyasar, whatever a browser sends.
+ */
+export interface CheckoutForm {
+  publishableKey: string;
+  amount: number;
+  currency: 'SAR';
+  description: string;
+  callbackUrl: string;
+  givenId: string;
+  methods: ('creditcard' | 'applepay' | 'stcpay' | 'samsungpay')[];
+  networks: string[];
+  applePay: { label: string; country: string } | null;
+  samsungPay: { serviceId: string; orderNumber: string } | null;
+  renew: { price: number; days: number; nextAt: string; methods: string[]; mada: boolean } | null;
+}
+
+export type CheckoutStart =
+  | { ok: true; url: string; order: string }
+  | { ok: true; form: CheckoutForm; order: string }
+  | { ok: false; reason: CheckoutRefusal; endsAt?: string };
+
+export async function startCheckout(lang: 'en' | 'ar'): Promise<CheckoutStart> {
   try {
     const res = await fetch(`${API}/pro/pay/checkout`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ lang }) });
-    const data = (await res.json().catch(() => null)) as { url?: string; order?: string; reason?: CheckoutRefusal; endsAt?: string } | null;
+    const data = (await res.json().catch(() => null)) as { url?: string; form?: CheckoutForm; order?: string; reason?: CheckoutRefusal; endsAt?: string } | null;
     // The address is Moyasar's page as our server got it from Moyasar's API; never anything but https.
     if (res.ok && data?.url && data.order && /^https:\/\//i.test(data.url)) return { ok: true, url: data.url, order: data.order };
+    // Or the order to open Moyasar's form for, here on the page.
+    if (res.ok && data?.form && data.order && /^pk_(test|live)_/.test(data.form.publishableKey ?? '')) return { ok: true, form: data.form, order: data.order };
     if (res.status === 401) return { ok: false, reason: 'signin' };
     return { ok: false, reason: data?.reason ?? (res.status === 404 ? 'off' : 'unavailable'), endsAt: data?.endsAt };
   } catch {
@@ -2031,16 +2064,115 @@ export async function startCheckout(lang: 'en' | 'ar'): Promise<{ ok: true; url:
   }
 }
 
+/**
+ * Read a response to its end and throw it away. A fetch whose body is never
+ * read stays open in the browser (the page never goes quiet, and a connection
+ * is held); every call below that only wants the status does this.
+ */
+const drain = (res: Response): Promise<unknown> => res.arrayBuffer().catch(() => null);
+
 export type OrderStatus = 'pending' | 'paid' | 'refunded' | 'failed' | 'expired';
 
+/** Why a payment did not go through, as the server sorted it (server/src/moyasar.ts FailKind). */
+export type PayFail = 'auth' | 'cancelled' | 'unavailable' | 'rejected' | 'error' | 'funds' | 'expired_card' | 'declined';
+
+export interface OrderView {
+  status: OrderStatus;
+  endsAt: string | null;
+  why: PayFail | null;
+  /** "Keep Pro on" was ticked with this order, and whether it took (some methods cannot renew). */
+  kept: boolean;
+  renews: boolean;
+}
+
 /** Whether an order of this account's is paid yet (the server reads it from Moyasar). Null: not ours, or no answer. */
-export async function fetchOrder(id: string): Promise<{ status: OrderStatus; endsAt: string | null } | null> {
+export async function fetchOrder(id: string): Promise<OrderView | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   try {
     const res = await fetch(`${API}/pro/pay/order/${id}`, { headers: authHeaders(false) });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { status?: OrderStatus; endsAt?: string | null };
-    return data.status ? { status: data.status, endsAt: data.endsAt ?? null } : null;
+    if (!res.ok) {
+      await drain(res);
+      return null;
+    }
+    const data = (await res.json()) as Partial<OrderView>;
+    return data.status ? { status: data.status, endsAt: data.endsAt ?? null, why: data.why ?? null, kept: data.kept === true, renews: data.renews === true } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "Keep Pro on", ticked or unticked on an open order. True only when the server recorded it. */
+export async function setKeepPro(order: string, keep: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/pro/pay/keep`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ order, keep }) });
+    await drain(res);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** The form sent a payment for this order. Best effort: it only stops the order being offered again. */
+export async function markPayAttempt(order: string): Promise<void> {
+  try {
+    await drain(await fetch(`${API}/pro/pay/attempt`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ order }), keepalive: true }));
+  } catch {
+    /* the server finds out from Moyasar anyway */
+  }
+}
+
+/** Auto-renew as its account sees it (server/src/payRoutes.ts subView). */
+export interface RenewalView {
+  status: 'active' | 'failing' | 'cancelled' | 'ended';
+  amount: number;
+  days: number;
+  nextAt: string | null;
+  method: string | null;
+  brand: string | null;
+  lastFour: string | null;
+  since: string;
+  stoppedAt: string | null;
+}
+
+/** This account's auto-renew. Null when there is nothing to show (never had it, or signed out). */
+export async function fetchRenewal(): Promise<{ offered: boolean; paused: boolean; sub: RenewalView | null } | null> {
+  try {
+    const res = await fetch(`${API}/pro/renew`, { headers: authHeaders(false) });
+    if (!res.ok) {
+      await drain(res);
+      return null;
+    }
+    return (await res.json()) as { offered: boolean; paused: boolean; sub: RenewalView | null };
+  } catch {
+    return null;
+  }
+}
+
+/** Turn auto-renew off (the account page). The Pro already paid for stays. */
+export async function cancelRenewal(): Promise<{ sub: RenewalView | null } | null> {
+  try {
+    const res = await fetch(`${API}/pro/renew/cancel`, { method: 'POST', headers: authHeaders(true), body: '{}' });
+    if (!res.ok) {
+      await drain(res);
+      return null;
+    }
+    return (await res.json()) as { sub: RenewalView | null };
+  } catch {
+    return null;
+  }
+}
+
+/** Turn auto-renew off with the link from an email. No sign-in: the link can do nothing else. */
+export async function stopRenewalByLink(t: string): Promise<{ endsAt: string | null } | null> {
+  if (!/^[A-Za-z0-9_-]{24,64}$/.test(t)) return null;
+  try {
+    const res = await fetch(`${API}/pro/renew/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t }) });
+    if (!res.ok) {
+      await drain(res);
+      return null;
+    }
+    const data = (await res.json()) as { endsAt?: string | null };
+    return { endsAt: data.endsAt ?? null };
   } catch {
     return null;
   }

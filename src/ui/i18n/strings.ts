@@ -3172,6 +3172,132 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'إيه. خلال 7 أيام من الدفع، إذا ما استخدمت المميّزة، رد على إيميل الإيصال وترجع لك فلوسك كاملة على نفس طريقة الدفع.',
   },
 
+  // Moyasar's payment form on /pro (payments v2, 16 Nov 2026; server/src/payments.ts
+  // PRO_CHECKOUT=form): shown only where the form is the checkout.
+  'pf.step1.t': { en: "Pay here, on Moyasar's secure form", ar: 'ادفع هنا في نموذج ميسّر الآمن' },
+  'pf.step1.b': {
+    en: 'By mada, Visa or Mastercard. What you type goes straight to Moyasar and never reaches us.',
+    ar: 'بمدى أو فيزا أو ماستركارد. واللي تكتبه يروح لميسّر على طول وما يوصل لنا أبد.',
+  },
+  'pf.methods': {
+    en: "The payment form is Moyasar's. Your card details go straight to Moyasar, never to us.",
+    ar: 'نموذج الدفع من ميسّر، وبيانات بطاقتك تروح لميسّر على طول وما توصل لنا أبد.',
+  },
+  'pf.opening': { en: 'Opening the payment form…', ar: 'جاري فتح نموذج الدفع…' },
+  'pf.close': { en: 'Not now', ar: 'مو الحين' },
+  'pf.faq.a5': {
+    en: "Here on this page, in Moyasar's secure payment form, by mada, Visa or Mastercard. Your card details go straight to Moyasar, never to us.",
+    ar: 'هنا في نفس الصفحة، في نموذج الدفع الآمن حق ميسّر، بمدى أو فيزا أو ماستركارد. وبيانات بطاقتك تروح لميسّر على طول وما توصل لنا أبد.',
+  },
+  'pf.fail.auth': {
+    en: "Your bank didn't confirm it was you (the code step), so nothing was charged. You can try again.",
+    ar: 'بنكك ما أكد إنك أنت (خطوة رمز التحقق)، فما انخصم منك شي. تقدر تحاول مرة ثانية.',
+  },
+  'pf.fail.cancelled': {
+    en: "The bank's code step was cancelled or ran out of time, so nothing was charged. Press Get Pro to try again.",
+    ar: 'خطوة رمز التحقق حقت البنك انلغت أو خلص وقتها، فما انخصم منك شي. اضغط اشترك وحاول مرة ثانية.',
+  },
+  'pf.fail.unavailable': {
+    en: "This card can't do the bank's online check, so nothing was charged. Try another card.",
+    ar: 'هالبطاقة ما تدعم تحقق البنك للشراء من النت، فما انخصم منك شي. جرّب بطاقة ثانية.',
+  },
+  'pf.fail.rejected': {
+    en: 'Your bank refused this payment, and nothing was charged. Try another card, or ask your bank.',
+    ar: 'بنكك رفض هالعملية، وما انخصم منك شي. جرّب بطاقة ثانية أو كلّم بنكك.',
+  },
+  'pf.fail.error': {
+    en: "Something went wrong at the bank's end, and nothing was charged. Try again in a few minutes.",
+    ar: 'صار خلل من جهة البنك، وما انخصم منك شي. جرّب بعد كم دقيقة.',
+  },
+  'pf.fail.funds': {
+    en: "The card didn't have enough balance, so nothing was charged. Try another card.",
+    ar: 'رصيد البطاقة ما يكفي، فما انخصم منك شي. جرّب بطاقة ثانية.',
+  },
+  'pf.fail.expired': {
+    en: 'This card has expired, so nothing was charged. Try another card.',
+    ar: 'هالبطاقة منتهية، فما انخصم منك شي. جرّب بطاقة ثانية.',
+  },
+  'pf.fail.declined': {
+    en: 'Your bank declined the payment, and nothing was charged. Try another card.',
+    ar: 'بنكك رفض الدفع، وما انخصم منك شي. جرّب بطاقة ثانية.',
+  },
+
+  // "Keep Pro on": optional auto-renew (payments v2; PRO_AUTORENEW=on). Shown
+  // only where it is offered, or to an account that has it.
+  'pr.lead': {
+    en: 'Everything free stays free. Pro adds the extras in its column below, for one payment. It renews only if you ask it to.',
+    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف الإضافات اللي في عمودها تحت، بدفعة وحدة، وما تتجدد إلا إذا أنت طلبت.',
+  },
+  'pr.step3.t': { en: 'It ends by itself, unless you choose otherwise', ar: 'تنتهي لحالها، إلا إذا اخترت غير كذا' },
+  'pr.step3.b': {
+    en: "Nothing renews unless you tick \"Keep Pro on\" when you pay. Haven't used it? Get all your money back within 7 days.",
+    ar: 'ما تتجدد إلا إذا علّمت على «خلّ المميّزة شغّالة» وقت الدفع. وإذا ما استخدمتها، ترجع لك فلوسك كاملة خلال 7 أيام.',
+  },
+  'pr.once': {
+    en: 'One payment. It renews only if you tick "Keep Pro on" when you pay.',
+    ar: 'دفعة وحدة، وما تتجدد إلا إذا علّمت على «خلّ المميّزة شغّالة» وقت الدفع.',
+  },
+  'pr.faq.a2': {
+    en: 'Only if you ask it to. Tick "Keep Pro on" when you pay and it renews every 30 days at the same price: we email you 3 days before each renewal, and you can turn it off with one click, from that email or your account. Leave it unticked and the month ends on its own.',
+    ar: 'بس إذا أنت طلبت. علّم على «خلّ المميّزة شغّالة» وقت الدفع وبتتجدد كل 30 يوم بنفس السعر: نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر توقفها بضغطة وحدة من الإيميل نفسه أو من حسابك. وإذا ما علّمت عليها، الشهر ينتهي لحاله.',
+  },
+  'pr.keep': { en: 'Keep Pro on: renew every {days} days', ar: 'خلّ المميّزة شغّالة: تجديد كل {days} يوم' },
+  'pr.keep.terms': {
+    en: 'SAR {price} on {date}, then every {days} days. We email you 3 days before each renewal, and you can cancel with one click; Pro then stays on until the days you paid for end.',
+    ar: '{price} ريال يوم {date}، وبعدها كل {days} يوم. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+  },
+  'pr.keep.methods': { en: 'Renews with: {methods}.', ar: 'التجديد يشتغل مع: {methods}.' },
+  'pr.keep.noMada': {
+    en: "mada cards can't renew yet: with mada, this stays a one-time month and nothing is charged again.",
+    ar: 'بطاقات مدى ما تتجدد للحين: مع مدى يبقى شهر واحد وما ينخصم منك شي مرة ثانية.',
+  },
+  'pr.m.cards': { en: 'Visa, Mastercard', ar: 'فيزا، ماستركارد' },
+  'pr.m.cardsMada': { en: 'mada, Visa, Mastercard', ar: 'مدى، فيزا، ماستركارد' },
+  'pr.m.sep': { en: ', ', ar: '، ' },
+  'pr.keep.on': {
+    en: 'Auto-renew is on for this payment. Moyasar will save your card for it.',
+    ar: 'التجديد التلقائي شغّال لهالدفعة، وميسّر بيحفظ بطاقتك عشانه.',
+  },
+  'pr.keep.off': { en: 'Not ticked: one payment, and nothing is charged again.', ar: 'مو معلّم عليها: دفعة وحدة، وما ينخصم منك شي مرة ثانية.' },
+  'pr.keep.failed': { en: "That didn't save. Check your connection and tick it again.", ar: 'ما انحفظ اختيارك. تأكد من اتصالك وعلّم عليها مرة ثانية.' },
+  'pr.paid.renews': {
+    en: 'Payment received! Pro is on until {date} and renews that day. You can turn auto-renew off any time in your account.',
+    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date} وتتجدد بنفس اليوم. وتقدر توقف التجديد التلقائي بأي وقت من حسابك.',
+  },
+  'pr.paid.once': {
+    en: "Payment received! Pro is on until {date}. Auto-renew couldn't be set up with this payment method, so this is a one-time month and nothing will be charged again.",
+    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}. التجديد التلقائي ما يشتغل مع طريقة الدفع هذي، فهذا شهر واحد وما راح ينخصم منك شي مرة ثانية.',
+  },
+  'pr.stop.working': { en: 'Turning auto-renew off…', ar: 'جاري إيقاف التجديد التلقائي…' },
+  'pr.stop.done': {
+    en: 'Auto-renew is off. Nothing more will be charged, and Pro stays on until {date}.',
+    ar: 'أوقفنا التجديد التلقائي. ما راح ينخصم منك شي بعد اليوم، والمميّزة تبقى معك لين {date}.',
+  },
+  'pr.stop.doneNoDate': { en: 'Auto-renew is off. Nothing more will be charged.', ar: 'أوقفنا التجديد التلقائي، وما راح ينخصم منك شي بعد اليوم.' },
+  'pr.stop.failed': {
+    en: "This link didn't work: it may be old. Sign in and open your account to check auto-renew.",
+    ar: 'الرابط ما اشتغل، يمكن إنه قديم. سجّل دخولك وافتح حسابك عشان تتأكد من التجديد التلقائي.',
+  },
+  // The account page's "Keep Pro on" block (src/ui/proAccount.ts).
+  'pr.ac.title': { en: 'Keep Pro on', ar: 'خلّ المميّزة شغّالة' },
+  'pr.ac.active': { en: 'Renews on {date} for SAR {price}, from {card}.', ar: 'تتجدد يوم {date} بـ{price} ريال، من {card}.' },
+  'pr.ac.failing': {
+    en: "We couldn't renew from {card}, and nothing was charged. We'll try again on {date}.",
+    ar: 'ما قدرنا نجدد من {card}، وما انخصم منك شي. بنحاول مرة ثانية يوم {date}.',
+  },
+  'pr.ac.paused': { en: 'Renewals are paused right now: nothing will be charged.', ar: 'التجديد موقف حاليًا: ما راح ينخصم منك شي.' },
+  'pr.ac.off': { en: 'Auto-renew is off. Nothing will be charged again.', ar: 'التجديد التلقائي موقف، وما راح ينخصم منك شي مرة ثانية.' },
+  'pr.ac.cancel': { en: 'Turn off auto-renew', ar: 'أوقف التجديد التلقائي' },
+  'pr.ac.cancelling': { en: 'Turning it off…', ar: 'جاري الإيقاف…' },
+  'pr.ac.cancelled': {
+    en: 'Auto-renew is off. Pro stays on until the days you paid for end.',
+    ar: 'أوقفنا التجديد التلقائي. والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+  },
+  'pr.ac.cancelFailed': { en: "That didn't go through. Try again.", ar: 'ما تمت العملية. حاول مرة ثانية.' },
+  'pr.ac.card': { en: 'your card', ar: 'بطاقتك' },
+  'pr.ac.cardEnding': { en: '{brand} ending {last}', ar: '{brand} المنتهية بـ{last}' },
+  'pr.ac.theCard': { en: 'the card', ar: 'البطاقة' },
+
   // The editor's card (src/ui/priceAsk.ts): shown once to a signed-in fan.
   'pa.tag': { en: 'Founding fans', ar: 'الجمهور المؤسس' },
   'pa.title': { en: "You're one of TifoMaker's founding fans", ar: 'أنت من أوائل جمهور تيفو ميكر' },

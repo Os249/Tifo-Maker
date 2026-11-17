@@ -258,6 +258,7 @@ async function main(): Promise<void> {
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: proRepo,
       payments: new PgPaymentRepository(pool),
+      renewalsTimer: true,
       kits: new PgKitRepository(pool),
       tifoEvents: new PgEventRepository(pool),
       stadiums,
@@ -302,6 +303,7 @@ async function main(): Promise<void> {
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: memoryPro,
       payments: new MemoryPaymentRepository(memoryPro, (id) => auth.usernameOf(id)),
+      renewalsTimer: true,
       kits: new MemoryKitRepository(),
       tifoEvents: new MemoryEventRepository(),
       stadiums: new MemoryStadiumRepository(),

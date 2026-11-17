@@ -34,6 +34,12 @@ export interface ProRouteDeps {
   paymentsOpenFor?: (username: string | null) => boolean;
   /** Whether Pro is on sale to everyone for real (payments.ts paymentsPublic): the signed-out page shows the price. */
   paymentsPublic?: () => boolean;
+  /** Where "Get Pro" pays (payments v2): Moyasar's hosted page, or its form on /pro. */
+  checkoutKind?: () => 'invoice' | 'form';
+  /** Whether "Keep Pro on" is offered (payments v2). */
+  autoRenew?: () => boolean;
+  /** Whether this account has (or had) auto-renew: its account page then shows it (payments v2). */
+  hasRenewal?: (userId: string) => Promise<boolean>;
 }
 
 const acctOf = (u: UserRow): ProAccount => ({ id: u.id, username: u.username, email: u.email, emailVerified: !!u.emailVerifiedAt });
@@ -69,8 +75,11 @@ const COUNT_FOR_MS = 60_000;
 const ADMIN_PRICE_ROWS = 300;
 
 /** The parts of the offer the Pro page shows: Free against Pro, one price, and whether this visitor can buy it. */
-function publicOffer(paymentsOpen: boolean) {
+function publicOffer(paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false) {
   return {
+    // Only said where Pro can be bought: the page's words follow them.
+    ...(paymentsOpen && checkout === 'form' ? { checkout } : {}),
+    ...(paymentsOpen && autoRenew ? { autoRenew } : {}),
     limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
     currency: OFFER.currency,
     monthly: { price: OFFER.monthly.price, days: OFFER.monthly.days },
@@ -98,16 +107,17 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId) {
       const open = proMode() === 'on';
-      return open ? { live: true, signedIn: false, offer: publicOffer(deps.paymentsPublic?.() ?? false), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
+      return open ? { live: true, signedIn: false, offer: publicOffer(deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
     }
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user) return { live: false, signedIn: true, soon: soonOffer() };
     if (!pro.live(user.username)) return { live: false, signedIn: true, soon: soonOffer(), notified: await pro.repo.notified(user.id) };
     const acct = acctOf(user);
-    const [holding, gift, notified] = await Promise.all([
+    const [holding, gift, notified, renewal] = await Promise.all([
       pro.plan(user.id),
       pro.giftFor(acct),
       pro.repo.notified(user.id),
+      deps.hasRenewal ? deps.hasRenewal(user.id).catch(() => false) : Promise.resolve(false),
     ]);
     const { plan, pass } = holding;
     const allowances = await pro.allowances(user.id, holding);
@@ -121,7 +131,9 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       allowances,
       gift,
       notified,
-      offer: publicOffer(canBuy(user.username)),
+      offer: publicOffer(canBuy(user.username), deps.checkoutKind?.(), deps.autoRenew?.()),
+      // Only said to an account that has it: nobody else's answer changes.
+      ...(renewal ? { renewal: true } : {}),
       soon: soonOffer(),
       now: pro.now().toISOString(),
     };

@@ -212,6 +212,57 @@
 .pb-note { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
 .pb-msg { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); font-weight: 700; }
 .pb-msg:empty { display: none; }
+/* ---- Moyasar's payment form, opened in place of "Get Pro" (payments v2) ---- */
+.pb-form { display: grid; gap: var(--sp-3); min-width: 0; }
+.pb-form[hidden] { display: none; }
+.pb-buy .pp-btn[hidden] { display: none; }
+/* "Keep Pro on": never ticked for the fan. The whole row is the target. */
+.pb-keep {
+  display: grid; grid-template-columns: auto 1fr; gap: var(--sp-3); align-items: start;
+  padding: var(--sp-3) var(--sp-4); min-height: 44px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--raise); cursor: pointer;
+}
+.pb-keep:has(input:checked) { border-color: var(--pro-line); background: var(--pro-tint); }
+.pb-keep input { inline-size: 20px; block-size: 20px; margin: 2px 0 0; accent-color: var(--blue-solid); cursor: pointer; }
+.pb-keep input:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.pb-keep b { display: block; font-size: var(--fs-md); line-height: 1.4; color: var(--ink); }
+.pb-keep-terms { display: block; margin-top: var(--sp-1); font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+.pb-keep-state { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); font-weight: 700; }
+.pb-mysr { min-width: 0; min-height: 120px; }
+.pb-mysr[aria-busy="true"] { border-radius: var(--r-md); background: var(--raise); }
+.pb-form-close {
+  justify-self: start; min-height: 44px; padding: 0 var(--sp-3); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  transition: color var(--duration-quick) var(--ease-smooth-out);
+}
+.pb-form-close:hover { color: var(--ink); }
+.pb-form-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) { .pb-form-close { min-height: 32px; } }
+/*
+ * Moyasar's form in the site's own colours, light and dark. Its stylesheet is
+ * Tailwind utilities marked !important under div#mysr (white fields, near-black
+ * text, its own blue), so each rule here is !important too, one step more
+ * specific. Only colours, type and sizes are touched: the fields, their order
+ * and their behaviour stay Moyasar's. Its Pay button is this screen's one blue
+ * button while the form is open ("Get Pro" is hidden then).
+ */
+.pb-mysr div#mysr > div { color: var(--ink) !important; font-family: inherit !important; }
+.pb-mysr div#mysr label, .pb-mysr div#mysr legend { color: var(--muted) !important; font-size: var(--fs-sm) !important; font-weight: 700 !important; }
+.pb-mysr div#mysr input {
+  min-height: 44px; background-color: var(--raise) !important; color: var(--ink) !important;
+  box-shadow: 0 0 0 1px var(--line) !important; font-family: inherit !important; font-size: var(--fs-base) !important;
+}
+.pb-mysr div#mysr input::placeholder { color: var(--muted) !important; opacity: 0.7; }
+.pb-mysr div#mysr input:focus { box-shadow: 0 0 0 2px var(--blue) !important; }
+.pb-mysr div#mysr button[type="submit"] {
+  min-height: 48px; border-radius: var(--r-pill) !important; background-color: var(--blue-solid) !important; color: var(--on-blue) !important;
+  font-family: inherit !important; font-size: var(--fs-md) !important; font-weight: 700 !important; box-shadow: var(--shadow-md);
+  transition: background-color var(--duration-quick) var(--ease-smooth-out);
+}
+.pb-mysr div#mysr button[type="submit"]:hover:not(:disabled) { background-color: var(--blue-solid-hover) !important; }
+.pb-mysr div#mysr button[type="submit"]:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.pb-mysr div#mysr a { color: var(--muted) !important; }
+
 /* Back from Moyasar's page: is it paid yet. */
 .pp-paid {
   margin: var(--sp-4) 0 0; max-width: 60ch; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
