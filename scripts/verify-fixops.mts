@@ -130,6 +130,9 @@ const textLayer = (over: Partial<TextObject> = {}): Omit<TextObject, 'id' | 'kin
   const no = (name: string, o: unknown): void => ok(`parse refuses: ${name}`, parseFixOp(o && typeof o === 'object' ? flat(o as Record<string, unknown>) : o, ctx) === null);
 
   yes('capitals', { type: 'text.setCase', layer: 't1', text: 'KINGS OF ASIA' }, { type: 'text.setCase', layer: 't1', text: 'KINGS OF ASIA' });
+  yes('capitals with the words left out', { type: 'text.setCase', layer: 't1' }, { type: 'text.setCase', layer: 't1', text: 'KINGS OF ASIA' });
+  no('capitals for words already in capitals', { type: 'text.setCase', layer: 't3' });
+  no('capitals for Arabic with the words left out', { type: 'text.setCase', layer: 't2' });
   no('other words dressed as a case change', { type: 'text.setCase', layer: 't1', text: 'KINGS OF EUROPE' });
   no('the same text', { type: 'text.setCase', layer: 't1', text: 'kings of asia' });
   no('a case change on Arabic', { type: 'text.setCase', layer: 't2', text: 'الزعيم ' });

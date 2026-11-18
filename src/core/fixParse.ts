@@ -97,8 +97,11 @@ export function parseFixOp(raw: unknown, ctx: FixContext): FixOp | null {
 
   switch (type as FixOpType) {
     case 'text.setCase': {
-      const text = cleanText(r.text);
-      if (!layer || layer.kind !== 'text' || !text || typeof layer.text !== 'string') return null;
+      if (!layer || layer.kind !== 'text' || typeof layer.text !== 'string') return null;
+      // "Capitals" with no words given means these words, in capitals: a model
+      // often names the fix and leaves the text out, since the text does not change.
+      const text = r.text === null || r.text === undefined || r.text === '' ? cleanText(layer.text.toUpperCase()) : cleanText(r.text);
+      if (!text) return null;
       // The same letters and nothing else: this fix can change case, never words.
       if (text === layer.text.trim() || text.toLowerCase() !== layer.text.trim().toLowerCase()) return null;
       // Arabic has no capitals; a "case" change there is some other change.

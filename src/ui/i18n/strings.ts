@@ -696,7 +696,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.ai.shuffle': { en: 'Shuffle: free offline variation', ar: 'تشكيل: نسخة ببلاش بدون نت' },
   'ed.ai.regen': { en: 'Regenerate', ar: 'أعد التوليد' },
   'ed.ai.revert': { en: 'Revert', ar: 'رجّع' },
-  'ed.ai.polish': { en: 'Polish with AI critique', ar: 'حسّن بمراجعة الذكاء' },
 
   // ---- editor: object panel ----
   'ed.obj': { en: 'Object', ar: 'عنصر' },
@@ -1035,10 +1034,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     en: 'Something went wrong on the way to the model. Nothing was used.',
     ar: 'حدث خطأ في الطريق إلى النموذج. ولم يُستهلك شيء.',
   },
-  'ai.card.polished': { en: 'Polished by AI critique', ar: 'تم التحسين بمراجعة الذكاء' },
-  'ai.card.polishKept': { en: 'Kept your design — the critique suggested no change', ar: 'أبقينا تصميمك — المراجعة لم تقترح أي تغيير' },
-  'ai.card.polishFailed': { en: 'Polish could not run', ar: 'تعذّر تشغيل التحسين' },
-  'ai.card.polishFailedBody': { en: 'Your design is untouched. Try again in a moment.', ar: 'تصميمك لم يتغيّر. جرّب بعد قليل.' },
   // Why premium could not deliver, one entry per server `cause`
   // (server/src/aiFailure.ts → publicCause). The provider's own words never
   // reach the editor; these are what a person can act on.
@@ -1073,12 +1068,10 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'سجّلنا المشكلة. المصمّم السريع يعمل في هذه الأثناء. لم يُخصم شيء من رصيدك.',
   },
   'ai.card.adminWhy': { en: 'See why (admin)', ar: 'عرض السبب (للمشرف)' },
-  'ai.card.polishCause': { en: '{why} Your design is untouched.', ar: '{why} تصميمك لم يتغيّر.' },
   'ai.label.super': { en: 'Super AI', ar: 'الذكاء الخارق' },
   'ai.label.plain': { en: 'AI', ar: 'الذكاء الاصطناعي' },
   'ai.bar.designed': { en: '{label}: designed ✓', ar: '{label}: تم التصميم ✓' },
   'ai.bar.notNow': { en: '{label}: could not deliver just now', ar: '{label}: تعذّر التنفيذ الآن' },
-  'ai.bar.polished': { en: 'AI: polished ✓', ar: 'الذكاء الاصطناعي: تم التحسين ✓' },
   'ai.card.describeFirst': { en: 'Describe the tifo you want first', ar: 'اكتب وصف التيفو أولًا' },
   'ed.import.cutoutT': { en: 'Flood the flat backdrop away so the design underneath shows through', ar: 'يزيل الخلفية المسطحة ليظهر التصميم خلف الصورة' },
   'ed.import.alpha': { en: 'Alpha', ar: 'الشفافية' },
@@ -2197,7 +2190,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.a11y.pattern': { en: 'Pattern', ar: 'النقشة' },
   'ed.ai.shuffleT': { en: 'Compose a multi-stand design instantly, offline: no tokens, no quota', ar: 'ركّب تصميم على عدة مدرجات فورًا وبدون إنترنت: بلا رصيد ولا حصة' },
   'ed.ai.revertT': { en: 'Restore the canvas from before this design', ar: 'رجّع اللوحة لحالتها قبل هذا التصميم' },
-  'ed.ai.polishT': { en: 'Render the design and ask the AI to fix legibility and balance', ar: 'ارسم التصميم واطلب من الذكاء الاصطناعي يحسّن الوضوح والتوازن' },
   'common.reset': { en: 'Reset', ar: 'إعادة تعيين' },
   'ed.loadT': { en: 'Open a .tifo file', ar: 'افتح ملف ‎.tifo' },
   'shape.rect': { en: 'Rectangle', ar: 'مستطيل' },

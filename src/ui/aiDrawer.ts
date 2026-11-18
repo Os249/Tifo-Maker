@@ -129,9 +129,139 @@ function countLevel(a: Allowance): 'none' | 'low' | '' {
   return a.remaining === 1 || (a.limit >= 10 && a.remaining <= 2) ? 'low' : '';
 }
 
+/**
+ * The home screen: the two doors. Each says in one sentence what it does to
+ * the tifo and carries its own counter. Built here for the same reason as the
+ * review's controls below. Returns the function that words it again.
+ */
+function buildHome(host: HTMLElement | null): (() => void) | null {
+  if (!host || host.childElementCount) return null;
+  const title = el('h4');
+  const titleText = el('span');
+  const tag = el('span', 'h4-tag');
+  title.append(titleText, ' ', tag);
+  const gate = el('div');
+  gate.id = 'ai-gate';
+  gate.setAttribute('aria-live', 'polite');
+  const door = (id: string, iconName: string, whatIcon: string): { box: HTMLElement; name: HTMLElement; body: HTMLElement; what: HTMLElement; go: HTMLButtonElement } => {
+    const box = el('section', 'ai-door');
+    box.id = `ai-door-${id}`;
+    const h = el('h5');
+    const name = el('span');
+    h.append(icon(iconName), ' ', name);
+    const body = el('p');
+    const whatLine = el('p', 'ai-door-what');
+    const what = el('span');
+    whatLine.append(icon(whatIcon), ' ', what);
+    const foot = el('div', 'ai-door-foot');
+    const count = el('span', 'ai-count');
+    count.id = `ai-count-${id}`;
+    count.hidden = true;
+    const go = el('button', 'ai-go');
+    go.id = `ai-open-${id}`;
+    go.type = 'button';
+    foot.append(count, go);
+    box.append(h, body, whatLine, foot);
+    return { box, name, body, what, go };
+  };
+  const create = door('create', 'ti-sparkles', 'ti-refresh');
+  const review = door('review', 'ti-eye', 'ti-shield-check');
+  const doors = el('div', 'ai-doors');
+  doors.append(create.box, review.box);
+  const foot = el('p', 'ai-home-foot');
+  foot.id = 'ai-home-foot';
+  foot.hidden = true;
+  host.append(title, gate, doors, foot);
+  const word = (): void => {
+    titleText.textContent = t('ai.home.title');
+    tag.textContent = t('ai.home.tag');
+    create.name.textContent = t('ai.door.create');
+    create.body.textContent = t('ai.door.createBody');
+    create.what.textContent = t('ai.door.createWhat');
+    create.go.textContent = t('ai.door.createGo');
+    review.name.textContent = t('ai.door.review');
+    review.body.textContent = t('ai.door.reviewBody');
+    review.what.textContent = t('ai.door.reviewWhat');
+    review.go.textContent = t('ai.door.reviewGo');
+  };
+  word();
+  return word;
+}
+
+/**
+ * The review's own controls: its header, the list and the message box. Built
+ * here, not written in index.html, so their words arrive with this module
+ * (it loads on demand) and not with the editor's first download. Returns the
+ * function that words them again when the language changes.
+ */
+function buildReview(host: HTMLElement | null): (() => void) | null {
+  if (!host || host.childElementCount) return null;
+  const head = el('div', 'ai-head');
+  const back = el('button', 'ai-back');
+  back.id = 'ai-back-review';
+  back.type = 'button';
+  back.append(icon('ti-arrow-right'));
+  const title = el('h4');
+  const titleText = el('span');
+  title.append(titleText);
+  const pill = el('span', 'ai-count');
+  pill.id = 'ai-pill-review';
+  pill.hidden = true;
+  const full = el('button', 'ai-icon');
+  full.id = 'ai-full';
+  full.type = 'button';
+  full.setAttribute('aria-pressed', 'false');
+  full.append(icon('ti-maximize'));
+  head.append(back, title, pill, full);
+  const list = el('div', 'rv-body');
+  list.id = 'rv-body';
+  const form = el('form', 'rv-composer');
+  form.id = 'rv-composer';
+  form.autocomplete = 'off';
+  const sugg = el('div', 'rv-sugg');
+  sugg.id = 'rv-sugg';
+  const asks = ['ai.chat.s1', 'ai.chat.s2'].map(() => {
+    const b = el('button', 'chip');
+    b.type = 'button';
+    b.dataset.ask = '';
+    return b;
+  });
+  sugg.append(...asks);
+  const row = el('div', 'rv-in');
+  const input = el('input');
+  input.id = 'rv-input';
+  input.type = 'text';
+  input.name = 'message';
+  input.maxLength = 400;
+  input.enterKeyHint = 'send';
+  input.spellcheck = true;
+  const send = el('button', 'rv-send');
+  send.id = 'rv-send';
+  send.type = 'submit';
+  send.append(icon('ti-arrow-big-up'));
+  row.append(input, send);
+  const count = el('p', 'ai-quota');
+  count.id = 'rv-chat-count';
+  form.append(sugg, row, count);
+  host.append(head, list, form);
+  const word = (): void => {
+    back.setAttribute('aria-label', t('ai.back'));
+    titleText.textContent = t('ai.door.review');
+    asks[0].textContent = t('ai.chat.s1');
+    asks[1].textContent = t('ai.chat.s2');
+    input.setAttribute('aria-label', t('ai.chat.label'));
+    input.placeholder = t('ai.chat.ph');
+    send.setAttribute('aria-label', t('ai.chat.send'));
+  };
+  word();
+  return word;
+}
+
 export function mountAiDrawer(deps: AiDrawerDeps): AiDrawerHandle {
   const { root, store, objects, map, editor } = deps;
   const $ = <T extends HTMLElement>(sel: string): T | null => root.querySelector<T>(sel);
+  const wordHome = buildHome($('#ai-home'));
+  const wordReview = buildReview($('#ai-review'));
   const views: Record<AiView, HTMLElement | null> = { home: $('#ai-home'), create: $('#ai-create'), review: $('#ai-review') };
   const body = $('#rv-body');
   const input = $<HTMLInputElement>('#rv-input');
@@ -742,8 +872,9 @@ export function mountAiDrawer(deps: AiDrawerDeps): AiDrawerHandle {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.body.classList.contains('ai-full')) setFull(false);
   });
-  onLangChange(() => { paintCounts(); if (view === 'review') render(); setFull(document.body.classList.contains('ai-full')); });
+  onLangChange(() => { wordHome?.(); wordReview?.(); paintCounts(); if (view === 'review') render(); setFull(document.body.classList.contains('ai-full')); });
 
+  setFull(false);
   show(remembered());
   void load();
   return { show };

@@ -41,7 +41,7 @@ import { currentCredit } from './creditLine';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
-import { mountAiDrawer } from './aiDrawer';
+import type { AiDrawerHandle } from './aiDrawer';
 import { mountAiPanel } from './aiPanel';
 import {
   createLocal, getLocal, keysFor, openUrl, purgeLocal, stashNewProject,
@@ -492,16 +492,34 @@ export function mountToolbar(
    * (busy, out of premium) and the Quick Designer. Then it is kept.
    */
   let aiNaming: { autoName: boolean } | null = null;
-  // Both AI tools' home (ui/aiDrawer.ts): the two doors, their counters, and AI Critique.
-  const aiDrawer = mountAiDrawer({
-    root, store, objects, map, editor,
-    title: () => docTitle?.value ?? '',
-    stadium: () => tl(map.templateRef.id),
-    refresh: () => panelRefresh(),
-  });
-  // Anything that types a brief for the designer (the AI bar, a project made
-  // with "Generate with AI") shows the designer, whichever door was open.
-  document.getElementById('ai-generate')?.addEventListener('click', () => aiDrawer.show('create'), { capture: true });
+  // Both AI tools' home (ui/aiDrawer.ts): the two doors, their counters, and
+  // AI Critique. Loaded on demand: its hundred strings and its code are no
+  // part of the editor's first download.
+  let aiDrawer: AiDrawerHandle | null = null;
+  let aiDrawerLoading: Promise<AiDrawerHandle> | null = null;
+  const loadAiDrawer = (): Promise<AiDrawerHandle> =>
+    (aiDrawerLoading ??= import('./aiDrawer').then((m) => (aiDrawer = m.mountAiDrawer({
+      root, store, objects, map, editor,
+      title: () => docTitle?.value ?? '',
+      stadium: () => tl(map.templateRef.id),
+      refresh: () => panelRefresh(),
+    }))));
+  // If the drawer cannot be fetched (offline, a deploy in between), the
+  // designer is still there: its view is in the page and needs nothing more.
+  const showDesignerAnyway = (): void => {
+    aiDrawerLoading = null;
+    const create = document.getElementById('ai-create');
+    if (create) create.hidden = false;
+  };
+  // Only when the AI tab is opened (the panel's tab, or the phone's): a visit
+  // that never opens it never downloads it, and the editor's first strings
+  // stay inside their budget (e2e-pages-load).
+  document.addEventListener('click', (e) => {
+    if (!aiDrawer && (e.target as Element | null)?.closest?.('#rail-ai, [data-tab="ai"]')) void loadAiDrawer().catch(showDesignerAnyway);
+  }, { capture: true });
+  // A design in the making before the drawer has arrived (the AI bar, a
+  // project made with "Generate with AI") shows the designer as soon as it does.
+  window.addEventListener('tifo:ai-create', () => { if (!aiDrawer) void loadAiDrawer().then((d) => d.show('create')).catch(showDesignerAnyway); });
   const aiPanel = mountAiPanel({
     root, store, editor, map, objects, composer, getPreview, refresh: panelRefresh,
     onApplied: (spec) => {

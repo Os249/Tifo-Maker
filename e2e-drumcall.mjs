@@ -313,7 +313,7 @@ console.log('\n— the editor: Animate reveal —');
   check('…with all six hits in it', vhits === 6, String(vhits));
   try {
     const { execFileSync } = await import('node:child_process');
-    const streams = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', vpath], { encoding: 'utf8' }).trim().split('\n');
+    const streams = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', vpath], { encoding: 'utf8' }).trim().split(/\r?\n/);
     check('the downloaded video has an audio stream', streams.includes('audio'), streams.join(','));
   } catch { /* no ffprobe here: the recorder check above stands */ }
   // Exporting again still has sound: the drum's tracks are detached, not stopped.

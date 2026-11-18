@@ -1886,35 +1886,6 @@ export async function generateAiTifo(
   return data as AiGenerateResult;
 }
 
-export interface AiCritiqueResult {
-  spec: TifoSpec;
-  source: 'model' | 'original';
-  notes?: string[];
-  /** Set when the critic could not run; the design came back unchanged. */
-  cause?: AiCause;
-  /** 'quota' when Pro is on and the Polish allowance is used up. */
-  reason?: 'quota';
-  /** With Pro on: the Polish allowance as it now stands. */
-  quota?: AiQuota;
-}
-
-/** Phase 4b: send the current design + a low-res render to the vision critic; get an improved spec back. */
-export async function critiqueAiTifo(spec: TifoSpec, image?: string, stadium?: string): Promise<AiCritiqueResult> {
-  const res = await fetch(`${API}/ai/critique`, {
-    method: 'POST',
-    headers: aiHeaders(true),
-    body: JSON.stringify({ spec, ...(image ? { image } : {}), ...(stadium ? { stadium } : {}) }),
-  });
-  const data = (await res.json().catch(() => null)) as (AiCritiqueResult & { error?: string }) | null;
-  if (!res.ok) {
-    const err = new Error(data?.error ? await tErrLater(data.error) : `critique failed (${res.status})`) as AiError;
-    err.status = res.status;
-    throw err;
-  }
-  const out = data as AiCritiqueResult;
-  return { ...out, cause: asCause(out.cause) };
-}
-
 /** Read AI access/quota. Throws an AiError (status 403, locked) when admin-only. */
 export async function fetchAiQuota(): Promise<AiQuota> {
   const res = await fetch(`${API}/ai/quota`, { headers: aiHeaders(false) });

@@ -168,7 +168,8 @@ console.log('\n— an account on the preview list —');
 {
   const { ctx, p } = await editor(fan.token, fan.design);
   await p.click('#rail-ai');
-  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  // The AI tab opens on its two doors (ui/aiDrawer.ts, loaded when the tab is opened): this suite is about the designer.
+  await p.waitForFunction(() => ['ai-open-create', 'ai-prompt'].some((id) => document.getElementById(id)?.getClientRects().length), null, { timeout: 15000 }).catch(() => {});
   await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   check('AI panel: the day\'s designs, counted', await waitFor(p, () => /^10 of 10 designs left today$/.test(document.getElementById('ai-quota')?.textContent || '')));
   // Whole stadium is the only AI path since 29 Oct 2026 (2e3d8f9): its box,

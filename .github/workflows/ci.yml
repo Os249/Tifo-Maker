@@ -81,6 +81,15 @@ jobs:
       - name: Pro tests (Postgres)
         run: npm run test:pro
 
+      # AI Critique: what is kept of the critic's answer, the two routes and
+      # their counters (the model is a stand-in), and the typed fix operations
+      # with their undo.
+      - name: AI review tests
+        run: npm run test:review
+
+      - name: Fix operation checks
+        run: npm run verify:fixops
+
       # Buying Pro: v1 (the hosted invoice), then v2 (the proxy, the payment
       # form, the webhook-only mode, auto-renew and its races). Both against a
       # fake Moyasar; the stores' locks run on the Postgres service above.

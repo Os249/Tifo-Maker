@@ -28,10 +28,10 @@ import { critiqueDesign, repairSpec } from '../core/critique';
 import { designShuffle } from '../core/promptDesigner';
 import { describeActiveArea } from '../core/activeArea';
 import { kitForAi } from './kitActive';
-import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice, type AiCause } from '../net/api';
+import { generateAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice, type AiCause } from '../net/api';
 import { isSignedIn, fetchMe, resendVerification, fetchPro, type Allowance, type AllowanceKind, type ProPlan, type ProState } from '../net/api';
 import { track } from '../net/analytics';
-import { allowanceLine, limitBack, limitTitle, proChipHtml } from './pro';
+import { allowanceLine, limitBack, limitTitle } from './pro';
 /** The sheets load the first time one opens (ui/proSheets.ts). */
 const sheets = () => import('./proSheets');
 import { openAuthModal } from './authModal';
@@ -107,7 +107,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const summaryEl = $('#ai-summary');
   const regenBtn = $<HTMLButtonElement>('#ai-regen');
   const revertBtn = $<HTMLButtonElement>('#ai-revert');
-  const polishBtn = $<HTMLButtonElement>('#ai-polish');
   const shuffleBtn = $<HTMLButtonElement>('#ai-shuffle');
   const quotaEl = $('#ai-quota');
   const stateEl = $('#ai-state');
@@ -120,8 +119,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   /** The layers the canvas had before the first generation, for Revert. */
   let baselineObjects: TifoObject[] | null = null;
   let busy = false;
-  let lastSpec: TifoSpec | null = null; // the applied design (for AI critique/polish)
-  let lastStadium: string | undefined; // stadium context the design was planned for
+  let lastSpec: TifoSpec | null = null; // the applied design
   let shuffleN = 0; // increments per free offline "shuffle"
 
   // ---- one state card -------------------------------------------------------
@@ -225,10 +223,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     { at: 22, text: 'Still designing — the whole stadium takes a moment…' },
     { at: 40, text: 'Nearly there…' },
   ];
-  const POLISH_STAGES: Stage[] = [
-    { at: 0, text: 'Looking at the render…' },
-    { at: 10, text: 'Reworking the design…' },
-  ];
   let progressTimer: number | null = null;
   // A Super run is 20-40s. Leaving someone with no way out of that but a page
   // reload is the thing every loading-state guide warns about, and it matters
@@ -309,16 +303,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     const lim = proState?.offer?.limits;
     return !!lim && JSON.stringify(lim.pro[kind]) !== JSON.stringify(lim.free[kind]);
   };
-  const paintPro = (): void => {
-    const pol = allowances.polish;
-    if (polishBtn) {
-      polishBtn.querySelector('.pro-chip')?.remove();
-      if (proLive && pol) {
-        polishBtn.title = allowanceLine(pol, proPlan);
-        if (pol.remaining <= 0 && (!proPlan || proPlan === 'free') && proGivesMore('polish')) polishBtn.insertAdjacentHTML('beforeend', ' ' + proChipHtml());
-      }
-    }
-  };
   /** Signed out, the main button says what pressing it does. */
   function syncGenLabel(): void {
     if (!genLabel) return;
@@ -329,7 +313,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const setQuota = (q: AiQuota | null): void => {
     syncGenLabel();
     learn(q);
-    paintPro();
     // The drawer's doors show this count too (ui/aiDrawer.ts).
     window.dispatchEvent(new CustomEvent('tifo:ai-quota', { detail: q }));
     if (!quotaEl) return;
@@ -359,7 +342,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
    */
   const showLimit = (kind: AllowanceKind, q: AiQuota, alternatives: CardAction[]): void => {
     learn(q);
-    paintPro();
     const al = allowanceOf(q) ?? allowances[kind];
     if (!al) return;
     // A pass at its ceiling, or an allowance Pro gives no more of: when it
@@ -620,7 +602,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       const base = localSummary(working.summary ?? working.title);
       summaryEl.textContent = critique?.issues.length ? `${base}  ·  ${critique.issues[0]}` : base;
     }
-    lastSpec = working; // the live design — input for AI critique/polish
+    lastSpec = working; // the live design
     if (resultEl) resultEl.style.display = '';
     deps.onApplied?.(working);
   };
@@ -668,14 +650,12 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     hideChoice();
     genBtn.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
-    if (polishBtn) polishBtn.disabled = true;
     setStatus('');
     startProgress(STAGES);
     try {
       // The bowl geometry goes with every request: the director plans each
       // stand from it, and needs to know how many rows each one really has.
       const stadium = describeStadiumContext(buildStadiumContext(map));
-      lastStadium = stadium;
       // Section 3: focus the design on the chosen active area, if any.
       const focus = describeActiveArea();
       const brief = focus ? `${text}: focus the design on ${focus}` : text;
@@ -834,93 +814,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       busy = false;
       genBtn.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
-      if (polishBtn) polishBtn.disabled = false;
-    }
-  };
-
-  // Capture a low-res flat render of the current seats (mirrors viewer.paint2D) for
-  // the vision critic — kept local to avoid importing the viewer's heavy 3D graph.
-  const captureRender = (): string | undefined => {
-    try {
-      const bw = map.bounds.maxX - map.bounds.minX;
-      const bh = map.bounds.maxY - map.bounds.minY;
-      const W = 384;
-      const scale = W / bw;
-      const c = document.createElement('canvas');
-      c.width = W;
-      c.height = Math.max(1, Math.round(bh * scale));
-      const ctx = c.getContext('2d');
-      if (!ctx) return undefined;
-      ctx.fillStyle = '#07080A';
-      ctx.fillRect(0, 0, c.width, c.height);
-      for (let i = 0; i < map.count; i++) {
-        ctx.fillStyle = store.cells[i] === 0 ? '#262a33' : store.palette[store.cells[i]] ?? '#262a33';
-        const x = (map.xy[i * 2] - map.bounds.minX) * scale;
-        const y = (map.xy[i * 2 + 1] - map.bounds.minY) * scale;
-        ctx.fillRect(x, y, Math.max(0.6, 3.2 * scale), Math.max(1, 8 * scale * 0.85));
-      }
-      return c.toDataURL('image/jpeg', 0.82);
-    } catch {
-      return undefined;
-    }
-  };
-
-  // Phase 4b: vision critique — send the render + spec, apply the improved design.
-  const polish = async (): Promise<void> => {
-    const spec = lastSpec;
-    if (busy || !spec) return;
-    busy = true;
-    setError(null);
-    genBtn.disabled = true;
-    if (regenBtn) regenBtn.disabled = true;
-    if (polishBtn) polishBtn.disabled = true;
-    setStatus('');
-    startProgress(POLISH_STAGES);
-    try {
-      const res = await critiqueAiTifo(spec, captureRender(), lastStadium);
-      const bar = document.getElementById('message');
-      stopProgress();
-      if (res.quota) setQuota(res.quota);
-      if (res.reason === 'quota' && res.quota) {
-        // The design is untouched; Polish comes back when its week does.
-        showLimit('polish', res.quota, [{ label: t('ai.card.keep'), run: clearCard }]);
-        if (bar) bar.textContent = '';
-        return;
-      }
-      if (res.cause) {
-        // The critic could not run. The design is exactly as it was, so there
-        // is nothing to apply — say why, in words, and leave it.
-        showCard({
-          tone: 'warn',
-          title: t('ai.card.polishFailed'),
-          body: tv('ai.card.polishCause', { why: causeTitle(res.cause) + '.' }),
-          actions: adminWhy(),
-        });
-        if (bar) bar.textContent = '';
-        return;
-      }
-      await applySpec(res.spec);
-      showCard({
-        tone: 'good',
-        title: t(res.source === 'model' ? 'ai.card.polished' : 'ai.card.polishKept'),
-      });
-      if (bar) bar.textContent = res.source === 'model' ? t('ai.bar.polished') : '';
-
-    } catch (e) {
-      const err = e as AiError;
-      showCard({
-        tone: 'bad',
-        title: t('ai.card.polishFailed'),
-        body: err.status && err.message && !/^critique failed/.test(err.message) ? err.message : t('ai.card.polishFailedBody'),
-      });
-    } finally {
-      // Whatever happened — success, the "busy" choice panel, a thrown error —
-      // the bar must not be left spinning over a finished run.
-      stopProgress();
-      busy = false;
-      genBtn.disabled = false;
-      if (regenBtn) regenBtn.disabled = false;
-      if (polishBtn) polishBtn.disabled = false;
     }
   };
 
@@ -953,7 +846,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     void run(promptEl.value);
   });
   regenBtn?.addEventListener('click', () => void run(promptEl.value));
-  polishBtn?.addEventListener('click', () => void polish());
   shuffleBtn?.addEventListener('click', () => void shuffle());
   revertBtn?.addEventListener('click', revert);
   // Ctrl/Cmd+Enter generates from the textarea.

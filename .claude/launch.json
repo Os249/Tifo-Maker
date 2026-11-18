@@ -27,6 +27,15 @@
         "server"
       ],
       "port": 8787
+    },
+    {
+      "name": "server-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "server:local"
+      ],
+      "port": 8787
     }
   ]
 }
