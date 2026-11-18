@@ -167,6 +167,33 @@ The scale is in `tokens.css`, after the motion tokens of transitions.dev.
 - **The first-tifo guide** (`ui/guide.ts`) runs once (`tifo_guide_v1`) and
   hides what it is not about.
 
+### The AI drawer (`ui/aiDrawer.ts`, `ui/aiDrawer.css`)
+The AI tab is one home for both AI tools, and a little wider than the tool
+panels (380px; 340px on a small laptop).
+
+- **Two doors, never a switch.** "Create a new tifo" replaces what is on the
+  stands; "Review my tifo" keeps it and suggests fixes. Each door says so in
+  one sentence and carries its own counter. The tab opens on the tool used
+  last (`tifo_ai_view_v1`), with a back arrow to the doors.
+- **A counter is seen before anything is spent**: on the door, in the tool's
+  header, and on the button that spends it ("Review my tifo · uses 1 of 2").
+  Create, reviews and chat messages each have their own; a review never draws
+  from Create's. The last one of a period is a warning (`data-level="low"`).
+- **A fix is a card**: a number, what is wrong, one sentence why, the before
+  and the after, Apply and Dismiss. Nothing changes until Apply; an applied
+  card says so and offers Undo. Apply is a tint (`.rv-apply`), never blue.
+  The number is violet because pointing at a card selects its layer.
+- **Bigger ideas are not fixes**: a dashed edge, no number, and "Give it to
+  Create", which says it uses one of Create's designs.
+- **Signed out or not verified, the drawer is all there** and a card says the
+  one step that opens it. At a limit: what ran out, when it comes back, and
+  the fixes already there stay usable. Pro is offered only where Pro is on.
+- **Full screen** (`body.ai-full`) hides everything but the tifo and the
+  review; the button or Escape puts it back. It always opens as the drawer.
+- Every sentence the model writes is put on the page as text, never as HTML,
+  and every fix is checked against the live design before it is applied
+  (`core/fixParse.ts`, `core/fixOps.ts`).
+
 ### Empty states
 Say what is missing, why it is fine, and give the next step right there, once.
 The banner empty state is the model: three cards (stand banner, hanging banner,

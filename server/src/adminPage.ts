@@ -1530,7 +1530,7 @@ function aiTab(){
     [function(d){ return d.username; }, function(d){ return d.model; }, function(d){ return d.quick; },
      function(d){ return d.quota; }, function(d){ return new Date(d.last).toLocaleDateString(); }]);
 
-  var modes = a.modes || { std:0, super:0, polish:0, photo:0, cutout:0 };
+  var modes = a.modes || { std:0, super:0, polish:0, photo:0, cutout:0, critique:0, chat:0 };
   html += '<h2 class="sec">Reference</h2><div class="grid">';
   html += kpi('Whole-bowl (Super)', modes.super, 'director prompt', true);
   html += kpi('Single design', modes.std, 'standard mode', true);
@@ -1581,7 +1581,7 @@ function aiReliabilitySection(a){
   if (!mo) return '';
   var lat = c.latencyMs || {}, by = c.byMode || {};
   var rows = [];
-  var order = ['super', 'std', 'polish', 'photo', 'cutout'];
+  var order = ['super', 'std', 'critique', 'chat', 'polish', 'photo', 'cutout'];
   for (var i = 0; i < order.length; i++){
     var m = order[i], o = mo[m] || {};
     var limited = o.limited || 0;
@@ -1675,7 +1675,7 @@ var REASON_INFO = {
   upstream_error:  ['Provider error', 'The provider answered with a server error (5xx).'],
   unknown:         ['Unclassified', 'Read the detail; if it recurs, it deserves its own category in aiFailure.ts.']
 };
-var MODE_LABEL = { std:'Premium', 'super':'Super AI', polish:'Polish', photo:'Photo reading', cutout:'Smart cut-out' };
+var MODE_LABEL = { std:'Premium', 'super':'Super AI', polish:'Polish', photo:'Photo reading', cutout:'Smart cut-out', critique:'Critique', chat:'Critique chat' };
 function reasonLabel(r){ return (REASON_INFO[r] || [labelize(r)])[0]; }
 
 function aiFailuresSection(a){

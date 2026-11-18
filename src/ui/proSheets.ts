@@ -79,11 +79,12 @@ const GIFT_PERKS = [
  */
 function perksOf(keys: string[], st?: ProState | null): string[] {
   const lim = st?.offer?.limits;
-  const more = (k: 'std' | 'polish' | 'photo'): boolean => !lim || JSON.stringify(lim.pro[k]) !== JSON.stringify(lim.free[k]);
+  const more = (k: 'std' | 'critique' | 'photo'): boolean => !lim || JSON.stringify(lim.pro[k]) !== JSON.stringify(lim.free[k]);
   return keys.flatMap((k) => {
     if (k === 'pro.perk.ai' || k === 'pro.perk.noLimits') return more('std') ? [k] : [];
     if (k !== 'pro.perk.polish') return [k];
-    if (!more('polish')) return [];
+    // The line is AI Critique's now (it took Polish's place, 18 Nov 2026); its key keeps the old name.
+    if (!more('critique')) return [];
     return more('photo') ? [k] : ['qp.perk.polish'];
   });
 }

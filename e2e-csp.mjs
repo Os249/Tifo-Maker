@@ -218,6 +218,8 @@ console.log(`\n— the editor (${GROUND}) —`);
   // The AI panel: its offline shuffle, and a generation (signed out, it asks
   // for an account first: the sign-in dialog opens and is closed again).
   await p.click('#rail-ai').catch(() => {});
+  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   await settle(p, 800);
   await p.evaluate(() => document.getElementById('ai-shuffle')?.click());
   await settle(p, 3000);

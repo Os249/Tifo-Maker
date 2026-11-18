@@ -23,9 +23,13 @@
  * runs the one whole-stadium pipeline (the director), so there is no separate
  * Super allowance any more; a request that still says mode: "super" is
  * metered as a design like any other (aiRoutes).
+ *
+ * 'critique' is one AI Critique run on the design in hand and 'chat' one
+ * follow-up message to it (18 Nov 2026). Each has a counter of its own:
+ * neither ever draws from 'std', whatever a run costs.
  */
-export type AllowanceKind = 'std' | 'polish' | 'photo' | 'cutout';
-export const ALLOWANCE_KINDS: AllowanceKind[] = ['std', 'polish', 'photo', 'cutout'];
+export type AllowanceKind = 'std' | 'polish' | 'photo' | 'cutout' | 'critique' | 'chat';
+export const ALLOWANCE_KINDS: AllowanceKind[] = ['std', 'polish', 'photo', 'cutout', 'critique', 'chat'];
 
 /**
  * day, week and month are Riyadh calendar periods. 'cycle' is a pass's own
@@ -73,6 +77,9 @@ export const FREE_WINDOWS: Record<AllowanceKind, Window[]> = {
   polish: [{ period: 'week', limit: 3 }],
   photo: [{ period: 'week', limit: 2 }],
   cutout: [{ period: 'week', limit: 1 }],
+  // What Polish gave, so nothing is taken away: at most about 13 a month.
+  critique: [{ period: 'week', limit: 3 }],
+  chat: [{ period: 'week', limit: 20 }],
 };
 
 /**
@@ -128,6 +135,11 @@ const PRO_WINDOWS: Record<AllowanceKind, Window[]> = {
   polish: AI_ON_PRO ? [{ period: 'day', limit: 10 }, { period: 'cycle', limit: 20 }] : FREE_WINDOWS.polish,
   photo: PHOTO_ON_PRO ? [{ period: 'day', limit: 3 }, { period: 'cycle', limit: 10 }] : FREE_WINDOWS.photo,
   cutout: [{ period: 'day', limit: 5 }, { period: 'cycle', limit: 15 }],
+  // Measured on 18 Nov 2026 (scripts/measure-critique.mts): a review $0.018 on
+  // Sonnet 5.5 with a cold cache, a chat message $0.0007 on Haiku 5.5. A
+  // member at both ceilings costs 40 x 0.018 + 300 x 0.0007 = $0.93 a month.
+  critique: AI_ON_PRO ? [{ period: 'day', limit: 6 }, { period: 'cycle', limit: 40 }] : FREE_WINDOWS.critique,
+  chat: AI_ON_PRO ? [{ period: 'day', limit: 40 }, { period: 'cycle', limit: 300 }] : FREE_WINDOWS.chat,
 };
 
 export const PLAN_WINDOWS: Record<PassPlan, Record<AllowanceKind, Window[]>> = {

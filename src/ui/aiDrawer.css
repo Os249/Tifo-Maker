@@ -1,0 +1,153 @@
+/*
+ * The AI drawer (ui/aiDrawer.ts): two doors, their counters, and AI Critique.
+ * Tokens only (docs/DESIGN.md). Apply is a tint, never blue: blue stays the
+ * one next step of the screen. A fix's number is violet, the editor's colour
+ * for what is selected, because pointing at a card selects its layer.
+ */
+
+/* The AI tab is a little wider than the tool panels: a fix card needs the room. */
+@media (min-width: 900px) {
+  body[data-panel-mode="ai"] .panel { width: 380px; flex-basis: 380px; }
+  body[data-panel-mode="ai"] .panel.collapsed { width: 32px; flex-basis: 32px; }
+}
+@media (min-width: 900px) and (max-width: 1365px) {
+  body[data-panel-mode="ai"] .panel { width: 340px; flex-basis: 340px; }
+}
+
+#ai-home[hidden], #ai-create[hidden], #ai-review[hidden] { display: none; }
+
+/* ---- home: the two doors ---- */
+.ai-home { display: grid; gap: var(--sp-3); }
+.ai-home > h4 { margin: 0; }
+.ai-doors { display: grid; gap: var(--sp-3); }
+.ai-door {
+  display: grid; gap: var(--sp-2); padding: var(--sp-3);
+  background: var(--ink-2); border: 1px solid var(--line-1); border-radius: var(--r-md);
+}
+.ai-door h5 {
+  margin: 0; display: flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-display); font-size: var(--fs-base); font-weight: 800; color: var(--text-1);
+  text-wrap: balance;
+}
+.ai-door h5 .ti { color: var(--blue-300); }
+.ai-door p { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
+.ai-door .ai-door-what { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
+.ai-door-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding-top: var(--sp-2); border-top: 1px solid var(--line-1);
+}
+#ctx-ai.ai-locked #ai-door-review { opacity: .6; }
+.ai-home-foot { margin: 0; font-size: var(--fs-2xs); color: var(--text-3); }
+
+/* A tinted action: on the main path, never the screen's one blue step. */
+.ai-go, .rv-apply {
+  background: var(--here-bg); color: var(--here-ink); border-color: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--here-line) 45%, transparent);
+  font-size: var(--fs-sm);
+}
+.ai-go:hover, .rv-apply:hover { background: var(--here-bg); box-shadow: inset 0 0 0 1px var(--here-line); }
+.ai-go:focus-visible, .rv-apply:focus-visible, .ai-back:focus-visible, .ai-icon:focus-visible, .rv-send:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+
+/* A counter: seen before anything is spent. */
+.ai-count {
+  padding: 2px var(--sp-2); border: 1px solid var(--line-1); border-radius: var(--r-pill);
+  font-size: var(--fs-2xs); color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ai-count[hidden] { display: none; }
+.ai-count[data-level="low"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, transparent); }
+.ai-count[data-level="none"] { color: var(--red-400); border-color: color-mix(in srgb, var(--red-400) 60%, transparent); }
+
+/* ---- a tool's header: back, name, counter ---- */
+.ai-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.ai-head h4 { margin: 0; flex: 1; min-width: 0; }
+.ai-back, .ai-icon {
+  flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; display: grid; place-items: center;
+  background: transparent; border-color: transparent; color: var(--text-2); font-size: var(--fs-base);
+}
+.ai-back:hover, .ai-icon:hover { background: var(--ink-3); color: var(--text-1); }
+/* The back arrow points back: left in English, right in Arabic. */
+:root:not([dir="rtl"]) .ai-back .ti, :root[dir="rtl"] .rv-arrow { transform: scaleX(-1); }
+
+/* ---- the review ---- */
+.rv-body { display: flex; flex-direction: column; gap: var(--sp-3); }
+.rv-intent, .rv-fix {
+  display: grid; gap: var(--sp-2); padding: var(--sp-3); min-width: 0;
+  background: var(--ink-2); border: 1px solid var(--line-1); border-radius: var(--r-md);
+}
+.rv-intent p, .rv-idea p { margin: 0; font-size: var(--fs-sm); color: var(--text-1); }
+.rv-label { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-2xs); font-weight: 700; color: var(--text-3); }
+.rv-acts, .rv-fix-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.rv-acts .link-btn, .rv-fix-foot .link-btn { margin-inline-start: 0; color: var(--text-2); }
+.rv-fix-head { display: flex; align-items: center; gap: var(--sp-2); }
+.rv-fix h5 { margin: 0; flex: 1; min-width: 0; font-family: var(--font-display); font-size: var(--fs-sm); font-weight: 800; }
+.rv-pin {
+  flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--violet); color: var(--violet-ink); font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.rv-kind, .rv-note, .rv-count { margin: 0; font-size: var(--fs-2xs); color: var(--text-3); }
+.rv-why { margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.rv-fix.is-open:hover, .rv-fix.is-open:focus-within { border-color: var(--violet); }
+.rv-fix.is-done { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.rv-fix.is-done .rv-pin { background: var(--ok); color: var(--ink-0); }
+.rv-fix.is-gone, .rv-fix.is-stale { opacity: .6; }
+.rv-done { flex: 1; display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); font-weight: 700; color: var(--ok); }
+
+/* What a fix changes: the before and the after, from the design as it is. */
+.rv-preview { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.rv-chip {
+  max-width: 100%; padding: 2px var(--sp-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--ink-0); border: 1px solid var(--line-1); border-radius: var(--r-sm); font-size: var(--fs-xs); color: var(--text-1);
+}
+.rv-sw { flex: none; width: 22px; height: 22px; border-radius: var(--r-sm); background: var(--sw, var(--ink-3)); border: 1px solid var(--line-2); }
+.rv-arrow { color: var(--text-3); }
+
+/* Bigger ideas: suggestions, so a dashed edge and no number. */
+.rv-sec { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--text-3); }
+.rv-sec b { font-family: var(--font-display); font-size: var(--fs-sm); color: var(--text-1); }
+.rv-idea { display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px dashed var(--line-2); border-radius: var(--r-md); }
+
+/* Chat */
+.rv-bub { max-width: 88%; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-sm); }
+.rv-bub.is-user { align-self: flex-start; background: var(--here-bg); color: var(--here-ink); }
+.rv-bub.is-ai { align-self: flex-end; background: var(--ink-2); border: 1px solid var(--line-1); color: var(--text-1); }
+.rv-sugg { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.rv-start { display: grid; gap: var(--sp-2); }
+.rv-lead { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
+.rv-go { width: 100%; }
+.rv-again { align-self: flex-start; }
+.rv-body .ai-state, .rv-body .ai-progress { margin-top: 0; }
+
+.rv-composer {
+  position: sticky; bottom: calc(-1 * var(--sp-8)); z-index: var(--z-raised);
+  display: grid; gap: var(--sp-2); margin-top: var(--sp-3); padding: var(--sp-3) 0 var(--sp-2);
+  background: var(--ink-1); border-top: 1px solid var(--line-1);
+}
+.rv-in {
+  display: flex; align-items: center; gap: var(--sp-2); padding-block: var(--sp-1); padding-inline: var(--sp-3) var(--sp-1);
+  background: var(--ink-2); border: 1px solid var(--line-1); border-radius: var(--r-pill);
+}
+.rv-in:focus-within { box-shadow: var(--ring-focus); }
+.rv-in input { flex: 1; min-width: 0; padding: 0; background: transparent; border: 0; color: var(--text-1); font: inherit; font-size: var(--fs-sm); }
+.rv-in input:focus-visible { outline: none; }
+.rv-send {
+  flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  background: var(--here-bg); color: var(--here-ink); border-color: transparent;
+}
+.rv-composer.is-busy .rv-send { opacity: .4; pointer-events: none; }
+.rv-composer .ai-quota { margin: 0; text-align: center; }
+
+@media (pointer: coarse) {
+  .ai-back, .ai-icon, .rv-send { width: 44px; height: 44px; }
+  .ai-go, .rv-apply { min-height: 44px; }
+}
+
+/* ---- full screen: the tifo and the review, and nothing else ---- */
+@media (min-width: 900px) {
+  body.ai-full > header, body.ai-full > footer, body.ai-full .tool-rail, body.ai-full .tool-bar, body.ai-full .panel-head { display: none; }
+  body.ai-full[data-panel-mode="ai"] .panel { width: 440px; flex-basis: 440px; }
+}
+/* On a phone the sheet is the full screen already. */
+@media (max-width: 899px) {
+  #ai-full { display: none; }
+  .rv-composer { bottom: 0; }
+}

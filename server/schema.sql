@@ -287,7 +287,7 @@ CREATE TABLE IF NOT EXISTS ai_events (
   id      BIGSERIAL PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- null = admin/unlocked
   at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' | 'cutout' (polish and photo: failures only until Oct 2026)
+  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' | 'cutout' | 'critique' | 'chat' (polish and photo: failures only until Oct 2026)
   outcome TEXT NOT NULL      -- model | cache | quick | quota | busy | blocked | invalid
 );
 CREATE INDEX IF NOT EXISTS ai_events_at_idx      ON ai_events (at DESC);

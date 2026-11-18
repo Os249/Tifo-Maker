@@ -279,6 +279,76 @@ export class DesignStore {
   }
 
   /**
+   * Replace the palette as ONE UNDO STEP, without touching a seat: every index
+   * keeps its seats and shows the new colour. An AI design's colours, a colour
+   * a suggested fix adds: undo puts the old colours back. (`setPalette` is for
+   * loading a design, where there is nothing to go back to.) Inside `group()`
+   * it joins the seats and layers changed with it.
+   */
+  changePalette(palette: string[]): void {
+    const next = palette.slice(0, DesignStore.MAX_COLORS);
+    const prev = this.palette;
+    if (next.length === 0 || (next.length === prev.length && next.every((c, i) => c === prev[i]))) return;
+    this.palette = next;
+    this.push({
+      t: 'paint',
+      diff: { indices: new Uint32Array(0), before: new Uint8Array(0), after: new Uint8Array(0) },
+      objs: null,
+      palette: { before: prev, after: next },
+    });
+    for (const fn of this.paletteListeners) fn();
+    this.notify('all');
+  }
+
+  /**
+   * Repaint by palette index: every seat and every layer showing index i shows
+   * `remap[i]` instead (an index the map leaves out is kept). One undo step.
+   * The palette itself is not changed, so merging two colours leaves a swatch
+   * with no seats rather than renumbering the design.
+   */
+  remapIndices(remap: readonly number[]): void {
+    const to = (i: number): number => {
+      const v = remap[i];
+      return typeof v === 'number' && v >= 0 && v < this.palette.length ? v : i;
+    };
+    const full = this.palette.map((_, i) => to(i));
+    if (full.every((v, i) => v === i)) return;
+    const old = new Map<number, number>();
+    for (let i = 0; i < this.base.length; i++) {
+      if (this.locked && this.locked[i] === 1) continue;
+      const was = this.base[i];
+      const now = full[was] ?? was;
+      if (now !== was) {
+        old.set(i, was);
+        this.base[i] = now;
+      }
+    }
+    const objs = this.layers ? this.layers.remap(full) : null;
+    if (old.size === 0 && !objs) return;
+    const entries = [...old.entries()];
+    this.push({
+      t: 'paint',
+      diff: {
+        indices: new Uint32Array(entries.map(([i]) => i)),
+        before: new Uint8Array(entries.map(([, v]) => v)),
+        after: new Uint8Array(entries.map(([i]) => this.base[i])),
+      },
+      objs,
+    });
+    this.recompose('all');
+    this.notify('all');
+  }
+
+  /**
+   * The step an undo would take back now, as a token to compare: a caller that
+   * kept it after its own change knows later whether that change is still the
+   * last one (a fix card's own Undo). Null with nothing to undo.
+   */
+  get lastStep(): object | null {
+    return this.undoStack[this.undoStack.length - 1] ?? null;
+  }
+
+  /**
    * Seats that never take the tifo — a royal box, where nobody holds up a
    * card (see SeatZone.noTifo). Locked seats are cleared now and every write
    * path leaves them empty, so the design itself says so: the editor, the AI,

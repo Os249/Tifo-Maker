@@ -990,7 +990,24 @@ export function meterRetries(fn: (() => void) | null): void {
   retryMeter = fn;
 }
 
-type CallOpts = { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean };
+type CallOpts = {
+  system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean;
+  /** Claude only: the answer must fit this JSON schema (output_config.format). */
+  schema?: unknown;
+  /** Claude only: cache the system prompt, for instructions that never change between calls. */
+  cacheSystem?: boolean;
+};
+
+/**
+ * Ask Claude, and only Claude: no second provider behind it. AI Critique's
+ * answer is held to a schema and its instructions are cached, which are both
+ * Claude's own features, so a fallback model would be answering a different
+ * request. With no Claude key it says so, like any provider that is not set up.
+ */
+export async function askClaude(prompt: string, opts: CallOpts = {}): Promise<ProviderResult> {
+  if (!process.env.ANTHROPIC_API_KEY) return { spec: null, error: 'no AI provider configured', usage: zeroUsage() };
+  return callProvider(prompt, opts, { provider: 'anthropic' });
+}
 
 /**
  * One call's time limit. Premium runs a bigger model on a longer prompt, and
@@ -1125,9 +1142,15 @@ async function callOne(provider: AiProvider, prompt: string, opts: CallOpts, mod
       const headers = { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01' };
       const effort = claudeEffort(tier);
       const thinking = claudeThinking(model, tier, effort);
-      const base = { model, max_tokens: claudeMaxTokens(), system, messages: [{ role: 'user', content: anthropicContent(user, opts.image) }] };
+      const base = {
+        model,
+        max_tokens: claudeMaxTokens(),
+        system: opts.cacheSystem ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system,
+        messages: [{ role: 'user', content: anthropicContent(user, opts.image) }],
+      };
+      const format = opts.schema ? { format: { type: 'json_schema', schema: opts.schema } } : {};
       const started = Date.now();
-      let res = await postJson('https://api.anthropic.com/v1/messages', headers, { ...base, output_config: { effort }, ...(thinking ? { thinking } : {}) }, timeoutMs);
+      let res = await postJson('https://api.anthropic.com/v1/messages', headers, { ...base, output_config: { effort, ...format }, ...(thinking ? { thinking } : {}) }, timeoutMs);
       let spent = zeroUsage();
       // A model that does not take the effort or thinking setting (an older
       // id in AI_CLAUDE_MODEL_*) says so with a 400. Losing the setting is far
@@ -1141,6 +1164,8 @@ async function callOne(provider: AiProvider, prompt: string, opts: CallOpts, mod
         if ((noThinking || noEffort) && !/credit balance|usage limits/i.test(body)) {
           spent = { ...zeroUsage(), calls: 1 };
           retryMeter?.();
+          // A refused schema goes with the effort setting: the answer is still asked
+          // for as JSON in the instructions, and is checked field by field either way.
           const again = { ...base, ...(noEffort ? {} : { output_config: { effort } }), ...(thinking && !noThinking ? { thinking } : {}) };
           res = await postJson('https://api.anthropic.com/v1/messages', headers, again, Math.max(5000, timeoutMs - (Date.now() - started)));
         }

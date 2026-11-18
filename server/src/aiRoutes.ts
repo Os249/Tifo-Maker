@@ -31,7 +31,9 @@ import { refineSpec } from '../../src/core/specRefine';
 import { composeSuperOffline } from '../../src/core/promptDesigner';
 import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
-import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries, providerModel, type ProviderResult } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, askClaude, clubHintLine, writeCopy, copyLine, meterRetries, providerModel, type ProviderResult } from './aiProvider';
+import { REVIEW_LIMITS, REVIEW_SCHEMA, REVIEW_SYSTEM, chatMessage, plainLine, readFixContext, readReviewAnswer, readTurns, reviewMessage, type ReviewLang } from './aiReview';
+import type { FixContext } from '../../src/core/fixParse';
 import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
 import { cleanColours, cleanName } from '../../src/core/kitRules';
 
@@ -53,7 +55,7 @@ import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
 import { sniffImage } from './imageMeta';
 import type { Allowance, Holding, ProService, Ticket } from './pro';
-import type { PlanKind } from './proPlan';
+import { FREE_WINDOWS, PLAN_WINDOWS, type PlanKind, type Window } from './proPlan';
 import { cutoutConfigured, cutoutForDesign, cutoutPicture, CUTOUT_MODEL, CUTOUT_PRICE_USD, MAX_CUTOUT_BYTES } from './cutout';
 
 const MAX_PROMPT = 400;
@@ -487,7 +489,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   //    50 runs from one free account cost 50 paid pictures and 50 model calls
   //    against AI_DAILY_BUDGET and used 0 of its 10 an hour (audit round five).
   //    After this many in a day, an incomplete run is charged like any other.
-  const PREMIUM_SIDE_PER_DAY = { photo: 24, polish: 30, picture: 60, uncharged: 20 } as const;
+  const PREMIUM_SIDE_PER_DAY = { photo: 24, polish: 30, picture: 60, uncharged: 20, critique: 3, chat: 20 } as const;
   const sideUse = new Map<string, number>();
   const takeSide = (a: Access, kind: keyof typeof PREMIUM_SIDE_PER_DAY, n: number): boolean => {
     if (a.kind !== 'user' || a.pro) return true;
@@ -591,18 +593,21 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   app.get('/api/ai/quota', async (req, reply) => {
     const access = await baseAccess(req);
     if (access.kind === 'deny') {
-      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
+      // What signing in (or verifying) would give, so the panel can say it.
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true, limits: reviewLimits });
     }
     if (access.kind !== 'user' || isUnlimited(access)) {
-      return { unlimited: true, used: 0, limit: 0, remaining: 999999, resetInSec: 0, provider: activeProvider() };
+      return { unlimited: true, used: 0, limit: 0, remaining: 999999, resetInSec: 0, provider: activeProvider(), review: null, limits: reviewLimits };
     }
+    // AI Critique's own counters, for every account (see runReview).
+    const review = await reviewQuota(access, await reviewHolding(access)).catch(() => null);
     const pf = await proFor(access);
     if (pf && deps.pro) {
       const allowances = await deps.pro.allowances(access.userId, pf);
-      return { unlimited: false, ...quotaFrom(allowances.std, pf.plan), allowances, provider: activeProvider() };
+      return { unlimited: false, ...quotaFrom(allowances.std, pf.plan), allowances, provider: activeProvider(), review, limits: reviewLimits };
     }
     const usage = await deps.aiUsage.get(access.userId, deps.freeLimit);
-    return { unlimited: false, ...usage, resetInSec: secondsToNextPeriod(), provider: activeProvider() };
+    return { unlimited: false, ...usage, resetInSec: secondsToNextPeriod(), provider: activeProvider(), review, limits: reviewLimits };
   });
 
   app.post('/api/ai/generate', deps.routeConfig ?? {}, async (req, reply) => {
@@ -1006,6 +1011,166 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // failure rate, or what Polish costs, had no denominator.
     note(access, 'polish', 'model', undefined, spent);
     return reply.code(200).send({ spec, source, notes, ...(pf && polishLeft ? { quota: quotaFrom(polishLeft, pf.plan) } : {}) });
+  });
+
+  // ---- AI Critique (aiReview.ts) ----
+  // A review of the design in hand, and follow-up messages about it. The
+  // critic answers with typed fixes the browser applies one at a time; this
+  // server never changes a design. Both run on Claude and nothing else
+  // (askClaude): the answer is held to a schema and the instructions cached.
+  //
+  // Each has a counter of its own, 'critique' and 'chat', that never draws
+  // from the AI designs': kept in pro_allowance for every signed-in account,
+  // whether or not Pro is switched on for it (an account Pro is off for is on
+  // the free plan here). One is taken before the model is asked and handed
+  // back unless an answer is delivered. Admin sessions and accounts on the
+  // old paid flag are not counted, as everywhere else in this file.
+  type ReviewKind = 'critique' | 'chat';
+  interface ReviewQuota { plan: PlanKind; critique: Allowance; chat: Allowance }
+  const monthOf = (w: Window[]): { period: 'day' | 'week' | 'month'; limit: number }[] =>
+    w.map((x) => ({ period: x.period === 'cycle' ? 'month' : x.period, limit: x.limit }));
+  /** What each plan gives, for a panel that has to say so before anyone is signed in. */
+  const reviewLimits = {
+    free: { std: monthOf(FREE_WINDOWS.std), critique: monthOf(FREE_WINDOWS.critique), chat: monthOf(FREE_WINDOWS.chat) },
+    pro: { std: monthOf(PLAN_WINDOWS.monthly.std), critique: monthOf(PLAN_WINDOWS.monthly.critique), chat: monthOf(PLAN_WINDOWS.monthly.chat) },
+  };
+  /** The plan a caller's reviews are counted on; null when they are not counted. */
+  const reviewHolding = async (a: Access): Promise<Holding | null> => {
+    if (!deps.pro || a.kind !== 'user' || a.pro) return null;
+    return a.live ? deps.pro.plan(a.userId) : { plan: 'free', pass: null };
+  };
+  const reviewQuota = async (a: Access, h: Holding | null): Promise<ReviewQuota | null> => {
+    if (!h || !deps.pro || a.kind !== 'user') return null;
+    const [critique, chat] = await Promise.all([deps.pro.allowance(a.userId, 'critique', h), deps.pro.allowance(a.userId, 'chat', h)]);
+    return { plan: h.plan, critique, chat };
+  };
+  /** The picture a review may carry: a PNG or JPEG that is what it says, of bounded size. Null: none, or not one. */
+  const reviewImage = (raw: unknown): string | null | 'bad' => {
+    if (raw === undefined || raw === null || raw === '') return null;
+    const m = typeof raw === 'string' ? /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/.exec(raw) : null;
+    if (!m) return 'bad';
+    const bytes = Buffer.from(m[2], 'base64');
+    if (bytes.length < 64 || bytes.length > REVIEW_LIMITS.imageBytes || sniffImage(bytes) !== m[1]) return 'bad';
+    return raw as string;
+  };
+  const REVIEW_BODY = Math.ceil((REVIEW_LIMITS.imageBytes * 4) / 3) + 64 * 1024;
+
+  /**
+   * One review or one chat message, from a request already read. Everything
+   * the two share: the budget, the counter, the call, the check of the answer
+   * and the record.
+   */
+  const runReview = async (
+    req: FastifyRequest,
+    access: Exclude<Access, { kind: 'deny' }>,
+    kind: ReviewKind,
+    ask: { message: string; image?: string; ctx: FixContext },
+  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const startedAt = Date.now();
+    const h = await reviewHolding(access);
+    const quotaNow = async (): Promise<ReviewQuota | null> => reviewQuota(access, h).catch(() => null);
+    if (!process.env.ANTHROPIC_API_KEY) {
+      note(access, kind, 'busy', { reason: 'no_provider', detail: 'AI Critique runs on Claude: ANTHROPIC_API_KEY is not set' });
+      return { status: 503, body: { error: 'the AI review is not available right now', reason: 'busy', cause: publicCause('no_provider'), review: await quotaNow() } };
+    }
+    await budgetReady();
+    if (premiumExhausted()) {
+      note(access, kind, 'busy', budgetFailure());
+      return { status: 503, body: { error: 'the AI is resting for today', reason: 'busy', cause: publicCause('budget'), retryAfterSec: busyRetrySec(), review: await quotaNow() } };
+    }
+    let ticket: Ticket | null = null;
+    if (h && deps.pro && access.kind === 'user') {
+      const t = await deps.pro.take(access.userId, kind, h);
+      if (!t.ok) {
+        note(access, kind, 'quota');
+        return { status: 429, body: { error: kind === 'chat' ? 'chat messages used up for now' : 'reviews used up for now', reason: 'quota', kind, plan: h.plan, review: await quotaNow() } };
+      }
+      ticket = t.ticket;
+    } else if (!takeSide(access, kind, 1)) {
+      // No allowance store (a test, an older wiring): the account's daily share, in memory.
+      note(access, kind, 'quota');
+      return { status: 429, body: { error: 'used up for today', reason: 'quota', kind, review: null } };
+    }
+    const giveBack = async (): Promise<void> => {
+      if (ticket && access.kind === 'user' && deps.pro) await deps.pro.giveBack(access.userId, ticket).catch(() => {});
+      ticket = null;
+    };
+    notePremiumCall();
+    // The review on the premium tier; chat on the fast one, at about a
+    // twentieth of the price (AI_REVIEW_CHAT_TIER=premium for the bigger model).
+    const tier: 'fast' | 'premium' = kind === 'critique' || process.env.AI_REVIEW_CHAT_TIER === 'premium' ? 'premium' : 'fast';
+    const res = await askClaude(ask.message, { system: REVIEW_SYSTEM, cacheSystem: true, schema: REVIEW_SCHEMA, image: ask.image, raw: true, tier })
+      .catch((e): ProviderResult => ({ spec: null, error: String(e), usage: zeroUsage() }));
+    const spent: Spent = { usage: res.usage ?? zeroUsage(), model: res.model, startedAt };
+    const answer = res.spec ? readReviewAnswer(res.spec, ask.ctx, { chat: kind === 'chat' }) : null;
+    if (!answer) {
+      await giveBack();
+      const fail: AiFailure = res.spec
+        ? { reason: 'invalid_design', detail: sanitizeDetail(`${res.model ?? '?'}: the review's answer had nothing usable in it`) }
+        : failureOf(res, 'the model did not answer', providerModel('anthropic', tier));
+      req.log.warn({ kind, reason: fail.reason, detail: fail.detail, model: res.model }, 'ai review: could not deliver');
+      note(access, kind, 'busy', fail, spent);
+      // 503, never 502 or 504: Cloudflare replaces those with a page of its own.
+      return { status: 503, body: { error: 'the AI review did not answer', reason: 'busy', cause: publicCause(fail.reason), review: await quotaNow() } };
+    }
+    // A review that could only ask what the tifo is about has reviewed
+    // nothing: it is answered, and not counted.
+    const onlyAsked = kind === 'critique' && !answer.intent.sure && !answer.fixes.length && !answer.ideas.length;
+    if (onlyAsked) await giveBack();
+    note(access, kind, 'model', undefined, spent);
+    return { status: 200, body: { ...answer, counted: !onlyAsked && access.kind === 'user' && !!h, review: await quotaNow() } };
+  };
+
+  /** The parts a review and a chat message both carry. */
+  const readReviewBody = (b: Record<string, unknown>): { design: string; lang: ReviewLang; intent: string; ctx: FixContext } | null => {
+    const design = plainLine(b.design, REVIEW_LIMITS.design);
+    const ctx = readFixContext(b.ctx);
+    if (!design || !ctx) return null;
+    return { design, lang: b.lang === 'ar' ? 'ar' : 'en', intent: plainLine(b.intent, REVIEW_LIMITS.intent).replace(/\n/g, ' '), ctx };
+  };
+
+  app.post('/api/ai/review', { ...(deps.routeConfig ?? {}), bodyLimit: REVIEW_BODY }, async (req, reply) => {
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
+    }
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const body = readReviewBody(b);
+    if (!body) return reply.code(400).send({ error: 'a design and what it holds are required' });
+    const image = reviewImage(b.image);
+    if (image === 'bad') return reply.code(400).send({ error: 'image must be a PNG or JPEG data URL of at most 600 KB' });
+    const out = await runReview(req, access, 'critique', {
+      message: reviewMessage({ design: body.design, lang: body.lang, intent: body.intent || undefined }),
+      ...(image ? { image } : {}),
+      ctx: body.ctx,
+    });
+    return reply.code(out.status).header('cache-control', 'no-store').send(out.body);
+  });
+
+  app.post('/api/ai/review/chat', deps.routeConfig ?? {}, async (req, reply) => {
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
+    }
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const body = readReviewBody(b);
+    const message = plainLine(b.message, REVIEW_LIMITS.message).replace(/\n/g, ' ');
+    if (!body || !message) return reply.code(400).send({ error: 'a design and a message are required' });
+    // The same first screen as a design brief: a clearly harmful message never reaches the model.
+    const safe = screenPrompt(message);
+    if (!safe.ok) {
+      note(access, 'chat', 'blocked', { reason: 'prompt_screen', detail: `matched the "${safe.rule}" list of the prompt screen` });
+      return reply.code(400).send({ error: safe.message, reason: 'blocked' });
+    }
+    const out = await runReview(req, access, 'chat', {
+      message: chatMessage({
+        design: body.design, lang: body.lang, intent: body.intent || undefined,
+        fixesSoFar: plainLine(b.fixes, REVIEW_LIMITS.fixesSoFar).replace(/\n/g, ' ') || undefined,
+        turns: readTurns(b.history), message,
+      }),
+      ctx: body.ctx,
+    });
+    return reply.code(out.status).header('cache-control', 'no-store').send(out.body);
   });
 
   // Read a photo of a real ground and report the categorical facts the bowl

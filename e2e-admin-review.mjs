@@ -121,6 +121,8 @@ const readCard = (p) => p.evaluate(() => ({
   const p = await newPage([['tifo_lang_v1', 'ar'], ['tifo_ai_unlock_v1', unlock]]);
   await p.goto(`${B}/app?new=1`, { waitUntil: 'networkidle' });
   await p.click('#rail-ai');
+  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   await p.fill('#ai-prompt', 'نسر ذهبي على المدرج الجنوبي');
   // (Whole stadium is the only AI path since 29 Oct 2026; its box is gone.)
   await p.click('#ai-generate');
@@ -139,6 +141,8 @@ const readCard = (p) => p.evaluate(() => ({
   const p = await newPage([['tifo_lang_v1', 'en'], ['tifo_ai_unlock_v1', unlock]]);
   await p.goto(`${B}/app?new=1`, { waitUntil: 'networkidle' });
   await p.click('#rail-ai');
+  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   await p.fill('#ai-prompt', 'Giant eagle on the south stand');
   await p.click('#ai-generate');
   await p.waitForSelector('#ai-state:not([hidden])', { timeout: 60000 });

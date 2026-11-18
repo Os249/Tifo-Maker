@@ -354,7 +354,41 @@
         </div>
 
         <div class="panel-section ctx-hidden" id="ctx-ai" data-panel="__menu_only__" data-menu="ai" style="display:none">
-          <h4><span data-i18n="ed.ai.title">AI Designer</span> <span class="h4-tag" data-i18n="ed.ai.tag">describe it, get a tifo</span></h4>
+          <!-- One home for both AI tools (ui/aiDrawer.ts). The tab opens on two
+               doors: Create replaces what is on the stands, Review keeps it and
+               suggests fixes. Each says so, and carries its own counter, before
+               anything is spent. -->
+          <div id="ai-home" class="ai-home">
+            <h4><span data-i18n="ai.home.title">AI</span> <span class="h4-tag" data-i18n="ai.home.tag">two tools</span></h4>
+            <div id="ai-gate" aria-live="polite"></div>
+            <div class="ai-doors">
+              <section class="ai-door" id="ai-door-create">
+                <h5><i class="ti ti-sparkles" aria-hidden="true"></i> <span data-i18n="ai.door.create">Create a new tifo</span></h5>
+                <p data-i18n="ai.door.createBody">Describe it, and the AI designs a whole tifo on the stands.</p>
+                <p class="ai-door-what"><i class="ti ti-refresh" aria-hidden="true"></i> <span data-i18n="ai.door.createWhat">Replaces what is on the stands. You can undo it.</span></p>
+                <div class="ai-door-foot">
+                  <span class="ai-count" id="ai-count-create" hidden></span>
+                  <button id="ai-open-create" class="ai-go" type="button" data-i18n="ai.door.createGo">Start a design</button>
+                </div>
+              </section>
+              <section class="ai-door" id="ai-door-review">
+                <h5><i class="ti ti-eye" aria-hidden="true"></i> <span data-i18n="ai.door.review">Review my tifo</span></h5>
+                <p data-i18n="ai.door.reviewBody">The AI looks at the tifo you have and suggests fixes. You choose what is applied.</p>
+                <p class="ai-door-what"><i class="ti ti-shield-check" aria-hidden="true"></i> <span data-i18n="ai.door.reviewWhat">Your tifo stays as it is until you press Apply.</span></p>
+                <div class="ai-door-foot">
+                  <span class="ai-count" id="ai-count-review" hidden></span>
+                  <button id="ai-open-review" class="ai-go" type="button" data-i18n="ai.door.reviewGo">Open the review</button>
+                </div>
+              </section>
+            </div>
+            <p id="ai-home-foot" class="ai-home-foot" hidden></p>
+          </div>
+          <div id="ai-create" hidden>
+            <div class="ai-head">
+              <button id="ai-back-create" class="ai-back" type="button" aria-label="Back to the two AI tools" data-i18n-attr="aria-label:ai.back"><i class="ti ti-arrow-right" aria-hidden="true"></i></button>
+              <h4><span data-i18n="ed.ai.title">AI Designer</span></h4>
+              <span class="ai-count" id="ai-pill-create" hidden></span>
+            </div>
           <p class="hint note" data-i18n="ed.ai.hint">Describe a display in plain words: a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.</p>
           <textarea id="ai-prompt" class="ai-input" rows="3" maxlength="400" placeholder="e.g. Giant eagle covering the south stand in black and gold" data-i18n-attr="placeholder:ed.ai.placeholder"></textarea>
           <div class="chips" id="ai-examples" style="margin-top:8px;flex-wrap:wrap;">
@@ -399,9 +433,29 @@
               <button id="ai-regen" class="grow"><i class="ti ti-refresh"></i> <span data-i18n="ed.ai.regen">Regenerate</span></button>
               <button id="ai-revert" title="Restore the canvas from before this design" data-i18n="ed.ai.revert" data-i18n-attr="title:ed.ai.revertT">Revert</button>
             </div>
-            <button id="ai-polish" style="width:100%;margin-top:8px;" title="Render the design and ask the AI to fix legibility and balance" data-i18n-attr="title:ed.ai.polishT"><i class="ti ti-wand"></i> <span data-i18n="ed.ai.polish">Polish with AI critique</span></button>
           </div>
           <p id="ai-quota" class="ai-quota"></p>
+          </div>
+          <div id="ai-review" hidden>
+            <div class="ai-head">
+              <button id="ai-back-review" class="ai-back" type="button" aria-label="Back to the two AI tools" data-i18n-attr="aria-label:ai.back"><i class="ti ti-arrow-right" aria-hidden="true"></i></button>
+              <h4><span data-i18n="ai.door.review">Review my tifo</span></h4>
+              <span class="ai-count" id="ai-pill-review" hidden></span>
+              <button id="ai-full" class="ai-icon" type="button" aria-pressed="false" aria-label="Full screen" title="Full screen" data-i18n-attr="aria-label:ai.full.on,title:ai.full.on"><i class="ti ti-maximize" aria-hidden="true"></i></button>
+            </div>
+            <div id="rv-body" class="rv-body"></div>
+            <form id="rv-composer" class="rv-composer" autocomplete="off">
+              <div class="rv-sugg" id="rv-sugg">
+                <button class="chip" type="button" data-ask data-i18n="ai.chat.s1">What would suit a derby?</button>
+                <button class="chip" type="button" data-ask data-i18n="ai.chat.s2">Make the slogan stronger</button>
+              </div>
+              <div class="rv-in">
+                <input id="rv-input" type="text" name="message" maxlength="400" enterkeyhint="send" spellcheck="true" aria-label="Ask about your tifo" placeholder="Ask about your tifo…" data-i18n-attr="aria-label:ai.chat.label,placeholder:ai.chat.ph">
+                <button id="rv-send" class="rv-send" type="submit" aria-label="Send" data-i18n-attr="aria-label:ai.chat.send"><i class="ti ti-arrow-big-up" aria-hidden="true"></i></button>
+              </div>
+              <p id="rv-chat-count" class="ai-quota"></p>
+            </form>
+          </div>
         </div>
 
         <!-- Everything about the banner that is not the art itself: the tool

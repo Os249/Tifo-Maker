@@ -41,6 +41,7 @@ import { currentCredit } from './creditLine';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
+import { mountAiDrawer } from './aiDrawer';
 import { mountAiPanel } from './aiPanel';
 import {
   createLocal, getLocal, keysFor, openUrl, purgeLocal, stashNewProject,
@@ -491,6 +492,16 @@ export function mountToolbar(
    * (busy, out of premium) and the Quick Designer. Then it is kept.
    */
   let aiNaming: { autoName: boolean } | null = null;
+  // Both AI tools' home (ui/aiDrawer.ts): the two doors, their counters, and AI Critique.
+  const aiDrawer = mountAiDrawer({
+    root, store, objects, map, editor,
+    title: () => docTitle?.value ?? '',
+    stadium: () => tl(map.templateRef.id),
+    refresh: () => panelRefresh(),
+  });
+  // Anything that types a brief for the designer (the AI bar, a project made
+  // with "Generate with AI") shows the designer, whichever door was open.
+  document.getElementById('ai-generate')?.addEventListener('click', () => aiDrawer.show('create'), { capture: true });
   const aiPanel = mountAiPanel({
     root, store, editor, map, objects, composer, getPreview, refresh: panelRefresh,
     onApplied: (spec) => {

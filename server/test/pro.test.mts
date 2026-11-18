@@ -121,9 +121,13 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     assert.ok(PLAN_WINDOWS.monthly[k].some((w) => w.period === 'cycle'), `${k}: Pro has a month's ceiling`);
   }
   // A member who uses every last one stays near the ~$2.50 a month the plan allows for.
-  const cost = { std: 0.022, polish: 0.013, photo: 0.04, cutout: 0.018 };
+  const cost = { std: 0.022, polish: 0.013, photo: 0.04, cutout: 0.018, critique: 0.018, chat: 0.0007 };
   const month = (k: keyof typeof cost) => (PLAN_WINDOWS.monthly[k].find((w) => w.period === 'cycle')?.limit ?? 0) * cost[k];
   assert.ok(month('std') + month('polish') + month('photo') + month('cutout') <= 2.5, 'the most one month of Pro can cost');
+  // With AI Critique (measured 18 Nov 2026: a review $0.018, a chat message $0.0007 on the
+  // small model), every ceiling together stays under $3.50 of the SAR 19 (about $5).
+  assert.ok(month('critique') + month('chat') <= 1, 'reviews and messages: under a dollar a month');
+  assert.ok(month('std') + month('polish') + month('photo') + month('cutout') + month('critique') + month('chat') <= 3.5, 'the most one month of Pro can cost, reviews included');
   // On sale, Pro always gives more designs than Free, by the day and by the month.
   if (AI_ON_PRO) assert.ok(PLAN_WINDOWS.monthly.std[0].limit > FREE_WINDOWS.std[0].limit && PLAN_WINDOWS.monthly.std[1].limit > FREE_WINDOWS.std[1].limit);
   assert.equal(OFFER.monthly.price, 19);

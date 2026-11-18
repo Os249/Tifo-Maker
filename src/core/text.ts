@@ -95,6 +95,9 @@ export function arcLayout(widths: number[], glyphH: number, theta: number): ArcL
   return { glyphs, width, height };
 }
 
+/** The thickest outline a text layer takes, in seats (core/objects.ts TextOutline). */
+export const MAX_OUTLINE_SEATS = 8;
+
 export interface RenderedText {
   canvas: HTMLCanvasElement;
   /** Pixel height of the letterforms (ascent + descent) — the sizing anchor. */
@@ -107,8 +110,8 @@ export interface RenderedText {
  * fattens the glyph, and a fattened copy stamped under a plain one is what reads
  * as an outline once the two are given different palette colours.
  */
-function paintRun(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, strokePx: number): void {
-  if (strokePx > 0) {
+function paintRun(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, strokePx: number, fillOnly = false): void {
+  if (strokePx > 0 && !fillOnly) {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = strokePx * 2;
     ctx.lineJoin = 'round';
@@ -120,9 +123,12 @@ function paintRun(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
 
 /**
  * White-on-transparent text; straight or arched by arcDeg (±170°).
- * `strokePx` fattens the letterforms — see paintRun.
+ * `strokePx` fattens the letterforms — see paintRun. `fillOnly` leaves the
+ * room the fattening needs and paints the plain letters in it, so the plain
+ * copy and the fattened one are the same size and sit exactly over each other
+ * (a text layer's outline, core/objects.ts).
  */
-export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0, strokePx = 0): RenderedText | null {
+export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0, strokePx = 0, fillOnly = false): RenderedText | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   const px = 128;
@@ -144,7 +150,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0, stro
     ctx.font = font;
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#ffffff';
-    paintRun(ctx, trimmed, pad, pad + ascent, strokePx);
+    paintRun(ctx, trimmed, pad, pad + ascent, strokePx, fillOnly);
     return { canvas, glyphHeight };
   }
 
@@ -155,7 +161,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0, stro
   // text engine do joining + bidi), then bend the resulting pixels along the arc
   // as vertical slices. This preserves correct text for any script.
   if (needsWholeStringShaping(trimmed)) {
-    return arcByWarp(trimmed, font, ascent, glyphHeight, (clamped * Math.PI) / 180, strokePx);
+    return arcByWarp(trimmed, font, ascent, glyphHeight, (clamped * Math.PI) / 180, strokePx, fillOnly);
   }
 
   const chars = [...trimmed];
@@ -174,7 +180,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0, stro
     ctx.translate(g.x, g.y);
     ctx.rotate(g.rotation);
     // Baseline sits (ascent − descent)/2 below the glyph's vertical center.
-    paintRun(ctx, chars[i], -widths[i] / 2, (ascent - descent) / 2, strokePx);
+    paintRun(ctx, chars[i], -widths[i] / 2, (ascent - descent) / 2, strokePx, fillOnly);
     ctx.restore();
   }
   return { canvas, glyphHeight };
@@ -200,6 +206,7 @@ function arcByWarp(
   glyphH: number,
   theta: number,
   strokePx = 0,
+  fillOnly = false,
 ): RenderedText {
   const pad = 4 + strokePx;
   const flat = document.createElement('canvas');
@@ -212,7 +219,7 @@ function arcByWarp(
   fctx.font = font;
   fctx.textBaseline = 'alphabetic';
   fctx.fillStyle = '#ffffff';
-  paintRun(fctx, text, pad, pad + ascent, strokePx);
+  paintRun(fctx, text, pad, pad + ascent, strokePx, fillOnly);
 
   const total = flatW;
   const radius = total / Math.abs(theta);

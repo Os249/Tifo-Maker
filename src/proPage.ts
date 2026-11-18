@@ -438,7 +438,7 @@ function limitHtml(l: PlanLimits[AllowanceKind] | undefined): string {
   return l.map((w) => `<span>${escapeHtml(tv(`pp.per.${w.period}`, { n: w.limit }))}</span>`).join('');
 }
 
-const ROWS: AllowanceKind[] = ['std', 'polish', 'cutout', 'photo'];
+const ROWS: AllowanceKind[] = ['std', 'critique', 'cutout', 'photo'];
 
 /** What only Pro has, in the order the Pro column lists it. */
 const PERK_ROWS = ['pp.row.mark', 'pp.row.video', 'pp.row.poster', 'pp.row.styles', 'pp.row.fonts', 'pp.row.led', 'pp.row.kit', 'pp.row.badge'];

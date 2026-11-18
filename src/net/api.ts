@@ -1757,6 +1757,25 @@ export interface AiQuota {
   plan?: ProPlan;
   /** From GET /api/ai/quota, with live: every allowance at once. */
   allowances?: Record<AllowanceKind, Allowance>;
+  /**
+   * AI Critique's own counters, for every signed-in account whether or not
+   * Pro is on for it. Null: not counted (an admin session).
+   */
+  review?: ReviewQuota | null;
+  /** What each plan gives, so a panel can say it before anything is spent. */
+  limits?: AiLimits;
+}
+
+/** A review and a chat message each have a counter; neither draws from the AI designs'. */
+export interface ReviewQuota {
+  plan: ProPlan;
+  critique: Allowance;
+  chat: Allowance;
+}
+type LimitWindows = { period: 'day' | 'week' | 'month'; limit: number }[];
+export interface AiLimits {
+  free: { std: LimitWindows; critique: LimitWindows; chat: LimitWindows };
+  pro: { std: LimitWindows; critique: LimitWindows; chat: LimitWindows };
 }
 
 export interface AiGenerateResult {
@@ -1815,6 +1834,8 @@ export interface AiError extends Error {
   locked?: boolean;
   /** Why access was denied: 'signin', 'verify' (email), or 'quota' (limit reached). */
   reason?: 'signin' | 'verify' | 'quota';
+  /** With a refused quota: what an account would get (the panel says it while signed out). */
+  limits?: AiLimits;
 }
 
 /**
@@ -1903,9 +1924,80 @@ export async function fetchAiQuota(): Promise<AiQuota> {
     err.status = res.status;
     err.locked = data?.locked;
     err.reason = data?.reason;
+    err.limits = data?.limits;
     throw err;
   }
   return data as AiQuota;
+}
+
+// ------------------------------------------------------- AI Critique ---
+// A review of the design in hand and follow-up messages about it
+// (server/src/aiReview.ts). The server answers with typed fixes; this file
+// only carries them. Each is checked again against the live design before it
+// is applied (core/fixOps.ts).
+
+/** One fix as the server sent it: `op` is checked with parseFixOp before use. */
+export interface ReviewFixWire { id: string; why: string; op: unknown }
+export interface ReviewAnswer {
+  intent: { summary: string; sure: boolean; question: string | null };
+  reply: string | null;
+  fixes: ReviewFixWire[];
+  ideas: { text: string; brief: string }[];
+  /** Whether this used one of the account's reviews or messages. */
+  counted?: boolean;
+  review?: ReviewQuota | null;
+}
+/** Why a review did not come, in terms the panel acts on. */
+export interface ReviewRefusal {
+  ok: false;
+  status: number;
+  /** 'signin' | 'verify' (who may ask), 'quota' (used up), 'blocked' (the prompt screen), 'busy' (try again), 'offline'. */
+  reason: 'signin' | 'verify' | 'quota' | 'blocked' | 'busy' | 'offline' | 'failed';
+  cause?: AiCause;
+  message?: string;
+  review?: ReviewQuota | null;
+}
+export type ReviewResult = ({ ok: true } & ReviewAnswer) | ReviewRefusal;
+
+export interface ReviewRequest {
+  design: string;
+  lang: 'en' | 'ar';
+  ctx: unknown;
+  intent?: string;
+  image?: string;
+}
+
+async function postReview(path: string, body: unknown, signal?: AbortSignal): Promise<ReviewResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, { method: 'POST', headers: aiHeaders(true), body: JSON.stringify(body), signal });
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') throw e;
+    return { ok: false, status: 0, reason: 'offline' };
+  }
+  const data = (await res.json().catch(() => null)) as (ReviewAnswer & { error?: string; reason?: string; cause?: AiCause }) | null;
+  if (res.ok && data && Array.isArray(data.fixes) && Array.isArray(data.ideas) && data.intent) return { ok: true, ...data };
+  const r = data?.reason;
+  const reason: ReviewRefusal['reason'] =
+    r === 'signin' || res.status === 401 ? 'signin'
+      : r === 'verify' ? 'verify'
+        : r === 'quota' || res.status === 429 ? 'quota'
+          : r === 'blocked' ? 'blocked'
+            : r === 'busy' || res.status === 503 ? 'busy' : 'failed';
+  return {
+    ok: false, status: res.status, reason, cause: data?.cause, review: data?.review,
+    ...(reason === 'blocked' && data?.error ? { message: await tErrLater(data.error) } : {}),
+  };
+}
+
+/** Ask for a review of the design in hand. */
+export function reviewAiTifo(req: ReviewRequest, signal?: AbortSignal): Promise<ReviewResult> {
+  return postReview('/ai/review', req, signal);
+}
+
+/** One follow-up message about the same design. */
+export function chatAiTifo(req: ReviewRequest & { message: string; history: { role: 'user' | 'ai'; text: string }[]; fixes?: string }, signal?: AbortSignal): Promise<ReviewResult> {
+  return postReview('/ai/review/chat', req, signal);
 }
 
 
@@ -1914,10 +2006,10 @@ export async function fetchAiQuota(): Promise<AiQuota> {
 // Nothing a page sends can change a plan, a limit or the gift.
 
 /** 'std' is an AI design: every design is the one whole-stadium pipeline, so there is no Super allowance. */
-export type AllowanceKind = 'std' | 'polish' | 'photo' | 'cutout';
+export type AllowanceKind = 'std' | 'polish' | 'photo' | 'cutout' | 'critique' | 'chat';
 /** One paid plan, a month of Pro; and the 7-day gift. */
 export type ProPlan = 'free' | 'monthly' | 'gift';
-const KINDS: readonly AllowanceKind[] = ['std', 'polish', 'photo', 'cutout'];
+const KINDS: readonly AllowanceKind[] = ['std', 'polish', 'photo', 'cutout', 'critique', 'chat'];
 const PLANS: readonly ProPlan[] = ['free', 'monthly', 'gift'];
 const isKind = (v: unknown): v is AllowanceKind => (KINDS as readonly unknown[]).includes(v);
 const isPlan = (v: unknown): v is ProPlan => (PLANS as readonly unknown[]).includes(v);

@@ -330,6 +330,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     syncGenLabel();
     learn(q);
     paintPro();
+    // The drawer's doors show this count too (ui/aiDrawer.ts).
+    window.dispatchEvent(new CustomEvent('tifo:ai-quota', { detail: q }));
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : t('err.aiSignIn');
     // Warn before the wall rather than at it: the last one of a weekly three
@@ -536,6 +538,10 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     let critique = null as ReturnType<typeof critiqueDesign> | null;
     store.group(() => {
       objects.clear(); // the last design's layers don't belong to a fresh generation
+      // The colours are part of the step: one undo puts back the seats, the
+      // layers AND the palette the canvas had (compileSpec's own setPalette is
+      // outside the history, so undo used to leave the old seats in new colours).
+      store.changePalette(working.palette);
       compileSpec(working, map, store);
 
       // Phase 4: deterministic critique of the rendered seats, with ONE bounded
@@ -621,11 +627,12 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
 
   const revert = (): void => {
     if (baselineCells === null || baselinePalette === null) return;
-    store.setPalette(baselinePalette);
+    const palette = baselinePalette;
     const base = baselineCells;
     const before = baselineObjects ?? [];
-    // The canvas as it was — its paint and its layers — as one undo step.
+    // The canvas as it was (its colours, its paint and its layers) as one undo step.
     store.group(() => {
+      store.changePalette(palette);
       objects.clear();
       store.paintBaseOnly(() => {
         store.beginStroke();
@@ -644,6 +651,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
 
   const run = async (prompt: string, opts: { engine?: 'offline' } = {}): Promise<void> => {
     if (busy) return;
+    // Whichever of the drawer's doors was open, a design in the making shows the designer.
+    window.dispatchEvent(new Event('tifo:ai-create'));
     const text = prompt.trim();
     if (!text) { setError(t('ai.card.describeFirst')); return; }
     if (!isSignedIn() && !aiUnlockToken()) {

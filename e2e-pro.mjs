@@ -168,6 +168,8 @@ console.log('\n— an account on the preview list —');
 {
   const { ctx, p } = await editor(fan.token, fan.design);
   await p.click('#rail-ai');
+  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   check('AI panel: the day\'s designs, counted', await waitFor(p, () => /^10 of 10 designs left today$/.test(document.getElementById('ai-quota')?.textContent || '')));
   // Whole stadium is the only AI path since 29 Oct 2026 (2e3d8f9): its box,
   // and the week's Super count and crown beside it, are gone, and the panel's
@@ -240,8 +242,8 @@ console.log('\n— an account on the preview list —');
   check('the gift sheet says when it would end', !!(await p.$('.pro-sheet .pro-when')));
   const perks = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-perks li')].map((l) => l.textContent));
   const listed = perks.some((x) => /cut-out/.test(x)) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /Super/.test(x));
-  if (AI_ON_PRO) check('…listing all of Pro: more AI and Polishes, the cut-out, clean exports, the video sizes, styles and fonts, the club kit', listed && perks.length === 8 && /More AI designs/.test(perks[0]) && perks.some((x) => /Polish/.test(x)), JSON.stringify(perks));
-  else check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or Polishes', listed && perks.length === 5 && !perks.some((x) => /AI designs|Polish|limit cards/.test(x)), JSON.stringify(perks));
+  if (AI_ON_PRO) check('…listing all of Pro: more AI designs and reviews, the cut-out, clean exports, the video sizes, styles and fonts, the club kit', listed && perks.length === 8 && /More AI designs/.test(perks[0]) && perks.some((x) => /AI reviews/.test(x)), JSON.stringify(perks));
+  else check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or reviews', listed && perks.length === 5 && !perks.some((x) => /AI designs|AI reviews|limit cards/.test(x)), JSON.stringify(perks));
   await p.click('.pro-sheet [data-act="start"]');
   check('Start runs the gift', await waitFor(p, () => /Your Pro gift is on/.test(document.querySelector('.pro-sheet h2')?.textContent || '')));
   const st = (await api('/api/pro', fan.token)).json;
@@ -273,8 +275,8 @@ console.log('\n— an account on the preview list —');
   }));
   check('…Pro with no price but the question, and every new perk in its column', !/SAR 19|USD 5 a month/.test(pp.pro) && /What would you pay for a month of Pro\?/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
   check('…Free: always free, a cut-out a week, none of Pro\'s perks', /1 a week/.test(pp.free) && /Always free/.test(pp.free), pp.free.slice(0, 300));
-  if (AI_ON_PRO) check('…AI designs and Polish rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /Polish/.test(pp.pro) && /Smart cut-out/.test(pp.pro));
-  else check('…no AI designs or Polish rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
+  if (AI_ON_PRO) check('…AI designs and AI reviews rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /AI reviews/.test(pp.pro) && !/Polish/.test(pp.pro) && /Smart cut-out/.test(pp.pro));
+  else check('…no AI designs or AI reviews rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|AI reviews|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
   check('…no Match Pass, Season Pass or group band', !/Match Pass|Season Pass/.test(pp.pro + pp.free) && !pp.group);
   await p.setViewportSize({ width: 390, height: 844 });
   await p.waitForTimeout(300);

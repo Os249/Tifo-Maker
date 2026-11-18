@@ -161,6 +161,12 @@ export class Editor {
       this.seats.cellsChanged(store.cells, indices);
       this.requestRender();
     });
+    // The colours too. Every caller that changed the palette used to have to
+    // remember to call rebuildPalette(), and two could not: an undo or redo
+    // of a step that carries a palette, and a suggested fix that adds a
+    // colour. The table is sent only if it differs, so a caller that still
+    // rebuilds by hand costs nothing.
+    store.onPaletteChange(() => this.rebuildPalette());
     // A lost context comes back empty: everything goes up again, and is drawn.
     app.canvas.addEventListener('webglcontextrestored', () => {
       this.seats.contextRestored();

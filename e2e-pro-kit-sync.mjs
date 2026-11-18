@@ -393,6 +393,8 @@ const studio = await device(fan.token);
     return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ needsChoice: true, reason: 'quota', kind: 'std', plan: 'free', retryAfterSec: 86400, quota: { admin: false, used: 10, limit: 10, remaining: 0, resetInSec: 86400, live: true, kind: 'std', period: 'day', resetAt, plan: 'free' } }) });
   });
   await p.click('#rail-ai');
+  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   check('the AI panel says "Using kit: Green Eagles"', await waitFor(p, () => /Using kit: Green Eagles/.test((document.querySelector('.qk-ai-kit:not([hidden])')?.textContent || '').replace(/[⁨⁩]/g, ''))));
   await p.locator('#ctx-ai').screenshot({ path: SHOTS ? join(SHOTS, 'kit-ai-chip.png') : '/tmp/kit-ai-chip.png' });
   await p.fill('#ai-prompt', 'An eagle over the north stand');
@@ -417,6 +419,8 @@ const studio = await device(fan.token);
   await open(p, away, 'sync_fan away');
   check('the project opens again with its kit still in use', await waitFor(p, () => !!window.__tifoClubKit.active(), null, 20000));
   await p.click('#rail-ai');
+  // The AI tab opens on its two doors (ui/aiDrawer.ts): this suite is about the designer.
+  await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
   check('…the AI panel says so again', await waitFor(p, () => !!document.querySelector('.qk-ai-kit:not([hidden])')));
 
   // Banners.

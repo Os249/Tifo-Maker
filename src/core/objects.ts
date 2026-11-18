@@ -4,12 +4,13 @@ import {
   type Grid, type GridJSON, cloneGrid, gridFromJSON, gridToJSON,
 } from './layers';
 import { cutoutBackground, enhanceForBake, halftoneCellFor, maskFromAlpha, quantizePixels, rasterize } from './importImage';
-import { fontCssOf, renderTextCanvas, type TifoFont } from './text';
+import { MAX_OUTLINE_SEATS, fontCssOf, renderTextCanvas, type TifoFont } from './text';
 import { isPortraitStyle, portraitStyleOf, posterizeByRank, stylePortrait, type PortraitStyle } from './portraitStyles';
 import { isFaceInfo, type FaceInfo } from './portraitPipeline';
 import { drawSymbol } from './symbols';
 import { isProVoice } from './proVoices';
 import { seatTextAlpha } from './seatText';
+import { EDITOR_UNITS } from './seatmap';
 
 /**
  * The layer stack's objects.
@@ -75,6 +76,50 @@ export interface TextObject extends BaseObject {
   arcDeg: number;
   /** Letterform height in seats — the sizing anchor (width derives from it). */
   heightSeats: number;
+  /**
+   * An outline: the letters once more, fattened by about `seats` seats, in
+   * another palette colour, under the plain ones. What makes words stand off
+   * a background close to their own colour. Absent: none. A Pro voice is
+   * drawn seat by seat (core/seatText) and takes no outline yet.
+   */
+  outline?: TextOutline;
+}
+
+export interface TextOutline {
+  colorIndex: number;
+  /** How far the outline reaches past the letters, in seats (1 to 8). */
+  seats: number;
+}
+
+export { MAX_OUTLINE_SEATS };
+
+/** Whether this text layer's outline is drawn (it has one, and its font takes one). */
+export function hasOutline(o: TifoObject): o is TextObject & { outline: TextOutline } {
+  return o.kind === 'text' && !!o.outline && o.outline.seats > 0 && !isProVoice(o.fontId);
+}
+
+/**
+ * An outline's reach in the pixels text is drawn at (renderTextCanvas sets
+ * letters about 120 px tall): the same share of the letters' height that
+ * `seats` is of `heightSeats`.
+ */
+export function outlineStrokePx(o: Pick<TextObject, 'heightSeats' | 'outline'>): number {
+  if (!o.outline || !(o.outline.seats > 0)) return 0;
+  return Math.max(1, Math.min(48, Math.round((o.outline.seats / Math.max(1, o.heightSeats)) * 120)));
+}
+
+/**
+ * The footprint of a text layer in editor units, for its words, font, arc,
+ * height in seats and outline: what the text tool gives a new layer, and what
+ * a layer must be given again when any of those change, so the letters stay
+ * the height they say they are. Browser only; null for empty text.
+ */
+export function textObjectSize(t: Pick<TextObject, 'text' | 'fontCss' | 'fontId' | 'arcDeg' | 'heightSeats' | 'outline'>): { width: number; height: number } | null {
+  const stroke = isProVoice(t.fontId) ? 0 : outlineStrokePx(t);
+  const r = renderTextCanvas(t.text, t.fontCss, t.arcDeg, stroke, true);
+  if (!r) return null;
+  const scale = (t.heightSeats * EDITOR_UNITS.rowPx) / r.glyphHeight;
+  return { width: r.canvas.width * scale, height: r.canvas.height * scale };
 }
 
 export interface ImageObject extends BaseObject {
@@ -414,6 +459,8 @@ export class ObjectLayer {
     };
     for (const o of this.objects) {
       o.colorIndex = remap[o.colorIndex] ?? o.colorIndex;
+      // A new object, never written in place: the snapshot above shares the old one.
+      if (o.kind === 'text' && o.outline) o.outline = { ...o.outline, colorIndex: remap[o.outline.colorIndex] ?? o.outline.colorIndex };
       o.touch = mapGrid(o.touch) ?? null;
       o.grid = mapGrid(o.grid) ?? null;
       // A remapped raster is still the raster for this size and source: keep
@@ -450,7 +497,9 @@ export function gridKeyFor(o: TifoObject): string {
     case 'text':
       // A Pro voice's raster is drawn seat-aware: a key of its own, so one
       // saved before that is drawn again rather than kept.
-      return `${isProVoice(o.fontId) ? 'ts' : 't'}|${o.text}|${o.fontId}|${o.arcDeg}|${o.colorIndex}|${cols}x${rows}`;
+      // An outline is added only when there is one, so a layer without one
+      // keeps the key it was saved with and is not drawn again on load.
+      return `${isProVoice(o.fontId) ? 'ts' : 't'}|${o.text}|${o.fontId}|${o.arcDeg}|${o.colorIndex}|${cols}x${rows}${hasOutline(o) ? `|o${o.outline.colorIndex}:${o.outline.seats}` : ''}`;
     case 'shape':
       return `s|${o.shape}|${o.colorIndex}|${cols}x${rows}`;
     case 'image':
@@ -489,7 +538,8 @@ export async function decodePictures(list: readonly TifoObject[]): Promise<void>
 /** Render an object's source canvas (white-on-transparent text or shape, or the picture). */
 export function renderObjectCanvas(obj: TifoObject): HTMLCanvasElement | ImageBitmap | null {
   if (obj.kind === 'text') {
-    const r = renderTextCanvas(obj.text, obj.fontCss, obj.arcDeg);
+    // With an outline, the plain letters in the room the outline needs.
+    const r = hasOutline(obj) ? renderTextCanvas(obj.text, obj.fontCss, obj.arcDeg, outlineStrokePx(obj), true) : renderTextCanvas(obj.text, obj.fontCss, obj.arcDeg);
     return r?.canvas ?? null;
   }
   if (obj.kind === 'shape') {
@@ -563,6 +613,12 @@ export function ensureGrid(o: TifoObject, palette: string[]): boolean {
     const seats = seatTextAlpha(o.text, o.fontCss, o.arcDeg, cols, rows);
     data = new Int16Array(cols * rows).fill(-1);
     if (seats) for (let i = 0; i < seats.length; i++) if (seats[i]) data[i] = o.colorIndex;
+  } else if (hasOutline(o)) {
+    // The fattened letters in the outline's colour, the plain ones over them.
+    const fat = renderTextCanvas(o.text, o.fontCss, o.arcDeg, outlineStrokePx(o));
+    data = fat ? maskFromAlpha(rasterize(fat.canvas, cols, rows), cols, rows, o.outline.colorIndex) : new Int16Array(cols * rows).fill(-1);
+    const plain = maskFromAlpha(pixels, cols, rows, o.colorIndex);
+    for (let i = 0; i < plain.length; i++) if (plain[i] >= 0) data[i] = plain[i];
   } else {
     data = maskFromAlpha(pixels, cols, rows, o.colorIndex); // text + shape: 1-colour mask
   }
@@ -682,6 +738,7 @@ export interface ObjectJSON {
   fontId?: string;
   arcDeg?: number;
   heightSeats?: number;
+  outline?: TextOutline;
   // picture
   name?: string;
   src?: string;
@@ -730,8 +787,10 @@ export function objectToJSON(o: TifoObject): ObjectJSON {
     out.grid = gridJSONOf(o.grid);
     if (o.gridKey) out.gridKey = o.gridKey;
   }
-  if (o.kind === 'text') Object.assign(out, { text: o.text, fontId: o.fontId, arcDeg: o.arcDeg, heightSeats: o.heightSeats });
-  else if (o.kind === 'image') {
+  if (o.kind === 'text') {
+    Object.assign(out, { text: o.text, fontId: o.fontId, arcDeg: o.arcDeg, heightSeats: o.heightSeats });
+    if (o.outline && o.outline.seats > 0) out.outline = { colorIndex: o.outline.colorIndex, seats: o.outline.seats };
+  } else if (o.kind === 'image') {
     Object.assign(out, { name: o.name, src: o.src, dither: o.dither, halftone: o.halftone, cutout: o.cutout, alphaThreshold: o.alphaThreshold });
     if (isPortraitStyle(o.style)) out.style = o.style;
     if (o.face) out.face = { box: o.face.box.slice() as FaceInfo['box'], pts: o.face.pts.slice() };
@@ -774,10 +833,16 @@ export function objectFromJSON(j: unknown, fonts: TifoFont[], paletteLen: number
   if (kind === 'text') {
     if (typeof r.text !== 'string' || !r.text) return null;
     const fontId = typeof r.fontId === 'string' ? r.fontId : fonts[0].id;
-    return {
+    const text: TextObject = {
       ...base, kind, text: r.text.slice(0, 200), fontId, fontCss: fontForObject(fonts, fontId),
       arcDeg: num(r.arcDeg ?? 0, -360, 360) ?? 0, heightSeats: num(r.heightSeats ?? 18, 1, 400) ?? 18,
     };
+    // An outline only as this version writes it: a colour of this palette and a whole number of seats.
+    const ol = r.outline as Partial<TextOutline> | undefined;
+    const olColour = num(ol?.colorIndex, 0, Math.max(0, paletteLen - 1));
+    const olSeats = num(ol?.seats, 1, MAX_OUTLINE_SEATS);
+    if (olColour !== null && olSeats !== null) text.outline = { colorIndex: Math.round(olColour), seats: Math.round(olSeats) };
+    return text;
   }
   if (kind === 'image') {
     const src = typeof r.src === 'string' && PICTURE_SRC.test(r.src) ? r.src : undefined;

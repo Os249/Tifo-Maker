@@ -39,10 +39,10 @@ is the short version and the workflow.
   `src/ui/floodlight.css`.
 - Editor layout: `src/main.ts` (views, `setView`, new-project flow),
   `src/ui/dock.ts` (Split dock), `src/ui/standThumbs.ts` (stand pictures),
-  `src/ui/aiBar.ts` (AI bar), `src/ui/foldSections.ts` (panel folds),
+  `src/ui/aiBar.ts` (AI bar), `src/ui/aiDrawer.ts` (the AI tab: two doors, AI Critique), `src/ui/foldSections.ts` (panel folds),
   `src/ui/guide.ts` (first tifo), `src/ui/mobileShell.ts` (phones).
 - Browser memory keys: `tifo_guide_v1`, `tifo_view_v1`, `tifo_dock_v1`,
-  `tifo_folds_v1`.
+  `tifo_folds_v1`, `tifo_ai_view_v1`, `tifo_ai_intent_v1`.
 - Funnel events: `src/net/analytics.ts`, `FUNNEL_STEPS` in
   `server/src/routes.ts`, labels in `server/src/adminPage.ts` (all three).
 
