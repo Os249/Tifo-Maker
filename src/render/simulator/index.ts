@@ -1304,7 +1304,14 @@ export class MatchDaySimulator {
     };
     // (A Raycaster keeps the vectors it is given, so give it copies.)
     const ray = new THREE.Raycaster(tgt.clone(), dir.clone(), 0, len + 1);
-    const hit = ray.intersectObject(obj, true).find(solid);
+    // Only what stands on the camera's half of the line is in its way. A low
+    // camera looks up at the far stand, and on a ground whose far stand is a
+    // building of its own that target is inside it, under its roof: the first
+    // thing the ray met was the stand being looked at, a metre or two out, and
+    // the camera was brought across the pitch to 4 m from it, inside the
+    // concrete, for a black picture (Pitch Level at the CBS Arena, Tunnel at
+    // the MKM; found through e2e-premier, 19 Nov 2026).
+    const hit = ray.intersectObject(obj, true).find((h) => h.distance > len * 0.5 && solid(h));
     const above = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 0, 7);
     let d = hit ? Math.max(4, hit.distance - 2.5) : len;
     // Not tucked up inside a vault or against a column either: nothing solid

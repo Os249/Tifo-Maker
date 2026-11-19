@@ -996,11 +996,26 @@ export async function fetchShareStats(id: string): Promise<ShareStats> {
 
 /** Upload the branded OG card for a saved design (owner only). Best-effort. */
 export async function uploadOgImage(id: string, ogPngB64: string): Promise<void> {
-  await fetch(`${API}/designs/${id}/og-image`, {
+  await drained(fetch(`${API}/designs/${id}/og-image`, {
     method: 'POST',
     headers: authHeaders(true),
     body: JSON.stringify({ ogPngB64 }),
-  }).catch(() => {});
+  }));
+}
+
+/**
+ * Send a request whose answer nobody needs, and still read that answer to its
+ * end. A fetch whose body is never read stays an open request in the browser:
+ * the connection is held, and the page never counts as idle (a new project's
+ * first save left its og-image upload hanging like that for as long as the
+ * editor stayed open; found through e2e-layers, 19 Nov 2026). Never throws.
+ */
+async function drained(req: Promise<Response>): Promise<void> {
+  try {
+    await (await req).arrayBuffer();
+  } catch {
+    /* best-effort */
+  }
 }
 
 /**
@@ -1663,11 +1678,11 @@ export async function unreadNotifications(): Promise<number> {
   return (await listNotifications()).unread;
 }
 export async function markNotificationsRead(id?: string): Promise<void> {
-  await fetch(`${API}/notifications/read`, {
+  await drained(fetch(`${API}/notifications/read`, {
     method: 'POST',
     headers: authHeaders(true),
     body: JSON.stringify({ id }),
-  }).catch(() => {});
+  }));
 }
 
 // ============ B2B leads ============
