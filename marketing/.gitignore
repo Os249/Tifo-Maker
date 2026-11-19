@@ -5,3 +5,10 @@ brag-output*/work/*.mp4
 brag-output/
 # Hyperframes' own check reports and caches.
 .hyperframes/
+# Launch videos: the final files and the scripts are kept; the source clips are
+# re-rendered by video-src/harness/run.mts, and the web copies and decoded audio are scratch.
+pro-launch/launch-video*/composition/assets/*.mp4
+pro-launch/launch-video*/work/*.mp4
+pro-launch/launch-video*/work/*.pcm
+# Superseded by launch-video-v3 (it used tifos drawn for the video, not fans' own).
+pro-launch/launch-video-v2/launch.mp4

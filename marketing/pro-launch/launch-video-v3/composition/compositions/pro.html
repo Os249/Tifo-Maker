@@ -1,0 +1,72 @@
+<template>
+  <style>
+    @font-face { font-family: 'Changa'; font-weight: 700; src: url('assets/fonts/changa-arabic-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Changa'; font-weight: 800; src: url('assets/fonts/changa-arabic-800-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Almarai'; font-weight: 700; src: url('assets/fonts/almarai-arabic-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Almarai'; font-weight: 800; src: url('assets/fonts/almarai-arabic-800-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'TM Inter'; font-weight: 700; src: url('assets/fonts/inter-latin-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'TM Inter'; font-weight: 800; src: url('assets/fonts/inter-latin-800-normal.woff2') format('woff2'); }
+    #root { position: absolute; inset: 0; overflow: hidden; background: #070B14; color: #F1F4FB; font-family: 'TM Inter', 'Almarai', sans-serif; }
+    .media { position: absolute; inset: 0; }
+    .media img, .media video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
+    .scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,11,20,.5) 0%, rgba(7,11,20,0) 20%, rgba(7,11,20,0) 52%, rgba(7,11,20,.92) 100%); }
+    .flash { position: absolute; inset: 0; background: #F1F4FB; opacity: 0; }
+    .words { position: absolute; direction: rtl; }
+    .display { font-family: 'Changa', 'TM Inter', sans-serif; font-weight: 800; line-height: 1.15; text-shadow: 0 4px 30px rgba(0,0,0,.75); }
+    .sub { font-family: 'TM Inter', 'Almarai', sans-serif; font-weight: 700; text-shadow: 0 2px 16px rgba(0,0,0,.85); }
+    .chip { display: inline-flex; align-items: center; gap: 12px; font-weight: 800; font-size: 40px; color: #F5B43C; border: 2px solid rgba(245,180,60,.55); background: rgba(7,11,20,.8); border-radius: 999px; padding: 10px 28px; }
+    .place { display: inline-flex; align-items: center; gap: 14px; font-weight: 800; font-size: 44px; color: #F1F4FB; background: rgba(7,11,20,.8); border: 2px solid #33415C; border-radius: 999px; padding: 12px 30px; white-space: nowrap; }
+    .place i { width: 16px; height: 16px; border-radius: 50%; background: #D9F000; display: inline-block; }
+    .chip svg, .crown { fill: #F5B43C; }
+    .mark { position: absolute; top: 108px; left: 192px; font-family: 'TM Inter', sans-serif; font-weight: 800; font-size: 44px; letter-spacing: .02em; text-shadow: 0 2px 16px rgba(0,0,0,.8); }
+    .mark b { color: #4A92F2; font-weight: 800; }
+    .navy { position: absolute; inset: 0; background: radial-gradient(90% 90% at 50% 45%, #1a2d57 0%, #0B1120 60%, #070B14 100%); }
+    
+  </style>
+  <div id="root" data-composition-id="pro" data-width="1920" data-height="1080">
+    <div class="navy"></div>
+    <div id="pro-glow" style="position: absolute; left: 610px; top: 190px; width: 700px; height: 700px; border-radius: 50%; background: radial-gradient(circle, rgba(245,180,60,.34) 0%, rgba(245,180,60,0) 65%); opacity: .4;"></div>
+    <div id="pro-words" class="clip words" data-start="0" data-duration="1.86" data-track-index="1" style="inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+      <div style="display: flex; align-items: center; gap: 40px;">
+        <div id="pro-word" class="display" style="font-size: 330px; line-height: 1; color: #F5B43C;">برو</div>
+        <div id="pro-crown"><svg class="crown" width="300" height="300" viewBox="0 0 24 24"><path d="M3.2 7.6l4.6 3.6 3.4-5.7a.95.95 0 0 1 1.6 0l3.4 5.7 4.6-3.6a.6.6 0 0 1 .96.58L19.9 17H4.1L2.24 8.18a.6.6 0 0 1 .96-.58z"/><path d="M4.4 18.6h15.2V20a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z"/></svg></div>
+      </div>
+      <div id="pro-sub" class="sub" style="font-size: 76px; font-weight: 800; margin-top: 30px;">فتحت. إضافات للي يبي أكثر</div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#pro-word", { scale: 0.7, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.36, ease: "back.out(1.7)" }, 0);
+    tl.fromTo("#pro-crown", { scale: 0, rotation: -25 }, { scale: 1, rotation: 0, duration: 0.45, ease: "back.out(1.7)" }, 0.1);
+    tl.fromTo("#pro-sub", { y: 36, opacity: 0 }, { y: 0, opacity: 1, duration: 0.36, ease: "power3.out" }, 0.2);
+    tl.to("#pro-glow", { opacity: 0.44, duration: 0.06, ease: "none" }, 0.030);
+    tl.to("#pro-glow", { opacity: 0.52, duration: 0.06, ease: "none" }, 0.097);
+    tl.to("#pro-glow", { opacity: 0.71, duration: 0.06, ease: "none" }, 0.163);
+    tl.to("#pro-glow", { opacity: 0.56, duration: 0.06, ease: "none" }, 0.230);
+    tl.to("#pro-glow", { opacity: 0.41, duration: 0.06, ease: "none" }, 0.297);
+    tl.to("#pro-glow", { opacity: 0.35, duration: 0.06, ease: "none" }, 0.363);
+    tl.to("#pro-glow", { opacity: 0.62, duration: 0.06, ease: "none" }, 0.430);
+    tl.to("#pro-glow", { opacity: 0.67, duration: 0.06, ease: "none" }, 0.497);
+    tl.to("#pro-glow", { opacity: 0.52, duration: 0.06, ease: "none" }, 0.563);
+    tl.to("#pro-glow", { opacity: 0.45, duration: 0.06, ease: "none" }, 0.630);
+    tl.to("#pro-glow", { opacity: 0.35, duration: 0.06, ease: "none" }, 0.697);
+    tl.to("#pro-glow", { opacity: 0.35, duration: 0.06, ease: "none" }, 0.763);
+    tl.to("#pro-glow", { opacity: 0.35, duration: 0.06, ease: "none" }, 0.830);
+    tl.to("#pro-glow", { opacity: 0.44, duration: 0.06, ease: "none" }, 0.897);
+    tl.to("#pro-glow", { opacity: 0.44, duration: 0.06, ease: "none" }, 0.963);
+    tl.to("#pro-glow", { opacity: 0.48, duration: 0.06, ease: "none" }, 1.030);
+    tl.to("#pro-glow", { opacity: 0.40, duration: 0.06, ease: "none" }, 1.097);
+    tl.to("#pro-glow", { opacity: 0.48, duration: 0.06, ease: "none" }, 1.163);
+    tl.to("#pro-glow", { opacity: 0.43, duration: 0.06, ease: "none" }, 1.230);
+    tl.to("#pro-glow", { opacity: 0.66, duration: 0.06, ease: "none" }, 1.297);
+    tl.to("#pro-glow", { opacity: 0.71, duration: 0.06, ease: "none" }, 1.363);
+    tl.to("#pro-glow", { opacity: 0.64, duration: 0.06, ease: "none" }, 1.430);
+    tl.to("#pro-glow", { opacity: 0.56, duration: 0.06, ease: "none" }, 1.497);
+    tl.to("#pro-glow", { opacity: 0.53, duration: 0.06, ease: "none" }, 1.563);
+    tl.to("#pro-glow", { opacity: 0.53, duration: 0.06, ease: "none" }, 1.630);
+    tl.to("#pro-glow", { opacity: 0.60, duration: 0.06, ease: "none" }, 1.697);
+    tl.to("#pro-glow", { opacity: 0.62, duration: 0.06, ease: "none" }, 1.763);
+    tl.to({}, { duration: 0.01 }, 1.84);
+    window.__timelines["pro"] = tl;
+  </script>
+</template>

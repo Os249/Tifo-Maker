@@ -1,0 +1,49 @@
+<template>
+  <style>
+    @font-face { font-family: 'Changa'; font-weight: 700; src: url('assets/fonts/changa-arabic-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Changa'; font-weight: 800; src: url('assets/fonts/changa-arabic-800-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Almarai'; font-weight: 700; src: url('assets/fonts/almarai-arabic-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Almarai'; font-weight: 800; src: url('assets/fonts/almarai-arabic-800-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'TM Inter'; font-weight: 700; src: url('assets/fonts/inter-latin-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'TM Inter'; font-weight: 800; src: url('assets/fonts/inter-latin-800-normal.woff2') format('woff2'); }
+    #root { position: absolute; inset: 0; overflow: hidden; background: #070B14; color: #F1F4FB; font-family: 'TM Inter', 'Almarai', sans-serif; }
+    .media { position: absolute; inset: 0; }
+    .media img, .media video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
+    .scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,11,20,.6) 0%, rgba(7,11,20,0) 24%, rgba(7,11,20,0) 46%, rgba(7,11,20,.94) 100%); }
+    .words { position: absolute; direction: rtl; }
+    .display { font-family: 'Changa', 'TM Inter', sans-serif; font-weight: 800; line-height: 1.15; text-shadow: 0 4px 30px rgba(0,0,0,.7); }
+    .sub { font-family: 'TM Inter', 'Almarai', sans-serif; font-weight: 700; text-shadow: 0 2px 16px rgba(0,0,0,.8); }
+    .chip { display: inline-flex; align-items: center; gap: 12px; font-weight: 800; font-size: 40px; color: #F5B43C; border: 2px solid rgba(245,180,60,.55); background: rgba(7,11,20,.78); border-radius: 999px; padding: 10px 28px; }
+    .chip svg, .crown { fill: #F5B43C; }
+    .mark { position: absolute; top: 108px; left: 192px; font-family: 'TM Inter', sans-serif; font-weight: 800; font-size: 44px; letter-spacing: .02em; }
+    .mark b { color: #4A92F2; font-weight: 800; }
+    .navy { position: absolute; inset: 0; background: radial-gradient(90% 90% at 50% 45%, #1a2d57 0%, #0B1120 60%, #070B14 100%); }
+    
+  </style>
+  <div id="root" data-composition-id="credit" data-width="1920" data-height="1080">
+    <div id="credit-media" class="media" data-layout-allow-overflow>
+      <img id="credit-free" class="clip" data-start="0" data-duration="2.76" data-track-index="1" src="assets/credit-free.jpg" alt="">
+      <img id="credit-pro" class="clip" data-start="0" data-duration="2.76" data-track-index="2" src="assets/credit-pro.jpg" alt="" style="opacity: 0;">
+    </div>
+    <div style="position: absolute; inset: 0; background: linear-gradient(0deg, rgba(7,11,20,0) 0%, rgba(7,11,20,0) 13%, rgba(7,11,20,.8) 26%, rgba(7,11,20,.8) 42%, rgba(7,11,20,.15) 62%, rgba(7,11,20,.7) 100%);"></div>
+    <div id="credit-tags" class="clip words" data-start="0" data-duration="2.76" data-track-index="3" style="top: 108px; right: 192px;">
+      <span id="credit-tag-free" class="chip" style="color: #F1F4FB; border-color: #33415C; position: absolute; right: 0; top: 0; white-space: nowrap;">المجانية</span>
+      <span id="credit-tag-pro" class="chip" style="position: absolute; right: 0; top: 0; opacity: 0;"><svg class="crown" width="40" height="40" viewBox="0 0 24 24"><path d="M3.2 7.6l4.6 3.6 3.4-5.7a.95.95 0 0 1 1.6 0l3.4 5.7 4.6-3.6a.6.6 0 0 1 .96.58L19.9 17H4.1L2.24 8.18a.6.6 0 0 1 .96-.58z"/><path d="M4.4 18.6h15.2V20a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z"/></svg>برو</span>
+    </div>
+    <div id="credit-words" class="clip words" data-start="0" data-duration="2.76" data-track-index="4" style="left: 192px; width: 1150px; bottom: 250px;">
+      <div id="credit-title" class="display" style="font-size: 120px;">بدون علامة الموقع</div>
+      <div id="credit-sub" class="sub" style="font-size: 60px; font-weight: 800; color: #F5B43C;">واسمك مكانها</div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.set("#credit-media", { scale: 1.5, x: -480, y: -270 }, 0);
+    tl.to("#credit-pro", { opacity: 1, duration: 0.2, ease: "none" }, 1.38);  // beat-grid: 11.605s
+    tl.to("#credit-tag-free", { opacity: 0, duration: 0.1, ease: "none" }, 1.38);
+    tl.to("#credit-tag-pro", { opacity: 1, duration: 0.15, ease: "none" }, 1.43);
+    tl.fromTo("#credit-title", { y: 36, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 0.13);
+    tl.fromTo("#credit-sub", { y: 36, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }, 1.4);
+    tl.to({}, { duration: 0.01 }, 2.74);
+    window.__timelines["credit"] = tl;
+  </script>
+</template>

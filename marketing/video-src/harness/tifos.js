@@ -53,7 +53,13 @@ const shield = (g, cx, cy, w, h, fill, line, lw) => {
   g.stroke();
 };
 /** A word, fitted to a box, with a thick outline so it reads off the seats. */
-const word = (g, text, font, cx, cy, maxW, maxH, fill, line, lw) => {
+const word = (g, text, font, cx, cy, maxW, maxH, fill, line, lw, stretch = 1) => {
+  if (stretch !== 1) {
+    g.save(); g.translate(cx, cy); g.scale(stretch, 1);
+    word(g, text, font, 0, 0, maxW / stretch, maxH, fill, line, lw);
+    g.restore();
+    return;
+  }
   let px = maxH;
   g.font = `${px}px ${font}`;
   const m = g.measureText(text).width;
@@ -136,11 +142,70 @@ export const DESIGNS = {
       word(g, 'الزعيم', f.stencil, W / 2, 200, 800, 260, '#f4f2ea', '#06265a', 22);
     },
   },
+  /**
+   * For King Abdullah Sports City's end stands, which have three tiers with
+   * ribbon boards between them: stripes on the upper tier (canvas y 0-95), the
+   * year on the middle one (105-210), the word on the lower one (220-400).
+   */
+  amid: {
+    palette: [EMPTY, '#101010', '#f9d71c', '#f4f2ea', '#c99a06'],
+    draw(g, f) {
+      band(g, 0, H, '#101010');
+      // Upper tier: tiger stripes.
+      for (let i = -4; i < 30; i++) {
+        g.fillStyle = '#f9d71c';
+        g.beginPath();
+        g.moveTo(i * 64, 0); g.lineTo(i * 64 + 34, 0); g.lineTo(i * 64 + 34 - 46, 100); g.lineTo(i * 64 - 46, 100);
+        g.closePath(); g.fill();
+      }
+      // Middle tier: the year between stars, on yellow.
+      band(g, 100, 115, '#f9d71c');
+      word(g, '1927', f.block, W / 2, 162, 260, 104, '#101010', '#101010', 0);
+      for (const x of [150, 290, W - 290, W - 150]) star(g, x, 158, 40, '#101010');
+      // Lower tier: the word.
+      band(g, 215, 185, '#101010');
+      band(g, 215, 12, '#f4f2ea'); band(g, H - 14, 14, '#f9d71c');
+      word(g, 'العميد', f.block, W / 2, 312, 860, 190, '#f9d71c', '#101010', 0, 1.3);
+    },
+  },
+  raqi: {
+    palette: [EMPTY, '#0c6b3a', '#f4f2ea', '#0a3d22', '#d8b24a'],
+    draw(g, f) {
+      band(g, 0, H, '#0c6b3a');
+      for (let x = 0; x < W; x += 96) { g.fillStyle = '#f4f2ea'; g.fillRect(x, 0, 48, 100); }
+      band(g, 100, 115, '#f4f2ea');
+      word(g, '1937', f.block, W / 2, 162, 260, 104, '#0c6b3a', '#0c6b3a', 0);
+      for (const x of [150, 290, W - 290, W - 150]) star(g, x, 158, 40, '#d8b24a');
+      band(g, 215, 185, '#0c6b3a');
+      band(g, 215, 12, '#d8b24a'); band(g, H - 14, 14, '#d8b24a');
+      word(g, 'الراقي', f.block, W / 2, 312, 860, 190, '#f4f2ea', '#0a3d22', 0, 1.3);
+    },
+  },
+  /** A steep single-tier kop: one word, kept well inside the stand. */
+  ynwa: {
+    palette: [EMPTY, '#c8102e', '#f4f2ea', '#7d0a1c', '#f6c945'],
+    draw(g, f) {
+      rays(g, W / 2, H * 0.55, 36, '#c8102e', '#7d0a1c');
+      band(g, 0, 24, '#f6c945'); band(g, H - 24, 24, '#f6c945');
+      word(g, 'YNWA', f.block, W / 2, 205, 560, 190, '#f4f2ea', '#7d0a1c', 14);
+    },
+  },
 };
 
 let canvas = null;
+/** The cells of a published tifo, when one is being filmed. */
+let community = null;
 /** Draw a design once the fonts are in; call before the harness's __boot. */
 export async function useDesign(name) {
+  // A tifo published on the site (run.mts puts its palette and cells on the window): filmed as it is.
+  if (name.startsWith('community:')) {
+    const c = window.__community;
+    window.__tifoPalette = c.palette;
+    const bin = atob(c.cellsB64);
+    community = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+    return { palette: c.palette, png: '' };
+  }
+  community = null;
   await Promise.all([loadTifoFonts(), loadProFonts()]);
   const f = {
     block: fontCssOf('block', PRO_FONTS), stencil: fontCssOf('stencil', PRO_FONTS), latin: fontCssOf('block', PRO_FONTS),
@@ -158,6 +223,7 @@ export async function useDesign(name) {
 const rgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
 
 export function paintTifo(map, stand, size) {
+  if (community) return community.length === map.count ? community : Uint8Array.from({ length: map.count }, (_, i) => community[i] ?? 0);
   const span = size === 'small' ? [0.34, 0.66] : size === 'medium' ? [0.17, 0.83] : [0.02, 0.98];
   const px = canvas.getContext('2d').getImageData(0, 0, W, H).data;
   const pal = window.__tifoPalette.map(rgb);
