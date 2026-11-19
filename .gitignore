@@ -38,3 +38,5 @@ scratch-aerial/
 
 # written by the Docker build, read by /admin#security
 audit-snapshot.json
+# tsx writes its compile cache here when TEMP is unset in a script (the path becomes the word "undefined").
+undefined/
