@@ -35,7 +35,7 @@ import {
 } from './net/api';
 import { claimAllLocal } from './net/claimProjects';
 import { mountProChip } from './ui/pro';
-import { mountGiftCard, mountReexportCard } from './ui/proCards';
+import { mountGiftCard, mountReexportCard, mountRefundCard } from './ui/proCards';
 import { CROWN_SVG } from './ui/crown';
 
 // ---------------------------------------------------------------- types ---
@@ -853,6 +853,8 @@ void (async () => {
   // Pro: the countdown beside the account, and the gift card under the
   // heading. Both stay hidden unless /api/pro has something to say.
   if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
+  // A refund that ended Pro is said here once (and by email): never a silent loss.
+  mountRefundCard(where.parentElement ?? document.body, controls);
   mountGiftCard(where.parentElement ?? document.body, controls);
   mountReexportCard(where.parentElement ?? document.body, controls, (on) => {
     offerClean = on;

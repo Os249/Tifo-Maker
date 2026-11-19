@@ -28,6 +28,7 @@ import { SPLIT_TELLS, tifoSplit } from '../render/simulator/tifoSplit';
 import { CROWN_SVG } from './pro';
 import { exportGate } from './proGate';
 import { offscreenMatchDay } from './proFilm';
+import { chosenSeats, focusPicker } from './tifoFocus';
 import { POSTER_SIZES, drawPoster, type PosterLayout, type PosterShape, type PosterSpec } from './posterLayout';
 
 export interface PosterSheetDeps {
@@ -158,6 +159,7 @@ export async function openPosterSheet(deps: PosterSheetDeps): Promise<void> {
     // Part of the tifo is where its stand has no seats (simulator/tifoSplit.ts): said, not hidden.
     (tifoSplit(md.map.uv, md.map.count, (i) => md.store.cells[i] !== 0) >= SPLIT_TELLS ? `<p class="qv-p-split">${escapeHtml(t('qv.p.split'))}</p>` : '') +
     `<div class="qv-form">` +
+    `<div class="qv-part"></div>` +
     `<div class="qv-row"><span class="qv-label">${escapeHtml(t('qv.p.layout'))}</span>${radios('layout', LAYOUTS.map((l) => [l, t(`qv.p.l.${l}`)]), f.layout)}</div>` +
     `<div class="qv-row"><span class="qv-label">${escapeHtml(t('qv.p.shape'))}</span>${radios('shape', SHAPES.map((s) => [s, t(`qv.p.s.${s}`)]), f.shape)}</div>` +
     `<div class="qv-grid">${input('club')}${input('opponent')}${input('date', 'date')}${input('time', 'time')}${input('venue')}${input('headline', 'text', t('qv.p.headlinePh'))}</div>` +
@@ -188,6 +190,7 @@ export async function openPosterSheet(deps: PosterSheetDeps): Promise<void> {
       if (closed) return;
       closed = true;
       release();
+      part.destroy();
       root.remove();
       resolve();
     };
@@ -195,6 +198,15 @@ export async function openPosterSheet(deps: PosterSheetDeps): Promise<void> {
   const release = containDialog(root, () => close());
   root.addEventListener('mousedown', (e) => { if (e.target === root) close(); });
   $('.pro-sheet-close').addEventListener('click', () => close());
+  // The part of the tifo to show (ui/tifoFocus.ts): the poster's picture is drawn again on it.
+  const part = focusPicker(md, () => {
+    drawing = drawing.then(() => {
+      sim?.setTifoFocus(chosenSeats(md));
+      stills.clear();
+    });
+    redraw();
+  });
+  $('.qv-part').append(part.root);
 
   /** Which fields the layout uses: the rest are hidden, not cleared. */
   const showFields = (): void => {

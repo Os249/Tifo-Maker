@@ -7,6 +7,7 @@ import { MemoryAiBudgetRepository, MemoryAiEventsRepository, MemoryAiUsageReposi
 import { PgAiBudgetRepository, PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { MemoryProRepository, PgProRepository } from './proRepo';
 import { MemoryPaymentRepository, PgPaymentRepository } from './payRepo';
+import { PgLaunchRepository, memoryLaunch } from './launchRepo';
 import { MemoryKitRepository, PgKitRepository } from './kitRepo';
 import { MemoryEventRepository, PgEventRepository } from './eventRepo';
 import { PgSocialRepository } from './pgSocial';
@@ -17,7 +18,7 @@ import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo'
 import { BatchedTrafficRepository, MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
 import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
 import { buildApp, ORIGIN_SECRET_MIN, TRASH_DAYS, type TemplateInfo } from './routes';
-import { createEmailSender } from './email';
+import { createEmailSender, emailHealth } from './email';
 import { seedShowcase, seedTemplates } from './seedTemplates';
 import { EVENTS_RETENTION_DAYS, type AuthRepository, type DesignRepository } from './repo';
 import { envNum } from './env';
@@ -110,6 +111,12 @@ async function main(): Promise<void> {
   // One sender for account mail and security alerts, so the email tab's
   // delivery counts cover both.
   const emailSender = createEmailSender();
+  // Founder emails go out only while email is really delivered. Two switches for the browser suite
+  // (e2e-launch.mjs), which neither works in production: LAUNCH_MAIL_TO_LOG=on lets the development sender
+  // (the log) stand in for delivery, and LAUNCH_JOB=off leaves the launch job to be run from /admin.
+  const notProd = process.env.NODE_ENV !== 'production';
+  const launchMailLive = (): boolean => emailHealth().delivering || (notProd && process.env.LAUNCH_MAIL_TO_LOG === 'on');
+  const launchTimer = !(notProd && process.env.LAUNCH_JOB === 'off');
   const socOptions = {
     key: socKeyFrom(process.env),
     sender: emailSender,
@@ -258,6 +265,11 @@ async function main(): Promise<void> {
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: proRepo,
       payments: new PgPaymentRepository(pool),
+      // Pro's launch: recorded, and the founders emailed, only once Pro is on sale for real (proLaunch.ts),
+      // and only while email is really being delivered (with no mail key every message goes to the log alone).
+      launch: new PgLaunchRepository(pool),
+      launchMailLive,
+      launchTimer,
       renewalsTimer: true,
       kits: new PgKitRepository(pool),
       tifoEvents: new PgEventRepository(pool),
@@ -289,6 +301,7 @@ async function main(): Promise<void> {
     const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
     seedRepos = { designs, auth };
     const memoryPro = new MemoryProRepository((id) => auth.usernameOf(id));
+    const memoryPay = new MemoryPaymentRepository(memoryPro, (id) => auth.usernameOf(id));
     app = await buildApp(designs, auth, templates, {
       staticDir,
       rateLimit: false,
@@ -302,7 +315,13 @@ async function main(): Promise<void> {
       aiBudget: new MemoryAiBudgetRepository(),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: memoryPro,
-      payments: new MemoryPaymentRepository(memoryPro, (id) => auth.usernameOf(id)),
+      payments: memoryPay,
+      launch: memoryLaunch(memoryPro, memoryPay, (id) => {
+        const u = [...auth.users.values()].find((x) => x.id === id);
+        return u ? { username: u.username, email: u.email, verified: !!u.emailVerifiedAt } : null;
+      }),
+      launchMailLive,
+      launchTimer,
       renewalsTimer: true,
       kits: new MemoryKitRepository(),
       tifoEvents: new MemoryEventRepository(),

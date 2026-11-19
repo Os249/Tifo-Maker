@@ -85,10 +85,45 @@ export interface ProOrder {
   cycle: number | null;
   /** Why it did not go through, as a kind the page has words for (moyasar.ts FailKind). */
   fail: string | null;
+  /** The card's scheme as Moyasar names it ('mada', 'visa', 'master'), when it said. Never a number. */
+  brand: string | null;
+  /** When the refund email was taken to be sent (claimRefundMail): once per order. */
+  refundMailAt: string | null;
+  /** When the site's one-time refund notice was shown to the fan. */
+  refundSeenAt: string | null;
+  /** Extra days its pass was given on top of `days`: the founders bonus (proLaunch.ts). 0 for every other order. */
+  bonusDays: number;
 }
 
 export interface ProOrderRow extends ProOrder {
   username: string | null;
+}
+
+// ------------------------------------------------------ refund requests ---
+
+export type RefundRequestStatus = 'pending' | 'approved' | 'declined';
+
+/** A fan's request for the refund the terms promise. At most one per order, ever. */
+export interface RefundRequest {
+  id: string;
+  orderId: string;
+  /** Null once the account is deleted. */
+  userId: string | null;
+  status: RefundRequestStatus;
+  /** What the fan wrote with it, if anything. */
+  note: string | null;
+  /** How much of Pro's allowances the order's pass had used when they asked: 0 is "not used". */
+  used: number;
+  /** Refunded by the PRO_AUTO_REFUND switch, not by a person. */
+  auto: boolean;
+  declineReason: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export interface RefundRequestRow extends RefundRequest {
+  username: string | null;
+  order: ProOrder | null;
 }
 
 export interface NewOrder {
@@ -107,10 +142,19 @@ export interface NewOrder {
 export interface PaidWith {
   paymentId: string;
   method: string | null;
+  /** The card's scheme, when Moyasar said ('mada', 'visa', ...). */
+  brand?: string | null;
   now: Date;
   /** The pass to give. Ignored when the account is gone. */
   startsAt: Date;
   endsAt: Date;
+  /**
+   * The founders bonus this payment is in time for, in days (0 or absent:
+   * none). Given only if the order's account is a founder that has never had
+   * it: the store takes that claim in the same step that marks the order
+   * paid, and then makes the pass that much longer.
+   */
+  bonusDays?: number;
 }
 
 export type PaidResult =
@@ -276,6 +320,31 @@ export interface PaymentRepository {
   trash(token: string, now: Date): Promise<void>;
   trashed(limit: number): Promise<string[]>;
   untrash(token: string): Promise<void>;
+
+  // Refunds, told and asked for (19 Nov 2026).
+  /**
+   * Take the one refund email for a refunded order. True for exactly one
+   * caller, however many notice the refund at once (/admin, the webhook, two
+   * servers); false when it was already taken, or the order is not refunded.
+   */
+  claimRefundMail(orderId: string, now: Date): Promise<boolean>;
+  /** The email could not be sent after all: it is owed again. */
+  unclaimRefundMail(orderId: string): Promise<void>;
+  /** Refunded orders (since `since`) whose email was never taken, oldest first. */
+  unmailedRefunds(since: Date, limit: number): Promise<ProOrder[]>;
+  /** An account's refunded orders (since `since`) whose notice on the site has not been shown, newest first. */
+  unseenRefunds(userId: string, since: Date): Promise<ProOrder[]>;
+  /** The notice was shown. True the first time, for the order's own account only. */
+  markRefundSeen(userId: string, orderId: string, now: Date): Promise<boolean>;
+  /** A refund request for an order. Null when the order already has one: one per order, ever. */
+  createRequest(r: { orderId: string; userId: string; note: string | null; used: number; now: Date }): Promise<RefundRequest | null>;
+  requestById(id: string): Promise<RefundRequest | null>;
+  requestForOrder(orderId: string): Promise<RefundRequest | null>;
+  requestsFor(userId: string): Promise<RefundRequest[]>;
+  /** The requests for /admin: the open ones first (oldest first), then the newest answered. */
+  listRequests(limit: number): Promise<RefundRequestRow[]>;
+  /** Answer a request. True for one caller: only a pending request is answered. */
+  decideRequest(id: string, status: 'approved' | 'declined', d: { reason: string | null; auto: boolean }, now: Date): Promise<boolean>;
 }
 
 const iso = (d: Date | string | null | undefined): string | null => (d == null ? null : new Date(d).toISOString());
@@ -289,6 +358,13 @@ export class MemoryPaymentRepository implements PaymentRepository {
   private orders = new Map<string, ProOrder>();
   private subs = new Map<string, ProSubscription>();
   private bin = new Set<string>();
+  private requests = new Map<string, RefundRequest>();
+
+  /**
+   * Where the founders bonus is claimed (the memory launch store), when there
+   * is one: asked while an order is marked paid, with no await in between.
+   */
+  founders: { claimBonus(userId: string, orderId: string, now: Date): boolean } | null = null;
 
   /** `pro` is the memory Pro store, where the passes live; `nameOf` names an account for /admin. */
   constructor(private readonly pro: MemoryProRepository, private readonly nameOf: (userId: string) => string | null = () => null) {}
@@ -303,6 +379,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
       status: 'pending', invoiceId: null, invoiceUrl: null, paymentId: o.paymentId ?? null, method: null, passId: null, note: null,
       createdAt: o.now.toISOString(), paidAt: null, refundedAt: null, refunded: 0,
       kind: o.kind ?? 'invoice', keep: false, keepAt: null, attemptedAt: null, subscriptionId: null, cycle: null, fail: null,
+      brand: null, refundMailAt: null, refundSeenAt: null, bonusDays: 0,
     };
     if (order.paymentId && [...this.orders.values()].some((x) => x.kind !== 'invoice' && x.paymentId === order.paymentId)) throw new Error('payment id already used');
     this.orders.set(order.id, order);
@@ -349,10 +426,15 @@ export class MemoryPaymentRepository implements PaymentRepository {
     o.paidAt = w.now.toISOString();
     o.paymentId = w.paymentId || o.paymentId;
     o.method = w.method;
+    o.brand = w.brand ?? null;
     o.fail = null;
     let pass: ProPass | null = null;
     if (o.userId) {
-      pass = await this.pro.grantPass({ userId: o.userId, plan: 'monthly', startsAt: w.startsAt, endsAt: w.endsAt, source: 'payment', createdBy: null });
+      // Once per account, ever: claimed here, before any await, so a second order of the same founder sees it taken.
+      const bonus = w.bonusDays && w.bonusDays > 0 && this.founders?.claimBonus(o.userId, o.id, w.now) ? w.bonusDays : 0;
+      o.bonusDays = bonus;
+      const endsAt = new Date(w.endsAt.getTime() + bonus * 24 * 3600_000);
+      pass = await this.pro.grantPass({ userId: o.userId, plan: 'monthly', startsAt: w.startsAt, endsAt, source: 'payment', createdBy: null });
       o.passId = pass.id;
     } else {
       o.note = 'paid after the account was deleted: no pass given';
@@ -418,6 +500,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
   /** An account deleted (the tests' stand-in for ON DELETE): its orders lose their owner. */
   forgetUser(userId: string): void {
     for (const o of this.orders.values()) if (o.userId === userId) o.userId = null;
+    for (const r of this.requests.values()) if (r.userId === userId) r.userId = null;
   }
 
   async subFor(userId: string): Promise<ProSubscription | null> {
@@ -489,6 +572,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
       status: 'pending', invoiceId: null, invoiceUrl: null, paymentId, method: null, passId: null, note: null,
       createdAt: now.toISOString(), paidAt: null, refundedAt: null, refunded: 0,
       kind: 'renewal', keep: false, keepAt: null, attemptedAt: null, subscriptionId: s.id, cycle: s.cycle, fail: null,
+      brand: null, refundMailAt: null, refundSeenAt: null, bonusDays: 0,
     };
     this.orders.set(order.id, order);
     return { order: { ...order }, resumed: false };
@@ -567,6 +651,82 @@ export class MemoryPaymentRepository implements PaymentRepository {
   async untrash(token: string): Promise<void> {
     this.bin.delete(token);
   }
+
+  async claimRefundMail(orderId: string, now: Date): Promise<boolean> {
+    const o = this.orders.get(orderId);
+    // Decided with no await before it: a second claim in the same tick sees it taken.
+    if (!o || o.status !== 'refunded' || o.refundMailAt) return false;
+    o.refundMailAt = now.toISOString();
+    return true;
+  }
+
+  async unclaimRefundMail(orderId: string): Promise<void> {
+    const o = this.orders.get(orderId);
+    if (o) o.refundMailAt = null;
+  }
+
+  async unmailedRefunds(since: Date, limit: number): Promise<ProOrder[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.status === 'refunded' && !o.refundMailAt && o.userId !== null && o.refundedAt !== null && Date.parse(o.refundedAt) >= since.getTime())
+      .sort((a, b) => a.refundedAt!.localeCompare(b.refundedAt!))
+      .slice(0, limit)
+      .map((o) => ({ ...o }));
+  }
+
+  async unseenRefunds(userId: string, since: Date): Promise<ProOrder[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.userId === userId && o.status === 'refunded' && !o.refundSeenAt && o.refundedAt !== null && Date.parse(o.refundedAt) >= since.getTime())
+      .sort((a, b) => b.refundedAt!.localeCompare(a.refundedAt!))
+      .map((o) => ({ ...o }));
+  }
+
+  async markRefundSeen(userId: string, orderId: string, now: Date): Promise<boolean> {
+    const o = this.orders.get(orderId);
+    if (!o || o.userId !== userId || o.status !== 'refunded' || o.refundSeenAt) return false;
+    o.refundSeenAt = now.toISOString();
+    return true;
+  }
+
+  async createRequest(r: { orderId: string; userId: string; note: string | null; used: number; now: Date }): Promise<RefundRequest | null> {
+    if ([...this.requests.values()].some((x) => x.orderId === r.orderId)) return null;
+    const rq: RefundRequest = {
+      id: randomUUID(), orderId: r.orderId, userId: r.userId, status: 'pending', note: r.note, used: r.used, auto: false,
+      declineReason: null, createdAt: r.now.toISOString(), decidedAt: null,
+    };
+    this.requests.set(rq.id, rq);
+    return { ...rq };
+  }
+
+  async requestById(id: string): Promise<RefundRequest | null> {
+    const r = this.requests.get(id);
+    return r ? { ...r } : null;
+  }
+
+  async requestForOrder(orderId: string): Promise<RefundRequest | null> {
+    const r = [...this.requests.values()].find((x) => x.orderId === orderId);
+    return r ? { ...r } : null;
+  }
+
+  async requestsFor(userId: string): Promise<RefundRequest[]> {
+    return [...this.requests.values()].filter((x) => x.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((x) => ({ ...x }));
+  }
+
+  async listRequests(limit: number): Promise<RefundRequestRow[]> {
+    const all = [...this.requests.values()];
+    const open = all.filter((x) => x.status === 'pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const done = all.filter((x) => x.status !== 'pending').sort((a, b) => (b.decidedAt ?? '').localeCompare(a.decidedAt ?? ''));
+    return [...open, ...done].slice(0, limit).map((x) => ({ ...x, username: x.userId ? this.nameOf(x.userId) : null, order: this.copy(this.orders.get(x.orderId)) }));
+  }
+
+  async decideRequest(id: string, status: 'approved' | 'declined', d: { reason: string | null; auto: boolean }, now: Date): Promise<boolean> {
+    const r = this.requests.get(id);
+    if (!r || r.status !== 'pending') return false;
+    r.status = status;
+    r.declineReason = status === 'declined' ? (d.reason ?? '').slice(0, 500) : null;
+    r.auto = d.auto;
+    r.decidedAt = now.toISOString();
+    return true;
+  }
 }
 
 // -------------------------------------------------------------- postgres ---
@@ -574,7 +734,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
 const ORDER_COLS =
   'o.id, o.user_id, o.amount, o.currency, o.days, o.lang, o.test_mode, o.status, o.invoice_id, o.invoice_url, o.payment_id, ' +
   'o.method, o.pass_id, o.note, o.created_at, o.paid_at, o.refunded_at, o.refunded, ' +
-  'o.kind, o.keep, o.keep_at, o.attempted_at, o.subscription_id, o.cycle, o.fail';
+  'o.kind, o.keep, o.keep_at, o.attempted_at, o.subscription_id, o.cycle, o.fail, o.brand, o.refund_mail_at, o.refund_seen_at, o.bonus_days';
 
 const s = (v: unknown): string | null => (v == null ? null : String(v));
 const n = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -606,6 +766,30 @@ function rowToOrder(r: Record<string, unknown>): ProOrder {
     subscriptionId: s(r.subscription_id),
     cycle: n(r.cycle),
     fail: s(r.fail),
+    brand: s(r.brand),
+    refundMailAt: iso(r.refund_mail_at as string | null),
+    refundSeenAt: iso(r.refund_seen_at as string | null),
+    bonusDays: Number(r.bonus_days ?? 0),
+  };
+}
+
+/** A request's columns, each under a name of its own so they can sit beside an order's in one row. */
+const REQUEST_COLS =
+  'r.id AS r_id, r.order_id AS r_order_id, r.user_id AS r_user_id, r.status AS r_status, r.note AS r_note, r.used AS r_used, r.auto AS r_auto, ' +
+  'r.decline_reason AS r_decline_reason, r.created_at AS r_created_at, r.decided_at AS r_decided_at';
+
+function rowToRequest(r: Record<string, unknown>): RefundRequest {
+  return {
+    id: String(r.r_id),
+    orderId: String(r.r_order_id),
+    userId: s(r.r_user_id),
+    status: String(r.r_status) as RefundRequestStatus,
+    note: s(r.r_note),
+    used: Number(r.r_used ?? 0),
+    auto: r.r_auto === true,
+    declineReason: s(r.r_decline_reason),
+    createdAt: iso(r.r_created_at as string)!,
+    decidedAt: iso(r.r_decided_at as string | null),
   };
 }
 
@@ -717,22 +901,33 @@ export class PgPaymentRepository implements PaymentRepository {
         return o.status === 'paid' ? { ok: true, first: false, order: o, pass: null } : { ok: false, reason: o.status };
       }
       let pass: ProPass | null = null;
+      let bonus = 0;
       if (o.userId) {
+        if (w.bonusDays && w.bonusDays > 0) {
+          // The founders bonus, once per account, ever: this UPDATE changes the founder's row only while no order
+          // has taken it. A second order of the same founder, paid in the same second, waits on the row and then
+          // changes nothing. Inside this transaction, so the claim and the paid order stand or fall together.
+          const c = await client.query(
+            `UPDATE pro_founders SET bonus_order_id = $2, bonus_at = $3 WHERE user_id = $1 AND bonus_order_id IS NULL`,
+            [o.userId, o.id, w.now],
+          );
+          if ((c.rowCount ?? 0) > 0) bonus = w.bonusDays;
+        }
         // The invoice names the pass, and payment_id is UNIQUE: one pass per invoice even past this lock.
         const p = await client.query(
           `INSERT INTO pro_passes (user_id, plan, starts_at, ends_at, source, payment_id)
            VALUES ($1, 'monthly', $2, $3, 'payment', $4)
            ON CONFLICT (payment_id) DO NOTHING RETURNING ${PASS_COLS}`,
-          [o.userId, w.startsAt, w.endsAt, `moyasar:${o.invoiceId ?? o.id}`],
+          [o.userId, w.startsAt, new Date(w.endsAt.getTime() + bonus * 24 * 3600_000), `moyasar:${o.invoiceId ?? o.id}`],
         );
         pass = p.rows[0] ? rowToPass(p.rows[0]) : null;
       }
       const u = await client.query(
         `UPDATE pro_orders AS o SET status = 'paid', paid_at = $2, payment_id = COALESCE(NULLIF($3, ''), o.payment_id), method = $4,
-           pass_id = COALESCE($5, o.pass_id), fail = NULL,
+           pass_id = COALESCE($5, o.pass_id), fail = NULL, brand = $6, bonus_days = $7,
            note = CASE WHEN o.user_id IS NULL THEN 'paid after the account was deleted: no pass given' ELSE o.note END
          WHERE o.id = $1 RETURNING ${ORDER_COLS}`,
-        [orderId, w.now, w.paymentId, w.method, pass?.id ?? null],
+        [orderId, w.now, w.paymentId, w.method, pass?.id ?? null, (w.brand ?? '').slice(0, 32) || null, pass ? bonus : 0],
       );
       await client.query('COMMIT');
       return { ok: true, first: true, order: rowToOrder(u.rows[0]), pass };
@@ -985,5 +1180,90 @@ export class PgPaymentRepository implements PaymentRepository {
 
   async untrash(token: string): Promise<void> {
     await this.pool.query('DELETE FROM pro_token_trash WHERE token = $1', [token]);
+  }
+
+  async claimRefundMail(orderId: string, now: Date): Promise<boolean> {
+    // One UPDATE: of any number of callers at once, the row changes for one.
+    const r = await this.pool.query(
+      `UPDATE pro_orders SET refund_mail_at = $2 WHERE id = $1 AND status = 'refunded' AND refund_mail_at IS NULL`,
+      [orderId, now],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async unclaimRefundMail(orderId: string): Promise<void> {
+    await this.pool.query('UPDATE pro_orders SET refund_mail_at = NULL WHERE id = $1', [orderId]);
+  }
+
+  async unmailedRefunds(since: Date, limit: number): Promise<ProOrder[]> {
+    const r = await this.pool.query(
+      `SELECT ${ORDER_COLS} FROM pro_orders o
+       WHERE o.status = 'refunded' AND o.refund_mail_at IS NULL AND o.user_id IS NOT NULL AND o.refunded_at >= $1
+       ORDER BY o.refunded_at LIMIT $2`,
+      [since, limit],
+    );
+    return r.rows.map(rowToOrder);
+  }
+
+  async unseenRefunds(userId: string, since: Date): Promise<ProOrder[]> {
+    const r = await this.pool.query(
+      `SELECT ${ORDER_COLS} FROM pro_orders o
+       WHERE o.user_id = $1 AND o.status = 'refunded' AND o.refund_seen_at IS NULL AND o.refunded_at >= $2
+       ORDER BY o.refunded_at DESC LIMIT 10`,
+      [userId, since],
+    );
+    return r.rows.map(rowToOrder);
+  }
+
+  async markRefundSeen(userId: string, orderId: string, now: Date): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE pro_orders SET refund_seen_at = $3 WHERE id = $1 AND user_id = $2 AND status = 'refunded' AND refund_seen_at IS NULL`,
+      [orderId, userId, now],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async createRequest(q: { orderId: string; userId: string; note: string | null; used: number; now: Date }): Promise<RefundRequest | null> {
+    // order_id is UNIQUE: of two requests for one order at once, one row is written.
+    const r = await this.pool.query(
+      `INSERT INTO pro_refund_requests AS r (order_id, user_id, note, used, created_at) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (order_id) DO NOTHING RETURNING ${REQUEST_COLS}`,
+      [q.orderId, q.userId, q.note, q.used, q.now],
+    );
+    return r.rows[0] ? rowToRequest(r.rows[0]) : null;
+  }
+
+  async requestById(id: string): Promise<RefundRequest | null> {
+    const r = await this.pool.query(`SELECT ${REQUEST_COLS} FROM pro_refund_requests r WHERE r.id = $1`, [id]);
+    return r.rows[0] ? rowToRequest(r.rows[0]) : null;
+  }
+
+  async requestForOrder(orderId: string): Promise<RefundRequest | null> {
+    const r = await this.pool.query(`SELECT ${REQUEST_COLS} FROM pro_refund_requests r WHERE r.order_id = $1`, [orderId]);
+    return r.rows[0] ? rowToRequest(r.rows[0]) : null;
+  }
+
+  async requestsFor(userId: string): Promise<RefundRequest[]> {
+    const r = await this.pool.query(`SELECT ${REQUEST_COLS} FROM pro_refund_requests r WHERE r.user_id = $1 ORDER BY r.created_at DESC LIMIT 100`, [userId]);
+    return r.rows.map(rowToRequest);
+  }
+
+  async listRequests(limit: number): Promise<RefundRequestRow[]> {
+    const r = await this.pool.query(
+      `SELECT ${REQUEST_COLS}, u.username, ${ORDER_COLS}
+       FROM pro_refund_requests r JOIN pro_orders o ON o.id = r.order_id LEFT JOIN users u ON u.id = r.user_id
+       ORDER BY (r.status = 'pending') DESC, CASE WHEN r.status = 'pending' THEN r.created_at END ASC, r.decided_at DESC NULLS LAST
+       LIMIT $1`,
+      [limit],
+    );
+    return r.rows.map((x) => ({ ...rowToRequest(x), username: x.username ? String(x.username) : null, order: rowToOrder(x) }));
+  }
+
+  async decideRequest(id: string, status: 'approved' | 'declined', d: { reason: string | null; auto: boolean }, now: Date): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE pro_refund_requests SET status = $2, decline_reason = $3, auto = $4, decided_at = $5 WHERE id = $1 AND status = 'pending'`,
+      [id, status, status === 'declined' ? (d.reason ?? '').slice(0, 500) : null, d.auto, now],
+    );
+    return (r.rowCount ?? 0) > 0;
   }
 }

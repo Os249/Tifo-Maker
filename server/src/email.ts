@@ -28,6 +28,11 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text?: string;
+  /**
+   * Extra headers for this message. Only the founders email uses it, for
+   * List-Unsubscribe (the mail client's own "unsubscribe" button).
+   */
+  headers?: Record<string, string>;
 }
 
 export interface EmailSender {
@@ -140,7 +145,7 @@ export class ResendEmailSender implements EmailSender {
         // email has the same subject, so a new code was folded under the old one
         // and people opened the message whose code had just been replaced.
         // Resend documents this header for exactly that.
-        headers: { 'X-Entity-Ref-ID': randomUUID() },
+        headers: { ...(msg.headers ?? {}), 'X-Entity-Ref-ID': randomUUID() },
       }),
     });
     if (!res.ok) {

@@ -1143,7 +1143,22 @@ export class MatchDaySimulator {
    */
   tifoFootprint(): TifoFootprint | null {
     const no = this.noTifo;
-    return tifoFootprint(this.map, (i) => this.store.cells[i] !== 0 && !(no !== null && no[i] === 1));
+    const part = this.tifoFocus;
+    return tifoFootprint(this.map, (i) => this.store.cells[i] !== 0 && !(no !== null && no[i] === 1) && (part === null || part[i] === 1));
+  }
+  /**
+   * The part of the tifo the fan chose to show (ui/tifoFocus.ts): 1 for each
+   * seat in it, or null for all of it. The tifo's cameras, and a film's or a
+   * still's framing, are worked out from those seats alone; every card still
+   * goes up. Set for an export and cleared after: the live view's cameras are
+   * the whole tifo's.
+   */
+  private tifoFocus: Uint8Array | null = null;
+  private tifoFocusId = 0;
+  setTifoFocus(part: Uint8Array | null): void {
+    if (part === this.tifoFocus) return;
+    this.tifoFocus = part;
+    this.tifoFocusId++;
   }
   /** The tifo's cameras, for the design and picture shape they were made for (a cut asks for every camera). */
   private tifoShotCache: { key: string; shots: SimShot[] } | null = null;
@@ -1151,7 +1166,7 @@ export class MatchDaySimulator {
     const cells = this.store.cells;
     let h = 0;
     for (let i = 0; i < cells.length; i++) if (cells[i]) h = (Math.imul(h, 31) + i * 7 + cells[i]) | 0;
-    const key = `${h}|${(this.camera.aspect || 0).toFixed(3)}`;
+    const key = `${h}|${(this.camera.aspect || 0).toFixed(3)}|${this.tifoFocusId}`;
     if (this.tifoShotCache?.key === key) return this.tifoShotCache.shots;
     const shots = this.makeTifoShots();
     this.tifoShotCache = { key, shots };
@@ -1808,6 +1823,8 @@ export class MatchDaySimulator {
         return b && b.shown && b.messages.some((m) => m.trim()) ? boardShot(this.tifoFootprint(), this.camera.aspect || 16 / 9) : null;
       },
       painted: (i) => this.store.cells[i] !== 0 && !(this.noTifo !== null && this.noTifo[i] === 1),
+      framed: (i) => this.store.cells[i] !== 0 && !(this.noTifo !== null && this.noTifo[i] === 1) && (this.tifoFocus === null || this.tifoFocus[i] === 1),
+      focused: () => this.tifoFocus !== null,
       map: this.map,
       cells: () => ({ cells: this.store.cells, paletteSize: this.store.palette.length }),
       overRoof: (at) => {

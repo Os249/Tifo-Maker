@@ -169,7 +169,7 @@ let orderId = null;
     blue: [...document.querySelectorAll('main .pp-btn:not(.quiet)')].map((b) => b.textContent),
     refundFaq: !document.getElementById('pp-faq-refund')?.hidden,
   }));
-  check('…the price and "Get Pro", in the Pro column', /^SAR \d+ for 30 days$/.test(ui.price || '') && /^Get Pro for SAR \d+$/.test(ui.btn || ''), JSON.stringify(ui));
+  check('…the price and "Get Pro", in the Pro column', /^SAR \d+(\.\d\d)? for 30 days$/.test(ui.price || '') && /^Get Pro for SAR \d+(\.\d\d)?$/.test(ui.btn || ''), JSON.stringify(ui));
   check('…the price question and "tell me" step aside', !ui.ask && !ui.act);
   check('…one blue button on the page', ui.blue.length === 1, ui.blue.join('|'));
   check('…and the refund question is in the FAQ', ui.refundFaq);
@@ -219,7 +219,7 @@ console.log('\n— in Arabic, on a phone —');
   const held = await account('pay_held');
   const { ctx, p } = await page(held.token, { lang: 'ar', w: 390, h: 844 });
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
-  check('Arabic: the sale hero and the button', await waitFor(p, () => /خذ المميّزة لمدة شهر/.test(document.getElementById('pp-h')?.textContent || '') && /^اشترك بـ\d+ ريال$/.test(document.querySelector('[data-act="buy"]')?.textContent || '')));
+  check('Arabic: the sale hero and the button', await waitFor(p, () => /خذ المميّزة لمدة شهر/.test(document.getElementById('pp-h')?.textContent || '') && /^اشترك بـ\d+(\.\d\d)? ريال$/.test(document.querySelector('[data-act="buy"]')?.textContent || '')));
   const fit = await p.evaluate(() => {
     const btn = document.querySelector('[data-act="buy"]');
     const b = btn.getBoundingClientRect();

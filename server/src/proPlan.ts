@@ -153,8 +153,15 @@ export const PLAN_RANK: Record<PassPlan, number> = { gift: 1, monthly: 2 };
 /** Prices and dates, as the Pro page shows them. */
 export const OFFER = {
   currency: 'SAR',
-  /** One plan: 30 days of Pro. Version 1 of payments sells it outright, with no renewal. */
-  monthly: { price: 19, days: CYCLE_DAYS },
+  /**
+   * One plan: 30 days of Pro. `price` is the regular price, SAR 19.99 (set
+   * from the fans' answers to the price question, 19 Nov 2026; it was a
+   * planned SAR 19 before anything was sold). `launchPrice` is what an order
+   * costs while the launch price runs (proLaunch.ts priceAt, until the day in
+   * PRO_LAUNCH_PRICE_UNTIL); with no such day set, Pro costs `price`.
+   * Auto-renew always renews at `price`. Halalas: 1999 and 1399.
+   */
+  monthly: { price: 19.99, launchPrice: 13.99, days: CYCLE_DAYS },
   /** Once per account, started whenever its holder likes: it never expires unclaimed. */
   gift: { days: 7 },
   /*

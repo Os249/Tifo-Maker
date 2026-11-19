@@ -125,12 +125,12 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const month = (k: keyof typeof cost) => (PLAN_WINDOWS.monthly[k].find((w) => w.period === 'cycle')?.limit ?? 0) * cost[k];
   assert.ok(month('std') + month('polish') + month('photo') + month('cutout') <= 2.5, 'the most one month of Pro can cost');
   // With AI Critique (measured 18 Nov 2026: a review $0.018, a chat message $0.0007 on the
-  // small model), every ceiling together stays under $3.50 of the SAR 19 (about $5).
+  // small model), every ceiling together stays under $3.50 of the SAR 19.99 (about $5.30).
   assert.ok(month('critique') + month('chat') <= 1, 'reviews and messages: under a dollar a month');
   assert.ok(month('std') + month('polish') + month('photo') + month('cutout') + month('critique') + month('chat') <= 3.5, 'the most one month of Pro can cost, reviews included');
   // On sale, Pro always gives more designs than Free, by the day and by the month.
   if (AI_ON_PRO) assert.ok(PLAN_WINDOWS.monthly.std[0].limit > FREE_WINDOWS.std[0].limit && PLAN_WINDOWS.monthly.std[1].limit > FREE_WINDOWS.std[1].limit);
-  assert.equal(OFFER.monthly.price, 19);
+  assert.equal(OFFER.monthly.price, 19.99);
   assert.equal(OFFER.monthly.days, 30);
   assert.equal(OFFER.gift.days, 7);
   assert.equal('claimBy' in OFFER.gift, false, 'the gift has no claim-by date');
@@ -409,7 +409,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(mine.gift.state, 'offered', 'a verified account with a saved design is offered the gift');
   assert.equal(mine.gift.claimBy, undefined, 'and it has no date to claim it by');
   assert.equal(mine.offer.paymentsOpen, false);
-  assert.deepEqual(mine.offer.monthly, { price: 19, days: 30 });
+  assert.deepEqual(mine.offer.monthly, { price: 19.99, days: 30 });
   assert.equal(mine.offer.season, undefined, 'one plan: no Season Pass');
   assert.equal(mine.offer.match, undefined, 'and no Match Pass');
   // The Pro page's table comes from the same settings the server enforces.
@@ -563,7 +563,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(anon.live, true);
   assert.equal(anon.signedIn, false);
   assert.equal(anon.allowances, undefined);
-  assert.equal(anon.offer.monthly.price, 19);
+  assert.equal(anon.offer.monthly.price, 19.99);
   assert.equal(((await get(other.token)).json() as Record<string, unknown>).live, true);
   assert.equal(fanCard(await gallery())?.ownerSupporter, undefined, 'the crown follows the pass: none now');
   restore();

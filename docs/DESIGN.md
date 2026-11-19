@@ -294,7 +294,7 @@ One title, one sentence, one blue action, at most one quiet alternative.
 - **The credit line** (`ui/creditLine.ts`) is the fan's own handle, small,
   in a bottom corner of every export, on a dark pill with a hairline; the
   site's mark keeps the bottom right, an Arabic credit reads right to left.
-- **One plan** (31 Oct 2026): Free against Pro, SAR 19 for 30 days, and a
+- **One plan** (31 Oct 2026): Free against Pro, SAR 19.99 for 30 days (SAR 13.99 while the launch price runs: docs/pro-launch.md), and a
   7-day gift that waits until it is started. Every new Pro item gets the
   crown where it is picked, is free to try, meets the export sheet at
   export, has English and Saudi Arabic words that load only with it, and has

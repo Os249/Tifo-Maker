@@ -272,4 +272,51 @@
 .pro-meter[data-left='low'] .pro-meter-text { color: var(--pro-ink); font-weight: 600; }
 .pro-meter[data-left='none'] .pro-meter-bar { background: var(--pro-tint); }
 .pro-ac-foot { margin: var(--sp-4) 0 0 !important; }
+/* "Pro and purchases": what was bought, each order with its receipt and its refund. */
+.pro-ac .ac-badge[data-state='quiet'] { color: var(--pro-muted); }
+.pro-ac-get { display: inline-flex; align-items: center; text-decoration: none; }
+.pu { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--pro-line); }
+.pu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.pu-order { padding: var(--sp-3) var(--sp-4); border: 1px solid var(--pro-line); border-radius: var(--r-md); background: var(--pro-surface); }
+.pu-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); }
+.pu-what { font-size: var(--fs-md); font-weight: 700; color: var(--pro-text); }
+.pu-amt { font-size: var(--fs-md); font-weight: 700; color: var(--pro-text); font-variant-numeric: tabular-nums; margin-inline-start: auto; }
+.pu-meta { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); color: var(--pro-muted); }
+.pu-order .ac-note { margin: var(--sp-2) 0 0; }
+.pu-receipt { margin-top: var(--sp-2); }
+.pu-receipt > summary {
+  display: inline-flex; align-items: center; min-height: 24px; cursor: pointer;
+  font-size: var(--fs-sm); font-weight: 600; color: var(--pro-text);
+}
+.pu-receipt > summary:focus-visible { outline: 2px solid var(--pro-crown); outline-offset: 2px; border-radius: var(--r-sm); }
+.pu-lines { margin: var(--sp-2) 0 0; display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-sm); }
+.pu-lines dt { color: var(--pro-muted); }
+.pu-lines dd { margin: 0; color: var(--pro-text); overflow-wrap: anywhere; }
+.pu-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.pu-actions .ac-btn, .pu-ask .ac-btn { margin-top: var(--sp-3); }
+.pu-ask { margin-top: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-sm); background: var(--pro-surface-2); }
+.pu-ask p { margin: 0; font-size: var(--fs-sm); color: var(--pro-text); }
+.pu-ask label { display: block; margin-top: var(--sp-3); font-size: var(--fs-sm); color: var(--pro-muted); }
+.pu-ask textarea {
+  display: block; inline-size: 100%; box-sizing: border-box; min-block-size: 72px; margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3);
+  font: inherit; font-size: var(--fs-md); color: var(--pro-text); background: var(--pro-surface); border: 1px solid var(--pro-line); border-radius: var(--r-sm); resize: vertical;
+}
+.pu-msg { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); color: var(--pro-muted); }
+.pu-msg:empty { display: none; }
+.pu-msg[data-tone='ok'] { color: var(--ok); }
+.pu-msg[data-tone='bad'] { color: var(--danger); }
+@media (pointer: coarse) { .pu-receipt > summary { min-height: 44px; } }
+@media (max-width: 599px) {
+  .pu-order { padding: var(--sp-3); }
+  .pu-lines { grid-template-columns: 1fr; gap: 0; }
+  .pu-lines dd { margin-bottom: var(--sp-2); }
+  .pu-ask textarea { font-size: var(--fs-base); }
+}
+/* The one-time refund notice on My projects: the gift card's shape, without the gold. */
+.pro-card-refund { background: var(--pro-surface); }
+.pro-card-refund .pro-card-link { font-size: var(--fs-md); font-weight: 600; color: var(--pro-text); text-underline-offset: 3px; }
+.pro-card-refund .pro-card-link:focus-visible { outline: 2px solid var(--pro-crown); outline-offset: 2px; border-radius: var(--r-sm); }
+@media (pointer: coarse) { .pro-card-refund .pro-card-link { display: inline-flex; align-items: center; min-height: 44px; } }
+/* The same news on the account page: its title on a line of its own. */
+.pro-refunded b { display: block; margin-bottom: var(--sp-1); }
 .pro-ac-name { margin: var(--sp-2) 0 0; font-size: var(--fs-base); font-weight: 700; color: var(--pro-text); }

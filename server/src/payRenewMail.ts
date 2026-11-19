@@ -58,18 +58,23 @@ export function renewEmail(r: RenewMailInput): EmailMessage {
 
   if (n.kind === 'reminder') {
     subject = `${test}تذكير: برو يتجدد بعد ${REMIND_DAYS} أيام · Pro renews in ${REMIND_DAYS} days`;
+    // A founder's first month ran longer (proLaunch.ts): this first renewal comes after all of it, and says so.
+    const firstAr = n.firstDays ? para(`أول ${n.firstDays} يوم لك (شهرك المدفوع وشهر هدية المؤسسين) تخلص هذاك اليوم، وهذا أول تجديد لك.`) : '';
+    const firstEn = n.firstDays ? para(`Your first ${n.firstDays} days (the month you paid for and your free founder month) end that day, and this is your first renewal.`) : '';
     ar =
       para(`تذكير: اشتراكك في تيفو ميكر برو بيتجدد تلقائيًا يوم ${dayOf(n.chargeAt, 'ar')}.`) +
+      firstAr +
       para(`المبلغ: ${price} ريال، لمدة ${s.days} يوم، من ${cardText(s, 'ar')}.`) +
       para('إذا تبي تكمّل، ما عليك شي. وإذا ما تبي التجديد، أوقفه الحين بضغطة وحدة، وبرو يبقى معك لين تخلص الأيام المدفوعة:') +
       button(cancel, 'إيقاف التجديد التلقائي') +
-      smallPrint(`بعد كل تجديد يوصلك إيصال، وتقدر تسترد المبلغ كامل خلال 7 أيام إذا ما استخدمت برو: ${r.contact}`);
+      smallPrint(`بعد كل تجديد يوصلك إيصال، وتقدر تسترد المبلغ كامل خلال 7 أيام إذا ما استخدمت برو. وكل هذا تديره من صفحة حسابك: ${base}/account#pro`);
     en =
       para(`A reminder: your TifoMaker Pro renews automatically on ${dayOf(n.chargeAt, 'en')}.`) +
+      firstEn +
       para(`Amount: SAR ${price}, for ${s.days} days, from ${cardText(s, 'en')}.`) +
       para("To carry on, there's nothing to do. If you'd rather not renew, turn it off now with one click; Pro stays on until the days you've paid for end:") +
       button(cancel, 'Turn off auto-renew') +
-      smallPrint(`You get a receipt after every renewal, and a full refund within 7 days if you haven't used Pro: ${r.contact}`);
+      smallPrint(`You get a receipt after every renewal, and a full refund within 7 days if you haven't used Pro. You can manage all of it on your account page: ${base}/account#pro`);
     text =
       `برو يتجدد يوم ${dayOf(n.chargeAt, 'ar')}: ${price} ريال. للإيقاف: ${cancel}\n\n` +
       `TifoMaker Pro renews on ${dayOf(n.chargeAt, 'en')}: SAR ${price} for ${s.days} days, from ${cardText(s, 'en')}.\nTurn off auto-renew (one click): ${cancel}\n`;

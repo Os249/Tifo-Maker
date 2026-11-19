@@ -32,6 +32,8 @@ import { matchDayDeps } from './matchDayDeps';
 import { CROWN_SVG } from './pro';
 import { exportGate } from './proGate';
 import { FILM_SIZES, offscreenMatchDay } from './proFilm';
+import { chosenSeats, focusPicker, type FocusPicker } from './tifoFocus';
+import type { MatchDaySimulator } from '../render/simulator/index';
 
 export interface ReelSheetDeps {
   /** The project's name: the file's, and the closing frame's title to start with. */
@@ -98,6 +100,7 @@ export async function openReelSheet(deps: ReelSheetDeps): Promise<void> {
     `</div>` +
     `<div class="qv-form">` +
     (tifoSplit(md.map.uv, md.map.count, (i) => md.store.cells[i] !== 0) >= SPLIT_TELLS ? `<p class="qv-p-split">${escapeHtml(t('qv.p.split'))}</p>` : '') +
+    `<div class="qv-part"></div>` +
     field('hook', 70, t('reel.hookPh')) +
     `<div class="qv-row"><span class="qv-label">${escapeHtml(t('reel.length'))}</span>` +
     `<div class="qv-seg" role="radiogroup" aria-label="${escapeHtml(t('reel.length'))}">` +
@@ -127,6 +130,7 @@ export async function openReelSheet(deps: ReelSheetDeps): Promise<void> {
   canvas.height = ph;
   const g = canvas.getContext('2d')!;
 
+  let part: FocusPicker | null = null;
   let closed = false;
   let close: () => void = () => {};
   const done = new Promise<void>((resolve) => {
@@ -135,6 +139,7 @@ export async function openReelSheet(deps: ReelSheetDeps): Promise<void> {
       closed = true;
       stop?.abort();
       release();
+      part?.destroy();
       root.remove();
       resolve();
     };
@@ -160,6 +165,7 @@ export async function openReelSheet(deps: ReelSheetDeps): Promise<void> {
 
   // ---- the preview's engine: one thing drawn at a time, the newest asked for wins ----
   let host: FilmHost | null = null;
+  let sim: MatchDaySimulator | null = null;
   let stop: AbortController | null = null;
   let chain: Promise<void> = Promise.resolve();
   let mode: Mode = 'play';
@@ -265,6 +271,13 @@ export async function openReelSheet(deps: ReelSheetDeps): Promise<void> {
     typing = window.setTimeout(() => show(name === 'hook' ? 'hook' : 'end'), 140);
   });
   play.addEventListener('click', () => show('play'));
+  // The part of the tifo to show (ui/tifoFocus.ts): the Reel holds on it, so watch it again.
+  part = focusPicker(md, () => {
+    stop?.abort();
+    chain = chain.then(() => sim?.setTifoFocus(chosenSeats(md)));
+    show('play');
+  });
+  $('.qv-part').append(part.root);
 
   // ---- the download ----
   download.addEventListener('click', async () => {
@@ -317,13 +330,15 @@ export async function openReelSheet(deps: ReelSheetDeps): Promise<void> {
     return;
   }
   try {
-    await offscreenMatchDay(async (sim) => {
-      host = sim.filmHost();
+    await offscreenMatchDay(async (s) => {
+      sim = s;
+      host = s.filmHost();
       show('play');
       await done;
       // Whatever is being drawn stops at its next frame, then Match Day is freed.
       await chain.catch(() => {});
       host = null;
+      sim = null;
     });
   } catch {
     wait.textContent = t('qv.failed');

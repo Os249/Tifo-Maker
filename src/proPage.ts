@@ -61,10 +61,10 @@ import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
 import {
   adoptProviderSession, fetchMe, fetchOrder, fetchPriceAnswer, fetchPro, forgetPro, markPayAttempt, notifyPro, sendPriceAnswer, setKeepPro,
-  startCheckout, stopRenewalByLink,
+  startCheckout, stopProMail, stopRenewalByLink,
   type AllowanceKind, type CheckoutForm, type CheckoutRefusal, type PayFail, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProState,
 } from './net/api';
-import { CROWN_SVG, endsText, mountProChip, whenDay } from './ui/pro';
+import { CROWN_SVG, endsText, money, mountProChip, proNavOnSale, whenDay, whenRiyadh } from './ui/pro';
 import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
 
@@ -149,24 +149,49 @@ function monthHeld(): { endsAt: string } | null {
   return p && p.plan === 'monthly' && Date.parse(p.endsAt) > Date.now() ? { endsAt: p.endsAt } : null;
 }
 
+/** The founders offer, while this account can still take it (server/src/proLaunch.ts). */
+function founderOpen(): { until: string; bonusDays: number; total: number } | null {
+  const f = state?.founder;
+  return f && f.state === 'open' && Date.parse(f.until) > Date.now() ? f : null;
+}
+
 /** The Pro column's head when Pro is on sale: the price, and the one way to buy it. */
 function buyHtml(): string {
   const o = state!.offer!;
-  const price = String(o.monthly.price);
+  const price = money(o.monthly.price);
   const held = monthHeld();
   const renew = !!held && Date.parse(held.endsAt) - Date.now() <= RENEW_MS;
+  const founder = state?.signedIn ? founderOpen() : null;
   let act = '';
   if (!state?.signedIn) act = `<button type="button" class="pp-btn" data-act="buy-signin">${escapeHtml(t('pb.signin'))}</button>`;
-  else if (held && !renew) act = `<p class="pb-note">${escapeHtml(tv('pb.err.held', { date: whenDay(held.endsAt) }))}</p>`;
+  // Holding Pro for longer than a week: come back in its last week. A founder's offer has a deadline, so they may buy now.
+  else if (held && !renew && !founder) act = `<p class="pb-note">${escapeHtml(tv('pb.err.held', { date: whenDay(held.endsAt) }))}</p>`;
   else {
-    act = `<button type="button" class="pp-btn" data-act="buy">${escapeHtml(tv(renew ? 'pb.renew' : 'pb.buy', { price }))}</button>` +
-      (renew ? `<p class="pb-note">${escapeHtml(t('pb.renewNote'))}</p>` : '');
+    act = `<button type="button" class="pp-btn" data-act="buy">${escapeHtml(tv(held ? 'pb.renew' : 'pb.buy', { price }))}</button>` +
+      (held ? `<p class="pb-note">${escapeHtml(t('pb.renewNote'))}</p>` : '');
   }
   const msg = buyMsg ? escapeHtml(tv(buyMsg.key, buyMsg.vars ?? {})) : '';
+  // The launch price: by default a price and the day it changes, in plain words. The regular price is shown
+  // crossed out only when the server says so, which it does only with a discount licence number to print.
+  const l = o.launch;
+  const regular = l ? money(l.regular) : '';
+  const strike = !!l && l.display === 'strike' && !!l.licence;
+  const was = strike ? ` <s class="pb-was" aria-label="${escapeHtml(tv('pb.launch.was', { regular }))}">${escapeHtml(tv('pb.price', { price: regular }))}</s>` : '';
+  const launch = l
+    ? `<p class="pb-launch" id="pb-launch">${escapeHtml(strike
+      ? tv('pb.launch.licence', { date: whenRiyadh(l.until, false), regular, licence: l.licence ?? '' })
+      : tv('pb.launch', { date: whenRiyadh(l.until, false), regular }))}</p>`
+    : '';
+  const offer = founder
+    ? `<p class="pb-founder" id="pb-founder">${CROWN_SVG}<span><b>${escapeHtml(tv('pb.founder', { date: whenRiyadh(founder.until) }))}</b>` +
+      `${escapeHtml(tv('pb.founder.terms', { total: founder.total, days: o.monthly.days }))}</span></p>`
+    : '';
   return (
     `<div class="pb-buy" id="pb-buy">` +
-    `<p class="pb-price"><b>${escapeHtml(tv('pb.price', { price }))}</b> <span>${escapeHtml(tv('pb.per', { days: o.monthly.days }))}</span></p>` +
-    `<p class="pb-once">${escapeHtml(t(renewOffered() ? 'pr.once' : 'pb.once'))}</p>` +
+    `<p class="pb-price"><b>${escapeHtml(tv('pb.price', { price }))}</b>${was} <span>${escapeHtml(tv('pb.per', { days: o.monthly.days }))}</span></p>` +
+    launch +
+    `<p class="pb-once">${escapeHtml(t(renewOffered() ? 'pr.once' : 'pb.once'))} ${escapeHtml(t('pb.vat'))}</p>` +
+    offer +
     act +
     // Moyasar's form opens here (openForm), in place of the button.
     `<div class="pb-form" id="pb-form" hidden></div>` +
@@ -273,12 +298,15 @@ async function openForm(orderId: string, form: CheckoutForm, keep: boolean): Pro
   if (!box) return;
   openOrder = { id: orderId, form, keep, sent: false };
   const rn = form.renew;
-  const price = String(rn?.price ?? form.amount / 100);
+  // What is charged now, and what each renewal will be: the two are not always the same price.
+  const now = money(form.amount / 100);
+  const price = money(rn?.price ?? form.amount / 100);
+  const fo = form.founder ?? null;
   box.innerHTML =
     (rn
       ? `<label class="pb-keep"><input type="checkbox" id="pb-keep"${keep ? ' checked' : ''}>` +
         `<span><b>${escapeHtml(tv('pr.keep', { days: rn.days }))}</b>` +
-        `<span class="pb-keep-terms">${escapeHtml(tv('pr.keep.terms', { price, date: whenDay(rn.nextAt), days: rn.days }))}</span>` +
+        `<span class="pb-keep-terms" id="pb-keep-terms">${escapeHtml(tv(fo ? 'pr.keep.termsFounder' : 'pr.keep.terms', { now, price, date: whenDay(rn.nextAt), days: rn.days, total: fo?.total ?? rn.days }))}</span>` +
         `<span class="pb-keep-terms">${escapeHtml(tv('pr.keep.methods', { methods: renewMethodsText(rn) }))}</span>` +
         (rn.mada ? '' : `<span class="pb-keep-terms">${escapeHtml(t('pr.keep.noMada'))}</span>`) +
         `</span></label>` +
@@ -415,7 +443,12 @@ async function watchOrder(id: string, back: boolean, declined = false): Promise<
       forgetPro();
       closeForm();
       // "Keep Pro on" was ticked: say whether it took. A method that cannot renew leaves a one-time pass.
-      paidMsg = { key: o.kept ? (o.renews ? 'pr.paid.renews' : 'pr.paid.once') : 'pb.paid', vars: { date: o.endsAt ? whenDay(o.endsAt) : '' }, tone: 'ok' };
+      // A founder's first purchase: the page says the extra month was given, as the receipt does.
+      const total = o.bonusDays ? (o.days ?? 0) + o.bonusDays : 0;
+      paidMsg = {
+        key: o.kept ? (o.renews ? 'pr.paid.renews' : 'pr.paid.once') : total ? 'pb.paid.founder' : 'pb.paid',
+        vars: { date: o.endsAt ? whenDay(o.endsAt) : '', total: String(total) }, tone: 'ok',
+      };
       await load(true);
       paintPaid();
       return;
@@ -696,6 +729,7 @@ async function load(fresh = false): Promise<void> {
   const first = !loaded;
   const [st, mine] = await Promise.all([fetchPro(fresh).catch(() => null), fetchPriceAnswer()]);
   state = st;
+  proNavOnSale(st);
   // A fresh load (after signing in) shows the account's answer, or this browser's.
   answer = mine?.answer ?? null;
   answered = mine?.answered ?? 0;
@@ -788,6 +822,28 @@ const stopToken = ((): string | null => {
   }
 })();
 
+/** "Stop these emails" from the founders email (/pro?nomail=...), taken out of the address bar the same way. */
+const noMailToken = ((): string | null => {
+  try {
+    const u = new URL(location.href);
+    const tok = u.searchParams.get('nomail');
+    if (!tok) return null;
+    u.searchParams.delete('nomail');
+    history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    return /^[A-Za-z0-9_-]{24,64}$/.test(tok) ? tok : null;
+  } catch {
+    return null;
+  }
+})();
+
+/** Stop emails about Pro's news and offers, and say so. No sign-in: the link can do nothing else. */
+async function stopMailByLink(token: string): Promise<void> {
+  paidMsg = { key: 'pb.nomail.working', tone: 'wait' };
+  paintPaid();
+  paidMsg = (await stopProMail(token)) ? { key: 'pb.nomail.done', tone: 'ok' } : { key: 'pb.nomail.failed', tone: 'bad' };
+  paintPaid();
+}
+
 // Back to this page from the bank's page with the browser's Back button: the form
 // that was open belongs to an order already used. Start clean.
 window.addEventListener('pageshow', (e) => {
@@ -804,4 +860,5 @@ void (async () => {
   await load();
   if (returned) void watchOrder(returned.id, returned.back);
   else if (stopToken) void stopByLink(stopToken);
+  else if (noMailToken) void stopMailByLink(noMailToken);
 })();

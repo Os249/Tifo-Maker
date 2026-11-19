@@ -25,6 +25,12 @@ export interface LayoutOptions {
   blocks: EmailBlock[];
   /** The site's own origin, for the footer link. */
   siteUrl: string;
+  /**
+   * Why this message was sent, in place of the account emails' "your address
+   * was used for an account" line: plain text, one per language. For the one
+   * kind of email that is news rather than owed (proLaunchMail.ts).
+   */
+  why?: { ar: string; en: string };
 }
 
 export const escapeHtml = (s: string): string =>
@@ -58,6 +64,11 @@ export const button = (href: string, label: string): string =>
 export const smallPrint = (text: string): string =>
   `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:${MUTED}">${escapeHtml(text)}</p>`;
 
+/** Small print that ends in a real link: "To stop these emails: <Stop these emails>". */
+export const smallLink = (text: string, href: string, label: string): string =>
+  `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:${MUTED}">${escapeHtml(text)} ` +
+  `<a href="${escapeHtml(href)}" style="color:${MUTED};text-decoration:underline">${escapeHtml(label)}</a></p>`;
+
 export function layoutEmail(opts: LayoutOptions): string {
   const site = opts.siteUrl.replace(/\/+$/, '');
   const host = site.replace(/^https?:\/\//, '');
@@ -87,10 +98,10 @@ export function layoutEmail(opts: LayoutOptions): string {
     `</table>` +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px">` +
     `<tr><td dir="rtl" lang="ar" style="padding:16px 28px 0;text-align:right;font-family:${FONT}">` +
-    smallPrint('وصلتك هذه الرسالة لأن بريدك استُخدم في حساب على تيفو ميكر.') +
+    smallPrint(opts.why?.ar ?? 'وصلتك هذه الرسالة لأن بريدك استُخدم في حساب على تيفو ميكر.') +
     `</td></tr>` +
     `<tr><td dir="ltr" lang="en" style="padding:4px 28px 0;text-align:left;font-family:${FONT}">` +
-    smallPrint('You received this because your address was used for an account on TifoMaker.') +
+    smallPrint(opts.why?.en ?? 'You received this because your address was used for an account on TifoMaker.') +
     `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:${MUTED}">TifoMaker · <a href="${escapeHtml(site)}" style="color:${MUTED}">${escapeHtml(host)}</a></p>` +
     `</td></tr>` +
     `</table>` +

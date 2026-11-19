@@ -35,6 +35,7 @@ import { matchDayDeps } from './matchDayDeps';
 import { CROWN_SVG } from './pro';
 import { exportGate } from './proGate';
 import { offscreenMatchDay } from './proFilm';
+import { chosenSeats, focusPicker } from './tifoFocus';
 
 export interface PackSheetDeps {
   /** The project's name: the files'. */
@@ -161,6 +162,7 @@ export async function openPackSheet(deps: PackSheetDeps): Promise<void> {
     `</div>` +
     `<div class="qv-form">` +
     (tifoSplit(md.map.uv, md.map.count, (i) => md.store.cells[i] !== 0) >= SPLIT_TELLS ? `<p class="qv-p-split">${escapeHtml(t('qv.p.split'))}</p>` : '') +
+    `<div class="qv-part"></div>` +
     `<div class="qv-row"><span class="qv-label">${escapeHtml(t('pack.size'))}</span>` +
     `<div class="qv-pack-sizes" role="radiogroup" aria-label="${escapeHtml(t('pack.size'))}">` +
     ORDER.map((k) => {
@@ -195,6 +197,7 @@ export async function openPackSheet(deps: PackSheetDeps): Promise<void> {
       if (closed) return;
       closed = true;
       release();
+      part.destroy();
       root.remove();
       resolve();
     };
@@ -202,6 +205,17 @@ export async function openPackSheet(deps: PackSheetDeps): Promise<void> {
   const release = containDialog(root, () => close());
   root.addEventListener('mousedown', (e) => { if (e.target === root) close(); });
   $('.pro-sheet-close').addEventListener('click', () => close());
+  // The part of the tifo to show (ui/tifoFocus.ts): every size is framed on it, then moved by hand.
+  const part = focusPicker(md, () => {
+    drawing = drawing.then(() => {
+      sim?.setTifoFocus(chosenSeats(md));
+      shown = null;
+    });
+    delete canvas.dataset.ready;
+    wait.textContent = t('qv.p.drawingPreview');
+    redraw();
+  });
+  $('.qv-part').append(part.root);
 
   const paintWords = (): void => {
     const s = PACK_FORMATS[format];

@@ -31,7 +31,7 @@ import { drawWatermark } from '../export/stadiumExport';
 import { currentCredit, drawCreditLine, type Credit } from './creditLine';
 import type { RevealId } from '../core/reveal';
 import type { Preview3D } from '../render/preview3d';
-import { onLangChange, t, tv } from './i18n';
+import { getLang, onLangChange, t, tv } from './i18n';
 import { CROWN_SVG, proChipHtml } from './pro';
 import { designProItems, withoutDesignProItems } from './proGate';
 import { cleanByDefault, rememberClean } from './proMark';
@@ -40,6 +40,7 @@ import { mountPhaseControl, phaseChoice } from './proPhases';
 import type { ProToolsContext } from './proTools';
 import { matchDayDeps } from './matchDayDeps';
 import { SPLIT_TELLS, tifoSplit } from '../render/simulator/tifoSplit';
+import { focusPicker, type FocusPicker } from './tifoFocus';
 
 type Size = { width: number; height: number };
 
@@ -186,6 +187,29 @@ export function mountProExport(ctx: ProToolsContext): void {
     if (deps && tifoSplit(deps.map.uv, deps.map.count, (i) => deps.store.cells[i] !== 0) >= SPLIT_TELLS) text = `${text} ${t('qv.split')}`.trim();
     note.textContent = text;
     note.hidden = !text || row.hidden;
+    paintPart(!!size && !refused && !row.hidden);
+  };
+  // The part of the tifo a Pro film is on (ui/tifoFocus.ts), under the size while one is picked.
+  // Made when first shown, and again when the design has changed since (the picker draws the tifo once).
+  let part: FocusPicker | null = null;
+  let partOf = '';
+  const paintPart = (on: boolean): void => {
+    const deps = on ? matchDayDeps() : null;
+    if (!deps) {
+      part?.root.classList.add('tf-off');
+      return;
+    }
+    let h = 0;
+    for (let i = 0; i < deps.store.cells.length; i++) if (deps.store.cells[i]) h = (Math.imul(h, 31) + i * 7 + deps.store.cells[i]) | 0;
+    const key = `${deps.template.id}|${h}|${getLang()}`;
+    if (!part || partOf !== key) {
+      part?.destroy();
+      part = focusPicker(deps, () => {});
+      part.root.classList.add('pexp-part');
+      partOf = key;
+      note.after(part.root);
+    }
+    part.root.classList.remove('tf-off');
   };
   const paint = (): void => {
     (row.querySelector('label') as HTMLElement).textContent = t('pexp.size');

@@ -48,6 +48,10 @@ export interface FilmHost {
   boards?(): SimShot | null;
   /** Whether a seat holds a card of the tifo. */
   painted(seat: number): boolean;
+  /** Whether a seat's card is in the part the camera frames: all of the tifo, or the part the fan chose (ui/tifoFocus.ts). */
+  framed?(seat: number): boolean;
+  /** The fan chose the part to show: a vertical film holds on it rather than panning across the tifo. */
+  focused?(): boolean;
   /** The design as painted: each seat's palette index (0: no card) and how many colours the palette has. */
   cells?(): { cells: ArrayLike<number>; paletteSize: number };
   /** The ground's own structure (a roof, a stand) is under `at`: a camera there looks across a building. */
@@ -197,12 +201,13 @@ export function filmPlanFor(host: FilmHost, aspect: number, hold?: FilmPlanInput
     const step = Math.max(1, Math.floor(fp.seats / 400));
     let k = 0;
     for (let i = 0; i < m.count; i++) {
-      if (!host.painted(i) || k++ % step) continue;
+      if (!(host.framed ? host.framed(i) : host.painted(i)) || k++ % step) continue;
       points.push([m.pos3[i * 3], m.pos3[i * 3 + 1] + 0.9, m.pos3[i * 3 + 2]]);
     }
   }
   return planFilm({
     hold,
+    fixed: !!host.focused?.(),
     points,
     revealFrom: keys ? revealStart(host.map, keys) : undefined,
     sees: (a, b) => host.sees(a, b),
@@ -571,10 +576,12 @@ async function filmRealtime(host: FilmHost, opts: FilmOptions, fps: number): Pro
  * ground and tifo have no such camera. The big screens are left out, as in
  * filmStill.
  */
-export async function shotStill(host: FilmHost, w: number, h: number, name: string): Promise<HTMLCanvasElement | null> {
+export async function shotStill(host: FilmHost, w: number, h: number, name: string | readonly string[]): Promise<HTMLCanvasElement | null> {
   await host.begin(w, h, 30);
   try {
-    const shot = host.shots().find((s) => s.name === name);
+    // The first of the names this ground and tifo have (a tifo round the whole bowl has no camera of its own).
+    const shots = host.shots();
+    const shot = (typeof name === 'string' ? [name] : name).map((n) => shots.find((s) => s.name === n)).find(Boolean);
     if (!shot) return null;
     host.screens?.(false);
     host.revealKeys(new Float32Array(host.map.count).fill(ALWAYS));

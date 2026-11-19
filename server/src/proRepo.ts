@@ -259,6 +259,16 @@ export class MemoryProRepository implements ProRepository {
     return this.notifies.has(userId);
   }
 
+  /** The accounts on the "tell me when Pro opens" list (the memory launch store reads the founders from here). */
+  notifyIds(): string[] {
+    return [...this.notifies];
+  }
+
+  /** The accounts that answered the price question while signed in. */
+  priceUserIds(): string[] {
+    return [...new Set([...this.prices.values()].map((p) => p.userId).filter((id): id is string => !!id))];
+  }
+
   async putPriceAnswer(a: PriceAnswerPut): Promise<'saved' | 'full'> {
     const had = this.prices.get(a.voter);
     const absorbed = a.absorb && a.absorb !== a.voter ? this.prices.get(a.absorb) : undefined;

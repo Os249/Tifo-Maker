@@ -36,7 +36,7 @@ export interface ReceiptInput {
    * due, and the one-click link that turns it off. Absent or null: the
    * receipt says, as before, that nothing renews.
    */
-  renew?: { nextAt: string; cancelUrl: string } | null;
+  renew?: { nextAt: string; cancelUrl: string; /** Halalas each renewal charges (the regular price). Absent: the order's own amount. */ amount?: number } | null;
 }
 
 /** The date alone, in Riyadh: "12 December 2026". */
@@ -56,41 +56,48 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
   const subject = `${test ? '[TEST] ' : ''}إيصال تيفو ميكر برو · Your TifoMaker Pro receipt`;
   const account = `${r.base}/account#pro`;
   const renewal = order.kind === 'renewal';
-  const rn = r.renew ?? null;
+  const refunded = order.status === 'refunded';
+  const rn = refunded ? null : r.renew ?? null;
+  // The founders bonus (proLaunch.ts): extra days on this order's pass, at no charge.
+  const bonus = order.bonusDays > 0 ? order.bonusDays : 0;
+  const bonusAr = bonus ? ` + ${bonus} يوم هدية المؤسسين (المجموع ${order.days + bonus} يوم)` : '';
+  const bonusEn = bonus ? ` + ${bonus} founder days free (${order.days + bonus} days in all)` : '';
   const itemAr = rn
-    ? `المنتج: تيفو ميكر برو، ${order.days} يوم${renewal ? ' (تجديد تلقائي)' : ''}`
-    : `المنتج: تيفو ميكر برو، ${order.days} يوم (دفعة وحدة، بدون تجديد تلقائي)`;
+    ? `المنتج: تيفو ميكر برو، ${order.days} يوم${bonusAr}${renewal ? ' (تجديد تلقائي)' : ''}`
+    : `المنتج: تيفو ميكر برو، ${order.days} يوم${bonusAr} (دفعة وحدة، بدون تجديد تلقائي)`;
   const itemEn = rn
-    ? `Item: TifoMaker Pro, ${order.days} days${renewal ? ' (automatic renewal)' : ''}`
-    : `Item: TifoMaker Pro, ${order.days} days (one payment, no auto-renewal)`;
+    ? `Item: TifoMaker Pro, ${order.days} days${bonusEn}${renewal ? ' (automatic renewal)' : ''}`
+    : `Item: TifoMaker Pro, ${order.days} days${bonusEn} (one payment, no auto-renewal)`;
+  // What each renewal charges: the regular price the fan agreed to, which is not always what this order cost.
+  const next = sar(rn?.amount ?? order.amount);
   const renewAr = rn
-    ? para(`التجديد التلقائي شغّال: بينخصم ${sar(order.amount)} ريال يوم ${dayOf(rn.nextAt, 'ar')}، وبنذكّرك بإيميل قبلها بـ3 أيام. تقدر توقفه بأي وقت بضغطة وحدة، وبرو يبقى معك لين تخلص الأيام المدفوعة.`) +
+    ? para(`التجديد التلقائي شغّال: بينخصم ${next} ريال يوم ${dayOf(rn.nextAt, 'ar')}، وبعدها كل ${order.days} يوم لين توقفه. بنذكّرك بإيميل قبل كل تجديد بـ3 أيام، وتقدر توقفه بأي وقت بضغطة وحدة، وبرو يبقى معك لين تخلص الأيام المدفوعة.`) +
       button(rn.cancelUrl, 'إيقاف التجديد التلقائي')
     : '';
   const renewEn = rn
-    ? para(`Auto-renew is on: SAR ${sar(order.amount)} will be charged on ${dayOf(rn.nextAt, 'en')}, and we'll email you 3 days before. You can turn it off any time with one click, and Pro stays on until the days you've paid for end.`) +
+    ? para(`Auto-renew is on: SAR ${next} will be charged on ${dayOf(rn.nextAt, 'en')}, and then every ${order.days} days until you turn it off. We'll email you 3 days before each renewal. You can turn it off any time with one click, and Pro stays on until the days you've paid for end.`) +
       button(rn.cancelUrl, 'Turn off auto-renew')
     : '';
   const ar =
     (test ? para('هذا إيصال تجريبي: ما انخصم أي مبلغ حقيقي.') : '') +
     para(renewal ? 'تجدّد برو على حسابك. شكرًا لك!' : 'شكرًا لك! وصلنا دفعك، وبرو مفعّل على حسابك.') +
     para(itemAr) +
-    para(`المبلغ: ${sar(order.amount)} ريال`) +
+    para(`المبلغ: ${sar(order.amount)} ريال (هذا المبلغ كامل، وما فيه ضريبة قيمة مضافة)`) +
     para(`تاريخ الدفع: ${when(paidAt, 'ar')} (بتوقيت الرياض)`) +
     (r.endsAt ? para(`برو شغّال لين: ${when(r.endsAt, 'ar')}`) : '') +
     para(`رقم المرجع: ${ref}`) +
-    renewAr +
-    smallPrint(`تقدر تطلب استرداد كامل المبلغ خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو، بالرد على هذي الرسالة أو على ${r.contact}.`);
+    (refunded ? para(`هذا الطلب تم استرداده يوم ${dayOf(order.refundedAt ?? paidAt, 'ar')}، وشهر برو حقه انتهى.`) : renewAr) +
+    (refunded ? '' : smallPrint(`تقدر تطلب استرداد كامل المبلغ خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو: من صفحة حسابك، تحت «المميّزة ومشترياتك»، اضغط «اطلب استرداد» (${account})، أو رد على هذي الرسالة أو راسلنا على ${r.contact}.`));
   const en =
     (test ? para('This is a test receipt: no real money was taken.') : '') +
     para(renewal ? 'Pro has renewed on your account. Thank you!' : 'Thank you! Your payment arrived and Pro is on for your account.') +
     para(itemEn) +
-    para(`Amount: SAR ${sar(order.amount)}`) +
+    para(`Amount: SAR ${sar(order.amount)} (the full amount; no VAT is charged)`) +
     para(`Paid: ${when(paidAt, 'en')} (Riyadh time)`) +
     (r.endsAt ? para(`Pro runs until: ${when(r.endsAt, 'en')}`) : '') +
     para(`Reference: ${ref}`) +
-    renewEn +
-    smallPrint(`You can ask for a full refund within ${REFUND_DAYS} days of paying if you haven't used Pro: reply to this email or write to ${r.contact}.`);
+    (refunded ? para(`This order was refunded on ${dayOf(order.refundedAt ?? paidAt, 'en')}, and its month of Pro has ended.`) : renewEn) +
+    (refunded ? '' : smallPrint(`You can ask for a full refund within ${REFUND_DAYS} days of paying if you haven't used Pro: on your account page, under "Pro and purchases", press "Request a refund" (${account}), or reply to this email or write to ${r.contact}.`));
   return {
     to: r.to,
     subject,
@@ -98,10 +105,11 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
     text:
       (test ? 'TEST: no real money was taken.\n\n' : '') +
       `تيفو ميكر برو، ${order.days} يوم: ${sar(order.amount)} ريال\nالمرجع: ${ref}\n${account}\n\n` +
-      `TifoMaker Pro, ${order.days} days: SAR ${sar(order.amount)}\nPaid: ${when(paidAt, 'en')} (Riyadh time)\n` +
+      `TifoMaker Pro, ${order.days} days${bonusEn}: SAR ${sar(order.amount)}\nPaid: ${when(paidAt, 'en')} (Riyadh time)\n` +
       (r.endsAt ? `Pro runs until: ${when(r.endsAt, 'en')}\n` : '') +
-      `Reference: ${ref}\nRefund within ${REFUND_DAYS} days if unused: ${r.contact}\n` +
-      (rn ? `Auto-renew is on: SAR ${sar(order.amount)} on ${dayOf(rn.nextAt, 'en')}. Turn it off: ${rn.cancelUrl}\n` : '') +
+      `Reference: ${ref}\n` +
+      (refunded ? `Refunded on ${dayOf(order.refundedAt ?? paidAt, 'en')}.\n` : `Refund within ${REFUND_DAYS} days if unused: ask on your account page (${account}) or write to ${r.contact}\n`) +
+      (rn ? `Auto-renew is on: SAR ${next} on ${dayOf(rn.nextAt, 'en')}, then every ${order.days} days. Turn it off: ${rn.cancelUrl}\n` : '') +
       textFooter(r.base),
   };
 }

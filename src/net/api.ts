@@ -2015,6 +2015,28 @@ export interface ProOffer {
   checkout?: 'form';
   /** "Keep Pro on" (auto-renew) is offered at checkout (payments v2). */
   autoRenew?: boolean;
+  /** What every renewal costs: the regular price, whatever the first month costs. */
+  renewPrice?: number;
+  /**
+   * The launch price is what `monthly.price` is now (server/src/proLaunch.ts):
+   * the regular price it gives way to, and the instant it does. 'strike' shows
+   * the regular price crossed out, which the server only says with a discount
+   * licence number to print; 'plain' never shows a crossed-out price.
+   */
+  launch?: { regular: number; until: string; display: 'plain' | 'strike'; licence?: string };
+}
+
+/**
+ * The founders offer as this account sees it (server/src/proLaunch.ts): still
+ * open to it (pay by `until` and the first month is `total` days), or taken
+ * with its first purchase.
+ */
+export interface FounderState {
+  state: 'open' | 'used';
+  until: string;
+  bonusDays: number;
+  total: number;
+  order?: string;
 }
 
 /**
@@ -2037,6 +2059,12 @@ export interface ProState {
   supporter?: boolean;
   /** This account has (or had) auto-renew: the account page shows it (payments v2). */
   renewal?: boolean;
+  /** This account bought something: the account page lists it (server/src/payRoutes.ts /api/pro/purchases). */
+  purchases?: boolean;
+  /** A refund this account has not been shown on the site yet: said once, then marked seen. */
+  refundNotice?: { order: string; amount: number; at: string; test: boolean };
+  /** Only for a founder, after Pro has gone on sale: nobody else is told anything. */
+  founder?: FounderState;
   allowances?: Record<AllowanceKind, Allowance>;
   gift?: GiftState;
   notified?: boolean;
@@ -2104,7 +2132,10 @@ export interface CheckoutForm {
   networks: string[];
   applePay: { label: string; country: string } | null;
   samsungPay: { serviceId: string; orderNumber: string } | null;
+  /** `price` is what each renewal charges (the regular price); `nextAt` the first renewal's date. */
   renew: { price: number; days: number; nextAt: string; methods: string[]; mada: boolean } | null;
+  /** The founders offer on this order: paid by `until`, it buys `total` days. */
+  founder?: { until: string; bonusDays: number; total: number } | null;
 }
 
 export type CheckoutStart =
@@ -2146,6 +2177,20 @@ export interface OrderView {
   /** "Keep Pro on" was ticked with this order, and whether it took (some methods cannot renew). */
   kept: boolean;
   renews: boolean;
+  /** The founders bonus this order's pass was given, with the days it bought. */
+  bonusDays?: number;
+  days?: number;
+}
+
+/** "Stop these emails", from the founders email's link. True when it worked. */
+export async function stopProMail(token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/pro/mail/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: token }) });
+    await drain(res);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether an order of this account's is paid yet (the server reads it from Moyasar). Null: not ours, or no answer. */
@@ -2238,6 +2283,83 @@ export async function stopRenewalByLink(t: string): Promise<{ endsAt: string | n
     return { endsAt: data.endsAt ?? null };
   } catch {
     return null;
+  }
+}
+
+/** Whether a refund can still be asked for (server/src/payments.ts RefundState). */
+export type RefundState = 'open' | 'late' | 'requested' | 'declined' | 'refunded' | 'none';
+
+/** An order as the account page lists it (server/src/payRoutes.ts purchaseView). */
+export interface PurchaseView {
+  id: string;
+  reference: string;
+  status: 'paid' | 'refunded' | 'failed' | 'checking' | 'pending' | 'expired';
+  amount: number;
+  days: number;
+  /** Extra days the order's pass was given: the founders bonus. */
+  bonusDays?: number;
+  /** 'creditcard', 'applepay', 'stcpay', ... and the card's scheme ('mada', 'visa', 'master') when known. */
+  method: string | null;
+  brand: string | null;
+  test: boolean;
+  renewal: boolean;
+  createdAt: string;
+  paidAt: string | null;
+  endsAt: string | null;
+  refundedAt: string | null;
+  refunded: number;
+  refund: { state: RefundState; until: string | null; used: boolean | null; reason: string | null; askedAt: string | null };
+}
+
+/** What this account bought. Null when there is nothing to show, or no answer. */
+export async function fetchPurchases(): Promise<{ refundDays: number; orders: PurchaseView[] } | null> {
+  try {
+    const res = await fetch(`${API}/pro/purchases`, { headers: authHeaders(false) });
+    if (!res.ok) {
+      await drain(res);
+      return null;
+    }
+    const data = (await res.json()) as { refundDays?: number; orders?: PurchaseView[] };
+    return { refundDays: data.refundDays ?? 7, orders: Array.isArray(data.orders) ? data.orders : [] };
+  } catch {
+    return null;
+  }
+}
+
+/** Ask for a refund of one of this account's orders. The server decides whether it still qualifies. */
+export async function requestRefund(order: string, note: string): Promise<{ ok: true; state: 'requested' | 'refunded' } | { ok: false; reason: string }> {
+  try {
+    const res = await fetch(`${API}/pro/purchases/refund`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ order, note: note.slice(0, 500) }) });
+    const data = (await res.json().catch(() => null)) as { state?: 'requested' | 'refunded'; reason?: string } | null;
+    if (res.ok && data?.state) {
+      forgetPro();
+      return { ok: true, state: data.state };
+    }
+    return { ok: false, reason: data?.reason ?? 'failed' };
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+}
+
+/** Send an order's receipt to the account's email again. */
+export async function resendReceipt(order: string): Promise<'sent' | 'wait' | 'no_email' | 'failed'> {
+  try {
+    const res = await fetch(`${API}/pro/purchases/receipt`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ order }) });
+    const data = (await res.json().catch(() => null)) as { reason?: string } | null;
+    if (res.ok) return 'sent';
+    return data?.reason === 'wait' ? 'wait' : data?.reason === 'no_email' ? 'no_email' : 'failed';
+  } catch {
+    return 'failed';
+  }
+}
+
+/** The one-time refund notice was shown: the server does not offer it again. */
+export async function seenRefundNotice(order: string): Promise<void> {
+  try {
+    await drain(await fetch(`${API}/pro/refund-notice/seen`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ order }), keepalive: true }));
+    forgetPro();
+  } catch {
+    /* it shows once more on the next visit, which is harmless */
   }
 }
 

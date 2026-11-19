@@ -23,6 +23,7 @@ import './proProposal.css';
 import { escapeHtml } from '../core/escape';
 import { pdfFromJpeg } from '../core/pdfImage';
 import { TIFO_FONTS, fontCssOf } from '../core/text';
+import type { MatchDaySimulator } from '../render/simulator/index';
 import { loadTifoFonts } from '../core/tifoFonts';
 import { containDialog } from './dialogFocus';
 import { getLang, t, tl, tv } from './i18n';
@@ -30,6 +31,7 @@ import { matchDayDeps } from './matchDayDeps';
 import { CROWN_SVG } from './pro';
 import { exportGate } from './proGate';
 import { offscreenMatchDay } from './proFilm';
+import { chosenSeats, focusPicker, type FocusPicker } from './tifoFocus';
 
 export interface ProposalSheetDeps {
   title(): string;
@@ -260,6 +262,7 @@ export async function openProposalSheet(deps: ProposalSheetDeps): Promise<void> 
     `<div class="qv-poster-body">` +
     `<div class="qv-preview"><canvas role="img" data-shape="portrait" aria-label="${escapeHtml(t('prop.preview'))}"></canvas><p class="qv-wait" role="status" aria-live="polite"></p></div>` +
     `<div class="qv-form">` +
+    `<div class="qv-part"></div>` +
     input('title', 60) + input('when', 60, t('prop.whenPh')) + input('note', 400, t('prop.notePh')) + input('contact', 80, t('prop.contactPh')) +
     `<div class="pro-actions"><button type="button" class="pro-btn qv-download" data-get="pdf">${CROWN_SVG}<span>${escapeHtml(t('prop.pdf'))}</span></button>` +
     `<button type="button" class="pro-alt" data-get="png">${escapeHtml(t('prop.png'))}</button></div>` +
@@ -272,6 +275,7 @@ export async function openProposalSheet(deps: ProposalSheetDeps): Promise<void> 
   const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-get]')];
   document.body.appendChild(root);
 
+  let part: FocusPicker | null = null;
   let closed = false;
   let close: () => void = () => {};
   const done = new Promise<void>((resolve) => {
@@ -279,6 +283,7 @@ export async function openProposalSheet(deps: ProposalSheetDeps): Promise<void> 
       if (closed) return;
       closed = true;
       release();
+      part?.destroy();
       root.remove();
       resolve();
     };
@@ -389,23 +394,53 @@ export async function openProposalSheet(deps: ProposalSheetDeps): Promise<void> 
     });
   }
 
+  // The two pictures, drawn one after the other, and again when the part to show changes (ui/tifoFocus.ts).
+  let sim: MatchDaySimulator | null = null;
+  let drawing: Promise<void> = Promise.resolve();
+  let wanted = 0;
+  const pictures = (): void => {
+    const mine = ++wanted;
+    wait.textContent = t('qv.p.drawingPreview');
+    drawing = drawing.then(async () => {
+      if (closed || !sim || mine !== wanted) return;
+      try {
+        sim.setTifoFocus(chosenSeats(md));
+        const { filmStill, shotStill } = await import('../render/simulator/film');
+        const a = await filmStill(sim.filmHost(), 1920, 1080);
+        if (closed) return;
+        picA = a;
+        redraw();
+        // From the pitch in front of the tifo; a tifo round the whole ground has no such camera, and gets the ultras' end.
+        const b = await shotStill(sim.filmHost(), 1280, 720, ['Tifo Pitch Level', 'Ultra View', 'TV Broadcast']);
+        if (closed) return;
+        picB = b;
+        redraw();
+        if (mine === wanted) wait.textContent = '';
+      } catch (e) {
+        console.warn('[tifo] the proposal pictures failed', e);
+        wait.textContent = t('pack.failed');
+      }
+    });
+  };
+  part = focusPicker(md, pictures);
+  $('.qv-part').append(part.root);
+
   wait.textContent = t('qv.p.drawingPreview');
   await loadTifoFonts();
   if (closed) return;
   // The page with its words first; the pictures arrive into it.
   redraw();
   try {
-    await offscreenMatchDay(async (sim) => {
-      const { filmStill, shotStill } = await import('../render/simulator/film');
-      picA = await filmStill(sim.filmHost(), 1920, 1080);
-      if (!closed) redraw();
-      picB = await shotStill(sim.filmHost(), 1280, 720, 'Tifo Pitch Level');
-      if (!closed) redraw();
-      wait.textContent = '';
+    await offscreenMatchDay(async (s) => {
+      sim = s;
+      pictures();
+      await done;
+      await drawing;
+      sim = null;
     });
   } catch (e) {
     console.warn('[tifo] the proposal pictures failed', e);
     wait.textContent = t('pack.failed');
+    await done;
   }
-  await done;
 }

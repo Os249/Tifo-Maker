@@ -208,6 +208,18 @@
 [dir="rtl"] .pb-price b { letter-spacing: 0; }
 .pb-price span { font-size: var(--fs-md); font-weight: 700; color: var(--muted); }
 .pb-once { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--fs-sm); color: var(--muted); }
+/* The launch price: plain words by default; the regular price crossed out only with a discount licence
+   (server/src/proLaunch.ts priceDisplay). */
+.pb-price .pb-was { font-size: var(--fs-md); font-weight: 700; color: var(--muted); text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.pb-launch { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--fs-sm); line-height: 1.5; font-weight: 700; color: var(--ink); }
+/* The founders offer, to a founder who can still take it. */
+.pb-founder {
+  display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md); border: 1px solid var(--pro-line); background: var(--pro-tint);
+  font-size: var(--fs-sm); line-height: 1.5; color: var(--ink);
+}
+.pb-founder svg { flex: none; inline-size: 18px; block-size: 18px; margin-top: 2px; color: var(--pro-crown); }
+.pb-founder b { display: block; }
 .pb-buy .pp-btn { justify-self: start; }
 .pb-note { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
 .pb-msg { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); font-weight: 700; }

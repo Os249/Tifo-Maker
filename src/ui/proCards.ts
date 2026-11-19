@@ -12,11 +12,11 @@
  * only: it is a courtesy, and the worst a cleared browser does is show a card
  * again.
  */
-import { fetchPro, isSignedIn, notifyPro, type ProState } from '../net/api';
+import { fetchPro, isSignedIn, notifyPro, seenRefundNotice, type ProState } from '../net/api';
 import { track } from '../net/analytics';
 import { escapeHtml } from '../core/escape';
-import { CROWN_SVG, whenDate } from './pro';
-import { onLangChange, t, tv } from './i18n';
+import { CROWN_SVG, money, whenDate, whenDay } from './pro';
+import { localPath, onLangChange, t, tv } from './i18n';
 
 const DAY = 24 * 60 * 60 * 1000;
 const LATER_KEY = 'tifo_gift_later_v1';
@@ -120,6 +120,53 @@ export function mountReexportCard(host: HTMLElement, before: Element | null, onC
   void load();
   window.addEventListener('tifo:auth', () => void load(true));
   window.addEventListener('tifo:pro', () => void load(true));
+  onLangChange(paint);
+}
+
+/**
+ * A refund ended Pro (19 Nov 2026): said once, calmly, the next time the fan
+ * opens My projects, with the way to their purchases. The server offers it
+ * once (/api/pro refundNotice) and is told as soon as the card is up, so it
+ * never comes back on another page or device; "OK" puts it away now. The
+ * email says the same (server/src/payRefundMail.ts).
+ */
+export function mountRefundCard(host: HTMLElement, before: Element | null): void {
+  const card = document.createElement('section');
+  card.className = 'pro-card pro-card-refund';
+  card.hidden = true;
+  card.setAttribute('aria-labelledby', 'pro-refund-h');
+  host.insertBefore(card, before);
+  let notice: NonNullable<ProState['refundNotice']> | null = null;
+  const paint = (): void => {
+    card.hidden = !notice;
+    if (!notice) {
+      card.innerHTML = '';
+      return;
+    }
+    card.innerHTML =
+      `<div class="pro-sheet-mark" aria-hidden="true">${CROWN_SVG}</div>` +
+      `<div><h2 id="pro-refund-h">${escapeHtml(t('rn.title'))}</h2>` +
+      `<p>${escapeHtml(tv('rn.body', { price: money(notice.amount), date: whenDay(notice.at) }))}${notice.test ? ` ${escapeHtml(t('rn.test'))}` : ''}</p>` +
+      `<div class="pro-card-actions"><a class="pro-card-link" href="${escapeHtml(localPath('/account'))}#pro">${escapeHtml(t('rn.link'))}</a>` +
+      `<button type="button" class="pro-text-btn" data-act="ok">${escapeHtml(t('gift.ok'))}</button></div></div>`;
+    card.querySelector('[data-act="ok"]')!.addEventListener('click', () => {
+      notice = null;
+      paint();
+    });
+  };
+  const load = async (fresh = false): Promise<void> => {
+    const st = isSignedIn() ? await fetchPro(fresh).catch(() => null) : null;
+    if (st?.refundNotice && notice?.order !== st.refundNotice.order) {
+      notice = st.refundNotice;
+      void seenRefundNotice(notice.order);
+    }
+    paint();
+  };
+  void load();
+  window.addEventListener('tifo:auth', () => {
+    notice = null;
+    void load(true);
+  });
   onLangChange(paint);
 }
 

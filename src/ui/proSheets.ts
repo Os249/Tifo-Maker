@@ -13,7 +13,7 @@ import { acceptProGift, notifyPro, type ProOffer, type ProState } from '../net/a
 import { track } from '../net/analytics';
 import { containDialog } from './dialogFocus';
 import { localPath, t, tv } from './i18n';
-import { CROWN_SVG, whenDate } from './pro';
+import { CROWN_SVG, money, whenDate } from './pro';
 import type { BothWays } from './proGate';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -138,7 +138,7 @@ export function openGiftSheet(state?: ProState | null): Promise<boolean> {
 
 /** The one plan's price in one line, from the server's offer. */
 export function priceLine(offer: ProOffer): string {
-  return tv('pro.priceLine', { price: offer.monthly.price });
+  return tv(offer.autoRenew ? 'pro.priceLineRenew' : 'pro.priceLine', { price: money(offer.monthly.price), days: offer.monthly.days });
 }
 
 /**
@@ -160,7 +160,7 @@ export function openProSheet(state: ProState, opts: { title?: string; lead?: str
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: offer.monthly.price }))}</a>`
+        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>`
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<a class="pro-text-btn" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(t('pro.act.seePage'))}</a>` +
     `</div><p class="pro-note" role="status" aria-live="polite"></p>`,
@@ -247,7 +247,7 @@ export function openExportSheet(items: string[], state: ProState, both?: BothWay
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: offer.monthly.price }))}</a>`
+        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>`
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<button type="button" class="pro-alt" data-act="free">${escapeHtml(t('pro.export.free'))}</button>` +
     `</div><p class="pro-note" role="status" aria-live="polite">${escapeHtml(t('pro.export.never'))}</p>`,

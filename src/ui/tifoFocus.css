@@ -1,0 +1,22 @@
+/*
+ * The part of the tifo to show (ui/tifoFocus.ts): the tifo flat, with a box
+ * dragged over it. Sits in the Pro sheets, the editor's export panel and
+ * Match Day's Recording section, so it takes its colours from pro.css's
+ * roles and has none of its own.
+ */
+.tf { display: grid; gap: var(--sp-1); min-width: 0; }
+.tf[hidden], .tf.tf-off { display: none; }
+.tf-label { font-size: var(--fs-xs); font-weight: 600; color: var(--pro-muted); }
+.tf-art {
+  display: grid; place-items: center; padding: var(--sp-2); border-radius: var(--r-md);
+  background: var(--pro-surface-2); border: 1px solid var(--pro-hairline);
+}
+.tf[data-on="1"] .tf-art { border-color: var(--pro-line); }
+.tf-art canvas { display: block; width: 100%; height: auto; cursor: crosshair; touch-action: none; border-radius: var(--r-sm); }
+.tf-art canvas.dragging { cursor: grabbing; }
+.tf-art canvas:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+.tf-hint { margin: 0; font-size: var(--fs-xs); line-height: 1.45; color: var(--pro-muted); }
+.tf-all { justify-self: start; }
+.tf-all[hidden] { display: none; }
+/* Under the editor's Pro video size (ui/proExport.ts). */
+.pexp-part { margin-top: var(--sp-2); }

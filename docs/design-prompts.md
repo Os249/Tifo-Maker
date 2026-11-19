@@ -45,14 +45,14 @@ Fastify). Follow docs/DESIGN.md. In particular:
 Build the pricing section for the paid plan (see the project doc "Tifo Maker
 Pro: monthly plan brief"; use the plan, price and limits that are DECIDED
 there at the time, and ask me if they are not).
-- Two cards: Free and Pro (one plan, SAR 19 a month), side by side on
+- Two cards: Free and Pro (one plan, SAR 19.99 for 30 days), side by side on
   desktop, stacked on a phone.
 - Each card: the name, the price in SAR as a large tabular number with "a
   month" beside it, what it includes as a short list with check icons, and
   one button.
 - Only Pro has the blue button. The free plan's button says what it does
   ("Keep designing free").
-- A line under the cards: paying with mada, Apple Pay or STC Pay (text, no
+- A line under the cards: paying with mada, a card or Apple Pay (text, no
   logos unless we have the right to use them), and that a month of Pro
   never renews by itself (version 1 of payments).
 - Do not invent testimonials, user counts or "most popular" claims.
@@ -66,7 +66,7 @@ there at the time, and ask me if they are not).
 Update the AI limit card in src/ui/aiPanel.ts (the quota branch of showCard)
 for when passes are on sale:
 - Title and one sentence as today, in both languages.
-- The blue button becomes Pro ("Get Pro for SAR 19 a month");
+- The blue button becomes Pro ("Get Pro for SAR 19.99");
   "Use the Quick Designer" moves to the tinted secondary; "Not now" is a text
   button.
 - Show when the free allowance comes back ("Back on Sunday") from the quota

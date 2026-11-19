@@ -772,6 +772,93 @@ CREATE UNIQUE INDEX IF NOT EXISTS pro_orders_payment_idx ON pro_orders (payment_
 CREATE UNIQUE INDEX IF NOT EXISTS pro_orders_cycle_idx ON pro_orders (subscription_id, cycle)
   WHERE kind = 'renewal' AND status IN ('pending', 'paid', 'refunded', 'review');
 
+-- Refunds told to the fan, and refund requests (19 Nov 2026; payRepo.ts,
+-- payments.ts "refunds, told and asked for"). Nothing here is read or written
+-- for an account that never had an order.
+--
+-- On an order: brand is the card's scheme as Moyasar names it ('mada', 'visa',
+-- 'master'; never a number), for "how it was paid" on the account page.
+-- refund_mail_at is set by the one caller that sends the refund email, so it
+-- goes out once whoever notices the refund (/admin, the webhook, two servers);
+-- refund_seen_at is set when the site's one-time notice has been shown.
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS brand TEXT CHECK (brand IS NULL OR char_length(brand) <= 32);
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS refund_mail_at TIMESTAMPTZ;
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS refund_seen_at TIMESTAMPTZ;
+
+-- A fan's request for the refund the terms promise: at most one per order,
+-- ever. used is how much of Pro's allowances the order's pass had used when
+-- they asked (0 is "not used"); auto says the refund was made by the
+-- PRO_AUTO_REFUND switch rather than by a person. The row outlives its
+-- account, like the order it is about.
+CREATE TABLE IF NOT EXISTS pro_refund_requests (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id       UUID NOT NULL UNIQUE REFERENCES pro_orders(id) ON DELETE CASCADE,
+  user_id        UUID REFERENCES users(id) ON DELETE SET NULL,
+  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'declined')),
+  note           TEXT CHECK (note IS NULL OR char_length(note) <= 500),
+  used           INT NOT NULL DEFAULT 0 CHECK (used >= 0),
+  auto           BOOLEAN NOT NULL DEFAULT false,
+  decline_reason TEXT CHECK (decline_reason IS NULL OR char_length(decline_reason) <= 500),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at     TIMESTAMPTZ,
+  CHECK ((status = 'pending') = (decided_at IS NULL)),
+  CHECK (status <> 'declined' OR decline_reason IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS pro_refund_requests_open_idx ON pro_refund_requests (created_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS pro_refund_requests_user_idx ON pro_refund_requests (user_id);
+
+-- Pro's launch (19 Nov 2026; server/src/proLaunch.ts has the rules,
+-- launchRepo.ts the store). Nothing here is written until Pro is on sale for
+-- real (PRO_PAYMENTS=on, a live Moyasar key, PRO_MODE=on): on a test key or in
+-- preview all three tables stay empty.
+--
+-- pro_launch: the moment Pro went on sale. One row, ever (the primary key is
+-- the constant true), so a restart or a second server reads the same moment.
+CREATE TABLE IF NOT EXISTS pro_launch (
+  id          BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+  launched_at TIMESTAMPTZ NOT NULL
+);
+
+-- pro_founders: the founders as they stood at the launch moment, copied in
+-- the transaction that recorded it. One row per account. The one email:
+-- mail_claimed_at is set by the single UPDATE that takes the send (given back
+-- only when the mail service refused the message), mail_sent_at when it went;
+-- mail_skip says why it never will (the fan asked for no such emails, or the
+-- address is gone). bonus_order_id is the order the founders bonus went to:
+-- set once, ever, in the transaction that marks that order paid. stop_token
+-- opens the email's "stop these emails" link and can do nothing else.
+CREATE TABLE IF NOT EXISTS pro_founders (
+  user_id         UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  source          TEXT NOT NULL CHECK (source IN ('notify', 'price', 'both')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  mail_claimed_at TIMESTAMPTZ,
+  mail_sent_at    TIMESTAMPTZ,
+  mail_tries      INT NOT NULL DEFAULT 0 CHECK (mail_tries >= 0),
+  mail_error      TEXT CHECK (mail_error IS NULL OR char_length(mail_error) <= 200),
+  mail_skip       TEXT CHECK (mail_skip IS NULL OR mail_skip IN ('stopped', 'no_email')),
+  stop_token      TEXT NOT NULL UNIQUE CHECK (char_length(stop_token) BETWEEN 24 AND 64),
+  bonus_order_id  UUID REFERENCES pro_orders(id) ON DELETE SET NULL,
+  bonus_at        TIMESTAMPTZ,
+  -- Sent means it was claimed first; a skipped one was never sent.
+  CHECK (mail_sent_at IS NULL OR mail_claimed_at IS NOT NULL),
+  CHECK (mail_skip IS NULL OR mail_sent_at IS NULL)
+);
+CREATE INDEX IF NOT EXISTS pro_founders_unsent_idx ON pro_founders (created_at) WHERE mail_sent_at IS NULL AND mail_claimed_at IS NULL AND mail_skip IS NULL;
+
+-- Accounts that asked for no emails about Pro's news and offers (the "stop
+-- these emails" link). Receipts, refunds and renewal reminders are not such
+-- emails: they are owed with a purchase and are always sent.
+CREATE TABLE IF NOT EXISTS pro_mail_stops (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  via        TEXT CHECK (via IS NULL OR char_length(via) <= 40)
+);
+
+-- An order's founders bonus: the extra days its pass was given on top of the
+-- days it bought (0 for every order but a founder's first, paid in time).
+-- They are part of the order's one pass, so a refund ends them with it.
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS bonus_days INT NOT NULL DEFAULT 0 CHECK (bonus_days BETWEEN 0 AND 60);
+
 -- Tifo events (15 Nov 2026; server/src/eventRepo.ts, tifoEvents.ts,
 -- eventRoutes.ts). A themed contest the admin makes on /admin: announced, open
 -- for entries, in voting, then closed and confirmed by hand. The stage is

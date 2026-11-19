@@ -36,6 +36,11 @@ import { cancelUrlOf, renewEmail } from './payRenewMail';
 import { PaymentService, moyasarKeyKind, payLegal, paymentsPublic, verifyMode } from './payments';
 import type { PaymentRepository } from './payRepo';
 import { receiptEmail } from './payReceipt';
+import type { LaunchRepository } from './launchRepo';
+import { registerLaunchRoutes } from './launchRoutes';
+import { FOUNDER_BONUS_DAYS, FOUNDER_MAILS_PER_DAY, LaunchService, founderBonusOn, founderDeadline, launchPriceUntil, priceAt } from './proLaunch';
+import { founderEmail } from './proLaunchMail';
+import { refundDeclinedEmail, refundEmail, refundOwnerEmail, refundReceivedEmail } from './payRefundMail';
 import { registerPayRoutes } from './payRoutes';
 import type { KitRepository } from './kitRepo';
 import { registerKitRoutes } from './kitRoutes';
@@ -309,6 +314,20 @@ export interface AppOptions {
   payments?: PaymentRepository;
   /** Moyasar, for the tests. Otherwise made from MOYASAR_SECRET_KEY when it is a secret key. */
   moyasar?: MoyasarApi;
+  /**
+   * Pro's launch (proLaunch.ts): the launch moment, the founders and their one
+   * email. With `pro` and `payments`, the launch routes exist; nothing is
+   * recorded or sent until Pro is on sale for real (a live key, PRO_MODE=on).
+   */
+  launch?: LaunchRepository;
+  /** Whether email is really delivered: founder emails wait while it is not. Absent: yes (the tests' stand-in sender). */
+  launchMailLive?: () => boolean;
+  /** The pause between two founder emails, in ms (the tests pass 0). */
+  launchGapMs?: number;
+  /** The launch's clock, for the tests. */
+  launchNow?: () => Date;
+  /** False: the launch job is not put on a timer (the browser suite runs it from /admin instead). */
+  launchTimer?: boolean;
   /**
    * Run the renewals job (payments v2 auto-renew) on a timer: the real server
    * sets it, the tests call PaymentService.runRenewals() themselves. The job
@@ -1551,6 +1570,8 @@ export async function buildApp(
       ? ((async () => { const e = new Error('proxy'); e.name = 'ProxyError'; throw e; }) as unknown as typeof fetch)
       : undefined;
   const payBase = (options.publicUrl || CANONICAL_ORIGIN).replace(/\/+$/, '');
+  /** Where sales questions go, and where the owner hears of a refund request. */
+  const PAY_CONTACT = 'osamah9070@gmail.com';
   /**
    * Apple Pay's domain file (payments v2). Moyasar gives it out when the
    * domain is added in its dashboard (Settings -> Apple Pay Domains ->
@@ -1581,6 +1602,38 @@ export async function buildApp(
     if (!applePayFile) return reply.code(404).send({ error: 'not found' });
     return reply.header('cache-control', 'no-cache').type('text/plain; charset=utf-8').send(applePayFile);
   });
+  // Pro's launch (proLaunch.ts): the founders offer the payment code asks about, and the job that records the
+  // launch and sends the founders their one email. It needs to know whether Pro is on sale for real, which is
+  // the payment service's to say, so it reads that through `payRef` once the service below exists.
+  let payRef: PaymentService | null = null;
+  const launchBudget = new SendBudget();
+  const founderMail = (to: string, stopToken: string, deadline: string | null, now: Date) => {
+    const p = priceAt(now);
+    return founderEmail({
+      to, base: payBase, contact: PAY_CONTACT, price: p.halalas, regular: p.regular, launchUntil: p.until,
+      offer: deadline ? { deadline, bonusDays: FOUNDER_BONUS_DAYS } : null,
+      autoRenew: payRef?.renewOn() ?? false,
+      stopUrl: `${payBase}/pro?nomail=${encodeURIComponent(stopToken)}`,
+      stopPost: `${payBase}/api/pro/mail/stop?t=${encodeURIComponent(stopToken)}`,
+    });
+  };
+  const launchNow = (): Date => options.launchNow?.() ?? proService?.now() ?? new Date();
+  const launchService = proService && options.payments && options.launch
+    ? new LaunchService(options.launch, options.payments, {
+      now: launchNow,
+      isPublic: () => !!payRef?.on() && paymentsPublic(),
+      canSend: options.launchMailLive,
+      takeBudget: () => launchBudget.take('founders', { cooldownMs: 0, perDay: FOUNDER_MAILS_PER_DAY }) === 0,
+      giveBudget: () => launchBudget.refund('founders'),
+      gapMs: options.launchGapMs,
+      send: options.emailSender
+        ? async (f, l) => {
+          if (!f.email) throw new Error('no address');
+          await options.emailSender!.send(founderMail(f.email, f.stopToken, l.deadline, launchNow()));
+        }
+        : undefined,
+    })
+    : null;
   const payService = proService && options.payments
     ? new PaymentService(
       options.payments,
@@ -1589,14 +1642,38 @@ export async function buildApp(
       options.moyasar ?? (moyasarKeyKind() && verifyMode() === 'api' ? new MoyasarClient(moyasarKey, { base: moyasarBase, fetch: moyasarFetch }) : null),
       {
         base: payBase,
+        founders: launchService ?? undefined,
         applePayReady: () => applePayFile !== null,
-        onPaid: async (order, endsAt, sub) => {
+        onPaid: async (order, endsAt, sub, nextAt) => {
           if (!options.emailSender || !order.userId) return;
           const u = await auth.getUserById(order.userId);
           if (!u?.email) return;
           // Auto-renew is on for this order's account: the receipt says when it renews and how to stop it.
-          const renew = sub && sub.status === 'active' && endsAt ? { nextAt: endsAt, cancelUrl: cancelUrlOf(payBase, sub) } : null;
-          await options.emailSender.send(receiptEmail({ order, to: u.email, endsAt, base: payBase, contact: 'osamah9070@gmail.com', renew }));
+          const next = nextAt ?? endsAt;
+          const renew = sub && sub.status === 'active' && next ? { nextAt: next, cancelUrl: cancelUrlOf(payBase, sub), amount: sub.amount } : null;
+          await options.emailSender.send(receiptEmail({ order, to: u.email, endsAt, base: payBase, contact: PAY_CONTACT, renew }));
+        },
+        // The refund email (payRefundMail.ts), once per refund. False only when the mail service
+        // refused it, so that it is tried again; an account with no address has nothing to retry.
+        onRefunded: async (order) => {
+          if (!options.emailSender || !order.userId) return true;
+          const u = await auth.getUserById(order.userId);
+          if (!u?.email) return true;
+          await options.emailSender.send(refundEmail({ order, to: u.email, base: payBase, contact: PAY_CONTACT }));
+          return true;
+        },
+        // A refund request: the fan hears it arrived and the owner that it is waiting; or the fan hears it was declined.
+        onRequest: async (n) => {
+          if (!options.emailSender) return;
+          const u = n.order.userId ? await auth.getUserById(n.order.userId) : null;
+          if (n.kind === 'declined') {
+            if (u?.email) await options.emailSender.send(refundDeclinedEmail({ order: n.order, request: n.request, to: u.email, base: payBase, contact: PAY_CONTACT }));
+            return;
+          }
+          // The owner first: his is the one that must not be lost behind a bounced address.
+          await options.emailSender.send(refundOwnerEmail({ order: n.order, request: n.request, username: u?.username ?? null, to: PAY_CONTACT, base: payBase }))
+            .catch((e) => console.error(`[tifo] payments: the owner's email about a refund request failed (${(e as Error).message})`));
+          if (u?.email) await options.emailSender.send(refundReceivedEmail({ order: n.order, request: n.request, to: u.email, base: payBase, contact: PAY_CONTACT }));
         },
         // A renewal email (payRenewMail.ts). True only when it was handed to the mail service: a
         // reminder that could not be sent is owed again, and no renewal is charged without one.
@@ -1604,12 +1681,26 @@ export async function buildApp(
           if (!options.emailSender) return false;
           const u = await auth.getUserById(n.sub.userId);
           if (!u?.email) return false;
-          await options.emailSender.send(renewEmail({ notice: n, to: u.email, base: payBase, contact: 'osamah9070@gmail.com' }));
+          await options.emailSender.send(renewEmail({ notice: n, to: u.email, base: payBase, contact: PAY_CONTACT }));
           return true;
         },
       },
     )
     : null;
+  payRef = payService;
+  if (launchService && options.renewalsTimer && options.launchTimer !== false) {
+    // The launch job: a little after boot, then every minute. Until Pro is on sale for real it returns at
+    // once without touching the database; after the founders have their email it has nothing to do.
+    const run = (): void => void launchService.tick().catch((e) => console.error(`[tifo] launch: the job failed (${(e as Error).message})`));
+    const first = setTimeout(run, 20_000);
+    const every = setInterval(run, 60_000);
+    first.unref();
+    every.unref();
+    app.addHook('onClose', async () => {
+      clearTimeout(first);
+      clearInterval(every);
+    });
+  }
   if (payService && options.renewalsTimer) {
     // Every 15 minutes, and once a minute after boot: a renewal is charged within minutes of
     // its month ending. Off (PRO_AUTORENEW unset) the job only retries deleting saved cards
@@ -1630,7 +1721,18 @@ export async function buildApp(
       paymentsPublic: () => !!payService?.on() && paymentsPublic(),
       checkoutKind: () => payService?.checkoutKind() ?? 'invoice',
       autoRenew: () => payService?.renewOn() ?? false,
+      price: () => priceAt(proService.now()),
+      founderFor: async (userId, canBuy) => (launchService && !payService?.testMode() ? launchService.viewFor(userId, canBuy) : null),
       hasRenewal: async (userId) => (payService ? (await payService.renewalFor(userId)) !== null : false),
+      // What the account bought, and a refund it has not been shown yet: nothing for an account with no orders.
+      payInfo: async (userId) => {
+        if (!payService) return null;
+        const [bought, notice] = await Promise.all([payService.purchases(userId), payService.refundNotice(userId)]);
+        return {
+          purchases: bought.length > 0,
+          refundNotice: notice ? { order: notice.id, amount: (notice.refunded || notice.amount) / 100, at: notice.refundedAt ?? notice.createdAt, test: notice.testMode } : null,
+        };
+      },
       pro: proService,
       userOf,
       requireUser,
@@ -1652,6 +1754,20 @@ export async function buildApp(
         baseOf: (req) => emailBase(req),
         checkoutConfig: options.rateLimit ? { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } } : undefined,
         hookConfig: options.rateLimit ? { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } } : undefined,
+      });
+    }
+    if (launchService) {
+      registerLaunchRoutes(app, {
+        launch: launchService,
+        adminAccess,
+        mailLive: () => options.launchMailLive?.() ?? !!options.emailSender,
+        // As it would go out now: with the offer when the offer is on (or when asked to see that version).
+        preview: (offer) => {
+          const now = launchNow();
+          const withOffer = offer ?? founderBonusOn();
+          return founderMail('founder@example.com', 'preview-preview-preview-preview', withOffer ? founderDeadline(now).toISOString() : null, now);
+        },
+        stopConfig: options.rateLimit ? { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } } : undefined,
       });
     }
     if (options.kits) {
@@ -3194,11 +3310,21 @@ export async function buildApp(
     let credit = '';
     // Their answer to "what would you pay for Pro?", given while signed in.
     let price: Awaited<ReturnType<ProRepository['priceAnswer']>> = null;
+    const fr = options.launch ? await options.launch.founder(userId).catch(() => null) : null;
+    const founder = fr
+      ? {
+        since: fr.createdAt, how: fr.source, emailedAt: fr.mailSentAt, emailSkipped: fr.mailSkip,
+        bonusTakenAt: fr.bonusAt, noMoreEmails: options.launch ? await options.launch.mailStopped(userId).catch(() => false) : false,
+      }
+      : null;
     // What they bought (payments v1): none while payments were never on.
     let orders: Awaited<ReturnType<PaymentRepository['recentFor']>> = [];
     // Auto-renew (payments v2): whether a card is saved for it, and which.
     let renewal: Awaited<ReturnType<PaymentRepository['subFor']>> = null;
+    // Refund requests made from the account page (19 Nov 2026).
+    let refundRequests: Awaited<ReturnType<PaymentRepository['requestsFor']>> = [];
     try {
+      refundRequests = payService ? await payService.repo.requestsFor(userId) : [];
       orders = payService ? await payService.repo.recentFor(userId, new Date(0)) : [];
       renewal = payService ? await payService.repo.subFor(userId) : null;
       [user, designs, passes, gift, price] = await Promise.all([
@@ -3234,11 +3360,23 @@ export async function buildApp(
         kits,
         credit,
         priceAnswer: price ? { amount: price.amount, currency: price.currency, comment: price.comment, wontPay: price.wontPay, at: price.updatedAt } : null,
+        // The launch (proLaunch.ts): whether this account was a founder, what became of its one email, and
+        // whether it asked for no such emails. Null for everyone else.
+        founder,
         orders: orders.map((o) => ({
           reference: o.invoiceId ?? o.id, amount: o.amount / 100, currency: o.currency, status: o.status === 'review' ? 'pending' : o.status,
-          method: o.method, createdAt: o.createdAt, paidAt: o.paidAt, refundedAt: o.refundedAt, test: o.testMode,
-          renewal: o.kind === 'renewal', askedToRenew: o.keep,
+          method: o.method, cardBrand: o.brand, createdAt: o.createdAt, paidAt: o.paidAt, refundedAt: o.refundedAt,
+          refunded: o.refunded / 100, test: o.testMode,
+          renewal: o.kind === 'renewal', askedToRenew: o.keep, days: o.days, founderBonusDays: o.bonusDays,
         })),
+        // What was asked for from the account page, what was written with it, and the answer.
+        refundRequests: refundRequests.map((q) => {
+          const o = orders.find((x) => x.id === q.orderId);
+          return {
+            orderReference: o ? o.invoiceId ?? o.id : null, status: q.status, note: q.note, askedAt: q.createdAt, answeredAt: q.decidedAt,
+            declineReason: q.declineReason, proUsesCountedWhenAsked: q.used, refundedAutomatically: q.auto,
+          };
+        }),
         // "Keep Pro on". The saved card is a token held by Moyasar, the payment company: this site
         // has only Moyasar's reference to it (not exported: it is of no use to anyone but this
         // server), the card's brand, last four digits and expiry.
@@ -4878,6 +5016,7 @@ export async function buildApp(
     checkPageText();
     /** The English paths (or path prefixes, '/t/') whose Arabic twin this build serves; the sitemap lists those. */
     const servedInArabic = new Set<string>();
+    const proOnSale = !!payService?.on() && paymentsPublic();
     const pagesOf = (file: string, english: string, enPath?: string): [PageLang, string][] => {
       let arabic: string | null = null;
       try {
@@ -4886,7 +5025,12 @@ export async function buildApp(
         arabic = null;
       }
       if (arabic !== null && enPath) servedInArabic.add(enPath);
-      return arabic === null ? [['en', english]] : [['en', english], ['ar', arabic]];
+      // The header's "Pro · soon" link says just "Pro" once Pro is on sale to everyone (a live key, PRO_MODE=on):
+      // sent that way, so nobody sees it change. An account that can buy before that (the owner's preview) has
+      // it changed by the page (src/ui/pro.ts proNavOnSale).
+      const nav = (html: string, lang: PageLang): string =>
+        proOnSale ? html.replace(/data-i18n="nav\.proSoon">[^<]*</g, `data-i18n="nav.pro">${pageText('nav.pro', lang)}<`) : html;
+      return arabic === null ? [['en', nav(english, 'en')]] : [['en', nav(english, 'en')], ['ar', nav(arabic, 'ar')]];
     };
     /**
      * Absolute base for anything we put IN the page - og:url, og:image, canonical.
@@ -5468,16 +5612,26 @@ export async function buildApp(
       const onSale = !!payService?.on() && paymentsPublic();
       // The auto-renew terms only where auto-renew is on (payments v2).
       const renewTerms = onSale && !!payService?.renewOn();
-      const legalHtml = payLegal(readFileSync(join(staticDir, 'legal.html'), 'utf8'), onSale, renewTerms);
-      for (const [lang, raw] of pagesOf('legal.html', legalHtml, '/legal')) {
-        const html = lang === 'en' ? raw : payLegal(raw, onSale, renewTerms);
-        const legalShell = htmlShell(routeIn('/legal', lang), html, {
+      // The launch price's terms only while it runs, the founders offer's only while that offer is on
+      // (proLaunch.ts). The launch price ends on a day of its own, so the page is made both ways here and the
+      // one that is true at the moment of the request is served.
+      const until = launchPriceUntil();
+      const founderTerms = onSale && founderBonusOn();
+      const legalRaw = readFileSync(join(staticDir, 'legal.html'), 'utf8');
+      const made = (raw: string, launching: boolean): string => {
+        const p = priceAt(launching && until ? new Date(until.getTime() - 1) : new Date(8.64e15));
+        return payLegal(raw, onSale, renewTerms, { launch: launching && p.launch && p.until ? { price: p.halalas, regular: p.regular, until: p.until } : null, founders: founderTerms });
+      };
+      for (const [lang, raw] of pagesOf('legal.html', legalRaw, '/legal')) {
+        const shell = (launching: boolean) => htmlShell(routeIn('/legal', lang), made(raw, launching), {
           title: pageText('meta.legal.title', lang),
           description: pageText('meta.legal.desc', lang),
           enPath: '/legal',
           lang,
         });
-        app.get(routeIn('/legal', lang), async (req, reply) => legalShell(req, reply));
+        const plain = shell(false);
+        const launching = until ? shell(true) : plain;
+        app.get(routeIn('/legal', lang), async (req, reply) => (onSale && priceAt(launchNow()).launch ? launching : plain)(req, reply));
       }
     } catch {
       /* legal page optional in API-only builds */

@@ -24,6 +24,7 @@ import { containDialog } from './dialogFocus';
 import { getLang, t, tv } from './i18n';
 import { matchDayDeps } from './matchDayDeps';
 import { CROWN_SVG, proChipHtml } from './pro';
+import { chosenSeats, focusPicker } from './tifoFocus';
 
 export type FilmShape = 'landscape' | 'vertical';
 export const FILM_SIZES: Record<FilmShape, { width: number; height: number }> = {
@@ -222,8 +223,14 @@ function testFrameLimit(): number | undefined {
 // ------------------------------------------------------------ from Match Day ---
 
 /** The film, from Match Day's own Record: the live simulator, as the fan has set it up. */
-export function filmFromMatchDay(sim: MatchDaySimulator, job: FilmJob): Promise<FilmOutcome> {
-  return film(async () => sim.filmHost(), job, progressCard(job.shape, job.reel?.seconds));
+export async function filmFromMatchDay(sim: MatchDaySimulator, job: FilmJob, part: Uint8Array | null = null): Promise<FilmOutcome> {
+  // The part the fan chose to show (ui/tifoFocus.ts) is the film's only: the live view's cameras are the whole tifo's again after.
+  sim.setTifoFocus(part);
+  try {
+    return await film(async () => sim.filmHost(), job, progressCard(job.shape, job.reel?.seconds));
+  } finally {
+    sim.setTifoFocus(null);
+  }
 }
 
 // -------------------------------------------------------------- from the editor ---
@@ -262,6 +269,8 @@ export async function offscreenMatchDay<T>(run: (sim: MatchDaySimulator) => Prom
     sim.setWeather('clear');
     sim.setWetPitch(true);
     sim.setGlow(false);
+    // The part of the tifo the fan chose to show, if any (ui/tifoFocus.ts).
+    sim.setTifoFocus(chosenSeats(deps));
     return await run(sim);
   } finally {
     sim?.dispose();
@@ -332,6 +341,8 @@ export async function previewFilm(canvas: HTMLCanvasElement, job: Omit<FilmJob, 
 export interface MatchDayFilmChoice {
   /** The film Record makes, or null for the recording of the view it always made. */
   shape(): FilmShape | null;
+  /** The seats of the part the fan chose to show, or null: the camera chooses. */
+  part(): Uint8Array | null;
   /** The film's name on the export sheet. */
   item(): string;
   /** Pro off for this account (a sign-out): the choice goes, and Record is what it always was. */
@@ -344,7 +355,7 @@ export interface MatchDayFilmChoice {
  * recording of the view as the fields below set it. While a film is picked
  * those fields are hidden: the film has its own length, rate and camera.
  */
-export function mountMatchDayFilmChoice(section: HTMLElement, recordingFields: HTMLElement[], design?: { map: SeatMap; store: DesignStore }): MatchDayFilmChoice {
+export function mountMatchDayFilmChoice(section: HTMLElement, recordingFields: HTMLElement[], design?: { map: SeatMap; store: DesignStore; template?: { id: string } }): MatchDayFilmChoice {
   const field = document.createElement('div');
   field.className = 'mds-field mds-pro qv-md-field';
   const label = document.createElement('div');
@@ -369,16 +380,22 @@ export function mountMatchDayFilmChoice(section: HTMLElement, recordingFields: H
   split.className = 'qv-md-note qv-md-split';
   split.textContent = t('qv.split');
   field.append(label, sel, note, split);
+  // The part of the tifo the film is on: chosen here, where the film is (ui/tifoFocus.ts).
+  const whole = design?.template ? { map: design.map, store: design.store, template: design.template } : null;
+  const part = whole ? focusPicker(whole, () => {}) : null;
+  if (part) field.append(part.root);
   section.prepend(field);
   const sync = (): void => {
     const film = !field.hidden && sel.value !== 'screen';
     for (const f of recordingFields) f.hidden = film;
     note.hidden = !film;
+    if (part) part.root.classList.toggle('tf-off', !film);
     split.hidden = !film || !design || splitOf(design.map, design.store) < SPLIT_TELLS;
   };
   sel.addEventListener('change', sync);
   return {
     shape: () => (!field.hidden && sel.value !== 'screen' ? (sel.value as FilmShape) : null),
+    part: () => (whole ? chosenSeats(whole) : null),
     item: () => t(sel.value === 'vertical' ? 'pexp.item.vertical' : 'pexp.item.hd'),
     setLive(live, running) {
       field.hidden = !live;

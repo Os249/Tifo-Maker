@@ -73,6 +73,7 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
       if (!(env.MOYASAR_WEBHOOK_SECRET ?? '').trim()) out.push({ key: 'MOYASAR_WEBHOOK_SECRET', effect: 'is not set while MOYASAR_VERIFY=webhook, so Pro cannot be bought: in this mode a payment is only ever seen through Moyasar\'s webhook.', state: 'wrong' });
       if (payKey) out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is set but not used: MOYASAR_VERIFY=webhook runs without a secret key. Remove one of the two; with the key and without MOYASAR_VERIFY, every payment is read back from Moyasar, which is the safer mode.' });
       if ((env.PRO_AUTORENEW ?? '').trim().toLowerCase() === 'on') out.push({ key: 'PRO_AUTORENEW', effect: 'is on but cannot work with MOYASAR_VERIFY=webhook: charging a saved card needs the secret key. Auto-renew stays off.', state: 'wrong' });
+      if ((env.PRO_AUTO_REFUND ?? '').trim().toLowerCase() === 'on') out.push({ key: 'PRO_AUTO_REFUND', effect: 'is on but cannot work with MOYASAR_VERIFY=webhook: refunding from the server needs the secret key. Refund requests wait in /admin, and are refunded in the Moyasar dashboard.', state: 'wrong' });
     } else if (!payKey) {
       out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is not set while PRO_PAYMENTS=on, so Pro cannot be bought and /pro stays the coming-soon page. Copy the secret key (sk_test_... or sk_live_...) from Moyasar\'s dashboard.', state: 'wrong' });
     } else if (!/^sk_(test|live)_[A-Za-z0-9]{8,}$/.test(payKey)) {
@@ -102,6 +103,14 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
     const methods = (env.MOYASAR_METHODS ?? '').toLowerCase();
     if (wantsForm && methods.includes('applepay') && !(env.APPLE_PAY_DOMAIN_ASSOCIATION ?? '').trim()) {
       out.push({ key: 'APPLE_PAY_DOMAIN_ASSOCIATION', effect: 'is not set while MOYASAR_METHODS includes applepay: unless the file was committed to public/.well-known/, the form does not offer Apple Pay. Paste the contents of the file from Moyasar\'s dashboard (Settings, Apple Pay Domains, Download Association).' });
+    }
+    // The launch price and how it is shown (proLaunch.ts).
+    const until = (env.PRO_LAUNCH_PRICE_UNTIL ?? '').trim();
+    if (until && !/^\d{4}-\d{2}-\d{2}($|T)/.test(until)) {
+      out.push({ key: 'PRO_LAUNCH_PRICE_UNTIL', effect: 'is not a date the server can read, so there is no launch price and Pro sells at the regular price. Use the first day at the regular price as a Riyadh date, like 2027-01-15.', state: 'wrong' });
+    }
+    if ((env.PRO_PRICE_DISPLAY ?? '').trim().toLowerCase() === 'strike' && !(env.PRO_DISCOUNT_LICENCE ?? '').trim()) {
+      out.push({ key: 'PRO_PRICE_DISPLAY', effect: 'is "strike" but PRO_DISCOUNT_LICENCE is not set, so the crossed-out price is not shown: /pro keeps the plain wording. A crossed-out "before" price is a discount, which needs the Ministry of Commerce licence whose number the page then prints.', state: 'wrong' });
     }
     const hook = env.MOYASAR_WEBHOOK_SECRET?.trim();
     if (hook && hook.length < 16) {

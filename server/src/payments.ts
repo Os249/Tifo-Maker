@@ -87,11 +87,26 @@
  *                            ends. Set to off, a mada payment stays a one-time
  *                            pass, its token is deleted at once, and the form
  *                            says so before paying.
+ *
+ * ---------------------------------------------------------------------------
+ * Refunds, told and asked for (19 Nov 2026). See the section of that name in
+ * the class below. A refund, wherever it is made, emails the fan once and
+ * shows on the site once; a fan can ask for the refund the terms promise from
+ * the account page, and the request waits for the owner in /admin.
+ *
+ *   PRO_AUTO_REFUND=on       refund such a request at once, with no person
+ *                            looking, when the order was paid within
+ *                            REFUND_DAYS, its pass shows no use, and the
+ *                            account has never been refunded before. Anything
+ *                            else still waits for the owner. Needs the secret
+ *                            key (not the webhook-only mode). Off by default:
+ *                            it moves money by itself.
  */
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { MoyasarError, failReason, isMoyasarId, readPayment, type MoyasarApi, type MoyasarInvoice, type MoyasarPayment } from './moyasar';
-import type { PaymentRepository, ProOrder, ProSubscription, ProSubscriptionRow } from './payRepo';
+import type { PaymentRepository, ProOrder, ProSubscription, ProSubscriptionRow, RefundRequest, RefundRequestRow } from './payRepo';
 import { OFFER, liveFor, previewUsers, proMode } from './proPlan';
+import { priceAt, regularHalalas } from './proLaunch';
 import type { ProService } from './pro';
 import type { ProPass } from './proRepo';
 
@@ -162,6 +177,15 @@ export function autoRenewOn(env: NodeJS.ProcessEnv = process.env): boolean {
   return isOn(env.PRO_AUTORENEW) && paymentsOn(env) && verifyMode(env) === 'api' && checkoutKind(env) === 'form';
 }
 
+/**
+ * PRO_AUTO_REFUND=on: a refund request that plainly meets the promise is
+ * refunded without waiting for the owner (see the file's note). Only with a
+ * secret key: the webhook-only mode cannot refund from here at all.
+ */
+export function autoRefundOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isOn(env.PRO_AUTO_REFUND) && paymentsOn(env) && verifyMode(env) === 'api';
+}
+
 /** mada cards renew like any other, unless PRO_AUTORENEW_MADA=off (see the file's note). */
 export const renewMada = (env: NodeJS.ProcessEnv = process.env): boolean => (env.PRO_AUTORENEW_MADA ?? '').trim().toLowerCase() !== 'off';
 
@@ -226,13 +250,19 @@ export function paymentsStatus(env: NodeJS.ProcessEnv = process.env, applePayRea
     autoRenew: autoRenewOn(env),
     autoRenewAsked: isOn(env.PRO_AUTORENEW),
     autoRenewMada: renewMada(env),
+    autoRefund: autoRefundOn(env),
+    autoRefundAsked: isOn(env.PRO_AUTO_REFUND),
   };
 }
 
 // ---------------------------------------------------------------- rules ---
 
-/** One month of Pro, in halalas. */
-export const priceHalalas = (): number => Math.round(OFFER.monthly.price * 100);
+/**
+ * One month of Pro bought at `now`, in halalas: the launch price while it
+ * runs, the regular price otherwise (proLaunch.ts priceAt). An order keeps
+ * the price it was made at.
+ */
+export const priceHalalas = (now: Date = new Date(), env: NodeJS.ProcessEnv = process.env): number => priceAt(now, env).halalas;
 
 /** Within this long of a pass's end, another month can be bought (it starts when the first ends). */
 export const RENEW_WITHIN_DAYS = 7;
@@ -262,6 +292,15 @@ const UNREACHABLE_DAYS = 7;
 
 const DAY_MS = 24 * 3600_000;
 
+/** The site's one-time "your Pro was refunded" notice is for refunds no older than this. */
+const NOTICE_DAYS = 30;
+/** A refund email that could not be sent is tried again by the job for this long. */
+const REFUND_MAIL_RETRY_DAYS = 3;
+/** An order that did not go through stays in the account's purchase list for this long. */
+const FAILED_SHOWN_DAYS = 30;
+/** A receipt can be sent again once in this long, per order. */
+const RECEIPT_AGAIN_MS = 5 * 60_000;
+
 export interface Buyer {
   id: string;
   username: string | null;
@@ -284,8 +323,26 @@ export interface FormConfig {
   networks: string[];
   applePay: { label: string; country: string } | null;
   samsungPay: { serviceId: string; orderNumber: string } | null;
-  /** "Keep Pro on", when it is offered: the price and date to show before paying, and what can renew. */
+  /**
+   * "Keep Pro on", when it is offered: what to show before paying, and what
+   * can renew. `price` is what each renewal charges (the regular price, never
+   * the launch price), `days` how long each renewal is, `nextAt` the first
+   * renewal's date (after the founders bonus, when there is one).
+   */
   renew: { price: number; days: number; nextAt: string; methods: string[]; mada: boolean } | null;
+  /** The founders offer, when this order's account can still take it: paid by `until`, the pass is `total` days. */
+  founder: { until: string; bonusDays: number; total: number } | null;
+}
+
+/**
+ * The founders offer, as the payment code needs it (proLaunch.ts LaunchService
+ * is the one implementation). Absent: nobody is a founder.
+ */
+export interface FounderRules {
+  /** The offer for this account right now, while it can still take it. */
+  offerFor(userId: string, now: Date): Promise<{ until: string; bonusDays: number } | null>;
+  /** The extra days a payment confirmed at `now` is in time for (0: none). The store decides once-per-account. */
+  bonusDays(order: ProOrder, now: Date): Promise<number>;
 }
 
 export type CheckoutResult =
@@ -297,9 +354,49 @@ export type RefundResult =
   | { ok: true; order: ProOrder }
   | { ok: false; reason: 'none' | 'not_paid' | 'late' | 'no_payment' | 'failed' | 'off' | 'dashboard' };
 
+/**
+ * Whether an order can still be refunded on request, as its owner sees it:
+ *   open       paid within REFUND_DAYS and not asked for yet
+ *   late       paid longer ago than that
+ *   requested  asked for, waiting for the owner
+ *   declined   asked for and declined (with the reason)
+ *   refunded   the money went back
+ *   none       nothing to refund (it was never paid)
+ */
+export type RefundState = 'open' | 'late' | 'requested' | 'declined' | 'refunded' | 'none';
+
+/** An order as the account page lists it. */
+export interface Purchase {
+  order: ProOrder;
+  /** When the pass it paid for ends (null: none, or it was taken back). */
+  endsAt: string | null;
+  refund: {
+    state: RefundState;
+    /** Until when a refund can be asked for (paid orders). */
+    until: string | null;
+    /** Whether the pass shows any use: only looked up while a refund can still be asked for. */
+    used: boolean | null;
+    /** Why a request was declined. */
+    reason: string | null;
+    askedAt: string | null;
+  };
+}
+
+export type RefundAskResult =
+  | { ok: true; state: 'requested' | 'refunded' }
+  | { ok: false; reason: 'none' | 'not_paid' | 'refunded' | 'late' | 'already' };
+
+export type RefundDecision =
+  | { ok: true; status: 'approved' | 'declined' }
+  | { ok: false; reason: 'none' | 'decided' | 'reason' | Exclude<RefundResult, { ok: true }>['reason'] };
+
+/** An email a refund request owes: to the fan and the owner when it arrives, to the fan when it is declined. */
+export type RefundRequestNotice = { kind: 'received' | 'declined'; request: RefundRequest; order: ProOrder };
+
 /** An email the renewals owe a fan. `endsAt` is when the Pro they hold ends. */
 export type RenewNotice =
-  | { kind: 'reminder'; sub: ProSubscription; chargeAt: string }
+  /** `firstDays`: this is the first renewal after a founder's longer first month of that many days; the email says so. */
+  | { kind: 'reminder'; sub: ProSubscription; chargeAt: string; firstDays?: number }
   | { kind: 'failed'; sub: ProSubscription; retryAt: string; endsAt: string | null }
   | { kind: 'ended'; sub: ProSubscription; why: 'payment_failed' | 'card_expired' | 'unreachable'; endsAt: string | null }
   | { kind: 'cancelled'; sub: ProSubscription; endsAt: string | null };
@@ -307,17 +404,29 @@ export type RenewNotice =
 export interface PaymentServiceOptions {
   env?: NodeJS.ProcessEnv;
   /**
-   * Told once, when an order is first paid (the receipt). `sub` is the
-   * auto-renew it started or belongs to, when there is one. Failures are
-   * logged, never thrown.
+   * Told once, when an order is first paid (the receipt), and again when its
+   * owner asks for the receipt to be sent again. `sub` is the auto-renew it
+   * started or belongs to, when there is one; `nextAt` the next renewal's
+   * date when it is not the day this order's pass ends (a receipt sent again
+   * later). Failures are logged, never thrown.
    */
-  onPaid?: (order: ProOrder, endsAt: string | null, sub: ProSubscription | null) => Promise<void>;
+  onPaid?: (order: ProOrder, endsAt: string | null, sub: ProSubscription | null, nextAt?: string | null) => Promise<void>;
+  /**
+   * An order was refunded: tell its fan by email. Called once per refund
+   * (payRepo.claimRefundMail), whoever noticed it. Resolves false only when
+   * the email should be tried again (the mail service refused it).
+   */
+  onRefunded?: (order: ProOrder) => Promise<boolean>;
+  /** A refund request arrived, or was declined: the emails it owes. Failures are logged, never thrown. */
+  onRequest?: (n: RefundRequestNotice) => Promise<void>;
   /** Send a renewal email. Resolves true only when it was really handed to the mail service. */
   notify?: (n: RenewNotice) => Promise<boolean>;
   /** Whether Apple Pay's domain file is being served (routes.ts). */
   applePayReady?: () => boolean;
   /** The site's own origin, for the address Moyasar requires on a token charge. */
   base?: string;
+  /** The founders offer (proLaunch.ts). Absent: there is none. */
+  founders?: FounderRules;
 }
 
 export interface RenewRun {
@@ -412,7 +521,8 @@ export class PaymentService {
   }
 
   /** What the page needs to open the form for this order. */
-  private formConfig(order: ProOrder, lang: 'en' | 'ar', base: string, start: Date): FormConfig {
+  private formConfig(order: ProOrder, lang: 'en' | 'ar', base: string, start: Date, fo: { until: string; bonusDays: number } | null): FormConfig {
+    const first = order.days + (fo?.bonusDays ?? 0);
     const methods = formMethods(this.env, this.applePayReady());
     const samsung = (this.env.MOYASAR_SAMSUNG_SERVICE_ID ?? '').trim();
     return {
@@ -428,13 +538,15 @@ export class PaymentService {
       samsungPay: methods.includes('samsungpay') ? { serviceId: samsung, orderNumber: order.id } : null,
       renew: this.renewOn()
         ? {
-          price: order.amount / 100,
+          // Renewals are always at the regular price, whatever this first month cost.
+          price: regularHalalas() / 100,
           days: order.days,
-          nextAt: new Date(start.getTime() + order.days * DAY_MS).toISOString(),
+          nextAt: new Date(start.getTime() + first * DAY_MS).toISOString(),
           methods: methods.filter((m) => RENEWABLE.includes(m)),
           mada: renewMada(this.env),
         }
         : null,
+      founder: fo ? { until: fo.until, bonusDays: fo.bonusDays, total: first } : null,
     };
   }
 
@@ -455,8 +567,13 @@ export class PaymentService {
       recent = await this.repo.recentFor(b.id, since);
     }
     const when = await this.startFor(b.id, now);
-    if ('held' in when) return { ok: false, reason: 'held', endsAt: when.held };
-    const amount = priceHalalas();
+    // The founders offer, while this account can still take it (never with test money).
+    const fo = this.testMode() ? null : (await this.opts.founders?.offerFor(b.id, now).catch(() => null)) ?? null;
+    // Holding Pro for longer than a week normally means "come back later". A founder's offer has a deadline,
+    // so they may buy now: the month starts when the Pro they hold ends, as any month bought early does.
+    if ('held' in when && !fo) return { ok: false, reason: 'held', endsAt: when.held };
+    const start = 'held' in when ? new Date(when.held) : when.start;
+    const amount = priceHalalas(now, this.env);
     const kind = this.checkoutKind();
     const fresh = (o: ProOrder): boolean =>
       o.status === 'pending' && o.amount === amount && o.testMode === this.testMode() && now.getTime() - Date.parse(o.createdAt) < REUSE_MINUTES * 60_000;
@@ -467,7 +584,7 @@ export class PaymentService {
       if (open) {
         // "Keep Pro on" starts unticked every time the form opens.
         if (open.keep) await this.repo.setKeep(open.id, b.id, false, now);
-        return { ok: true, orderId: open.id, form: this.formConfig({ ...open, keep: false }, lang, base, when.start) };
+        return { ok: true, orderId: open.id, form: this.formConfig({ ...open, keep: false }, lang, base, start, fo) };
       }
       if (recent.length >= ORDERS_PER_DAY) return { ok: false, reason: 'busy' };
       const givenId = randomUUID();
@@ -482,7 +599,7 @@ export class PaymentService {
         }
       }
       const order = await this.repo.create({ userId: b.id, amount, days: OFFER.monthly.days, lang, testMode: this.testMode(), now, kind: 'form', paymentId: givenId });
-      return { ok: true, orderId: order.id, form: this.formConfig(order, lang, base, when.start) };
+      return { ok: true, orderId: order.id, form: this.formConfig(order, lang, base, start, fo) };
     }
 
     if (!this.api) return { ok: false, reason: 'off' };
@@ -532,7 +649,7 @@ export class PaymentService {
   }
 
   /** Paid: the pass, once, then the auto-renew it asked for and the receipt. */
-  private async grant(order: ProOrder, paymentId: string, method: string | null, now: Date, p: MoyasarPayment | null): Promise<ProOrder> {
+  private async grant(order: ProOrder, paymentId: string, method: string | null, now: Date, p: MoyasarPayment | null, brand: string | null = p?.company ?? null): Promise<ProOrder> {
     const when = order.userId ? await this.startFor(order.userId, now) : { start: now };
     // Paid is paid: a month bought while holding a long pass starts when that pass ends.
     let start = 'start' in when ? when.start : new Date(when.held);
@@ -545,10 +662,13 @@ export class PaymentService {
         .filter((t) => t <= now.getTime() && now.getTime() - t <= RENEWAL_GRACE_MS);
       if (justEnded.length) start = new Date(Math.max(...justEnded));
     }
-    const r = await this.repo.markPaid(order.id, { paymentId, method, now, startsAt: start, endsAt: new Date(start.getTime() + order.days * DAY_MS) });
+    // The founders bonus this confirmation is in time for (proLaunch.ts has the rule). Whether this account may
+    // have it, once and never again, is decided by the store in the step that marks the order paid.
+    const bonusDays = (await this.opts.founders?.bonusDays(order, now).catch(() => 0)) ?? 0;
+    const r = await this.repo.markPaid(order.id, { paymentId, method, brand, now, startsAt: start, endsAt: new Date(start.getTime() + order.days * DAY_MS), bonusDays });
     if (!r.ok) return (await this.repo.get(order.id)) ?? order;
     if (r.first) {
-      console.log(`[tifo] payments: order ${order.id} paid${order.testMode ? ' (test)' : ''}`);
+      console.log(`[tifo] payments: order ${order.id} paid${order.testMode ? ' (test)' : ''}${r.order.bonusDays ? ` (founders bonus: ${r.order.bonusDays} more days)` : ''}`);
       const sub = await this.afterPaid(r.order, p, r.pass, now).catch((e) => {
         console.error(`[tifo] payments: auto-renew for order ${order.id} could not be set up (${(e as Error).message})`);
         return null;
@@ -590,12 +710,12 @@ export class PaymentService {
         return (await this.repo.get(order.id)) ?? order;
       }
       if (order.status === 'paid') return order;
-      return this.grant(order, paid?.id ?? '', paid?.sourceType ?? null, now, null);
+      return this.grant(order, paid?.id ?? '', paid?.sourceType ?? null, now, null, paid?.company ?? null);
     }
     if ((inv.status === 'refunded' || inv.status === 'voided') && order.status === 'paid') {
       // Refunded in Moyasar's dashboard rather than from /admin: the pass goes with the money.
       const refunded = inv.payments.reduce((s, p) => s + p.refunded, 0) || order.amount;
-      await this.repo.markRefunded(order.id, Math.min(refunded, order.amount), now);
+      await this.markRefunded(order, Math.min(refunded, order.amount), now);
       return (await this.repo.get(order.id)) ?? order;
     }
     if (order.status === 'pending' && ['expired', 'canceled', 'failed', 'voided', 'refunded'].includes(inv.status)) {
@@ -635,7 +755,7 @@ export class PaymentService {
     if (p.status === 'refunded' || p.status === 'voided' || (paid && p.refunded > 0)) {
       // Refunded (in /admin, or in Moyasar's dashboard), in full or in part: the pass goes with the money, and so does auto-renew.
       if (order.status === 'paid') {
-        await this.repo.markRefunded(order.id, Math.min(p.refunded || order.amount, order.amount), now);
+        await this.markRefunded(order, Math.min(p.refunded || order.amount, order.amount), now);
         if (order.userId) await this.stopRenewing(order.userId, 'refunded', false);
       } else if (order.status === 'pending') {
         await this.repo.settle(order.id, 'failed', `the payment is ${p.status === 'paid' || p.status === 'captured' ? 'refunded' : p.status}`);
@@ -753,6 +873,7 @@ export class PaymentService {
    * not decide that, because "used" is a judgement (a design exported with
    * the Pro mark is a use the counters do not see). A refund also turns
    * auto-renew off: nobody who asked for their money back is charged again.
+   * The fan is told by email, once, wherever the refund was made (afterRefund).
    */
   async refund(orderId: string, late = false): Promise<RefundResult> {
     if (!this.on()) return { ok: false, reason: 'off' };
@@ -769,7 +890,7 @@ export class PaymentService {
     try {
       const p = await this.api.refund(o.paymentId);
       if (p.status !== 'refunded') throw new MoyasarError(0, `status_${p.status}`);
-      await this.repo.markRefunded(o.id, p.refunded || o.amount, now);
+      await this.markRefunded(o, p.refunded || o.amount, now);
     } catch (e) {
       console.error(`[tifo] payments: refunding order ${o.id} failed (${(e as Error).message})`);
       // Moyasar says to read the payment back before trying again: reconcile does.
@@ -778,6 +899,223 @@ export class PaymentService {
     }
     if (o.userId) await this.stopRenewing(o.userId, 'refunded', false).catch(() => false);
     return { ok: true, order: (await this.repo.get(o.id)) ?? o };
+  }
+
+  // ------------------------------------------- refunds, told and asked for ---
+  //
+  // (19 Nov 2026.) The whole of it:
+  //
+  //  1. Every refund, from /admin or from Moyasar's dashboard (seen through
+  //     the webhook or the next look at the order), goes through
+  //     markRefunded() below. The store ends the pass in the same step as
+  //     before; afterRefund() then answers an open request for that order
+  //     and sends the refund email. One caller sends it (claimRefundMail),
+  //     and one that could not be sent is tried again by the job.
+  //  2. The site shows the refund once (refundNotice, seenRefund).
+  //  3. A fan asks for a refund from the account page (requestRefund): only
+  //     for their own order, paid within REFUND_DAYS, once. It waits for the
+  //     owner (decideRequest), unless PRO_AUTO_REFUND is on and the request
+  //     plainly meets the promise.
+  //
+  // None of this gives or takes money except through refund() above, which
+  // asks Moyasar and believes only its answer.
+
+  /** Orders the auto-refund switch is refunding right now, so the request each answers is marked as its doing. */
+  private readonly autoRefunding = new Set<string>();
+  private readonly receiptSent = new Map<string, number>();
+
+  /** An order is refunded: the pass goes with it (the store), then the fan is told. */
+  private async markRefunded(order: ProOrder, amount: number, now: Date): Promise<void> {
+    await this.repo.markRefunded(order.id, amount, now);
+    await this.afterRefund(order.id, now);
+  }
+
+  /**
+   * What a refund owes besides ending the pass: the request it answers is
+   * closed as approved, and the fan gets the email, once. Safe to call any
+   * number of times for the same order; never throws.
+   */
+  private async afterRefund(orderId: string, now: Date): Promise<void> {
+    try {
+      const o = await this.repo.get(orderId);
+      if (!o || o.status !== 'refunded') return;
+      const rq = await this.repo.requestForOrder(o.id);
+      if (rq?.status === 'pending') await this.repo.decideRequest(rq.id, 'approved', { reason: null, auto: this.autoRefunding.has(o.id) }, now);
+      if (!o.userId || !this.opts.onRefunded) return;
+      if (!(await this.repo.claimRefundMail(o.id, now))) return;
+      const sent = await this.opts.onRefunded(o).catch((e) => {
+        console.error(`[tifo] payments: the refund email for ${o.id} failed (${(e as Error).message})`);
+        return false;
+      });
+      // Owed again: the job tries for a few days (sweepRefundMails).
+      if (!sent) await this.repo.unclaimRefundMail(o.id);
+    } catch (e) {
+      console.error(`[tifo] payments: telling the fan about the refund of ${orderId} failed (${(e as Error).message})`);
+    }
+  }
+
+  /** Refund emails that could not be sent when the refund was made. */
+  private async sweepRefundMails(): Promise<void> {
+    if (!this.opts.onRefunded) return;
+    const now = this.pro.now();
+    for (const o of await this.repo.unmailedRefunds(new Date(now.getTime() - REFUND_MAIL_RETRY_DAYS * DAY_MS), 20)) await this.afterRefund(o.id, now);
+  }
+
+  /** The newest refund this account has not been shown on the site yet, if any. */
+  async refundNotice(userId: string): Promise<ProOrder | null> {
+    const now = this.pro.now();
+    return (await this.repo.unseenRefunds(userId, new Date(now.getTime() - NOTICE_DAYS * DAY_MS)))[0] ?? null;
+  }
+
+  /** The notice was shown: it is not shown again. An account's unseen refunds all go with it (one card, not one per order). */
+  async seenRefund(userId: string, orderId: string): Promise<boolean> {
+    const now = this.pro.now();
+    const unseen = await this.repo.unseenRefunds(userId, new Date(0));
+    if (!unseen.some((o) => o.id === orderId)) return false;
+    for (const o of unseen) await this.repo.markRefundSeen(userId, o.id, now);
+    return true;
+  }
+
+  private refundUntil(o: ProOrder): number | null {
+    return o.paidAt ? Date.parse(o.paidAt) + REFUND_DAYS * DAY_MS : null;
+  }
+
+  /**
+   * What an account bought, newest first: paid and refunded orders, ones
+   * being checked, and (for a month) ones that did not go through. An order
+   * that was opened and never sent is not a purchase and is left out.
+   */
+  async purchases(userId: string): Promise<Purchase[]> {
+    const now = this.pro.now();
+    const orders = (await this.repo.recentFor(userId, new Date(0))).filter((o) =>
+      o.status === 'paid' || o.status === 'refunded' || o.status === 'review' ||
+      (o.status === 'failed' && (o.kind !== 'invoice' || !!o.invoiceId) && now.getTime() - Date.parse(o.createdAt) < FAILED_SHOWN_DAYS * DAY_MS));
+    if (!orders.length) return [];
+    const [requests, passes] = await Promise.all([this.repo.requestsFor(userId), this.pro.repo.allPasses(userId)]);
+    return Promise.all(orders.map(async (o): Promise<Purchase> => {
+      const pass = o.passId ? passes.find((p) => p.id === o.passId) ?? null : null;
+      const rq = requests.find((r) => r.orderId === o.id) ?? null;
+      const until = this.refundUntil(o);
+      const state: RefundState =
+        o.status === 'refunded' ? 'refunded' :
+        o.status !== 'paid' ? 'none' :
+        rq?.status === 'pending' ? 'requested' :
+        rq?.status === 'declined' ? 'declined' :
+        until !== null && now.getTime() <= until ? 'open' : 'late';
+      return {
+        order: o,
+        endsAt: pass && !pass.revokedAt ? pass.endsAt : null,
+        refund: {
+          state,
+          until: o.status === 'paid' && until !== null ? new Date(until).toISOString() : null,
+          used: state === 'open' && o.passId ? (await this.pro.repo.passUse(userId, o.passId).catch(() => 0)) > 0 : null,
+          reason: state === 'declined' ? rq?.declineReason ?? null : null,
+          askedAt: rq?.createdAt ?? null,
+        },
+      };
+    }));
+  }
+
+  /**
+   * A fan asks for a refund of an order, from the account page. Only their
+   * own order, paid, within REFUND_DAYS, and once per order. By default it
+   * waits for the owner: the fan and the owner are both emailed. With
+   * PRO_AUTO_REFUND=on it is refunded at once when the pass shows no use and
+   * the account has never been refunded before (so buying and refunding in a
+   * loop, each one costing a fee, is not on offer); anything else still waits.
+   */
+  async requestRefund(userId: string, orderId: string, note: string | null): Promise<RefundAskResult> {
+    const o = await this.repo.get(orderId);
+    // Someone else's order is no order at all.
+    if (!o || o.userId !== userId) return { ok: false, reason: 'none' };
+    if (o.status === 'refunded') return { ok: false, reason: 'refunded' };
+    if (o.status !== 'paid') return { ok: false, reason: 'not_paid' };
+    const now = this.pro.now();
+    const until = this.refundUntil(o);
+    if (until === null || now.getTime() > until) return { ok: false, reason: 'late' };
+    const used = o.passId ? await this.pro.repo.passUse(userId, o.passId).catch(() => -1) : 0;
+    const text = (note ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) || null;
+    // A count that could not be read is not "not used": such a request waits for a person.
+    const rq = await this.repo.createRequest({ orderId: o.id, userId, note: text, used: Math.max(0, used), now });
+    if (!rq) return { ok: false, reason: 'already' };
+
+    if (autoRefundOn(this.env) && this.on() && this.api && used === 0 && o.passId) {
+      const before = (await this.repo.recentFor(userId, new Date(0))).some((x) => x.status === 'refunded');
+      if (!before) {
+        this.autoRefunding.add(o.id);
+        try {
+          const r = await this.refund(o.id);
+          if (r.ok) {
+            console.log(`[tifo] payments: order ${o.id} refunded on request (PRO_AUTO_REFUND)`);
+            return { ok: true, state: 'refunded' };
+          }
+          console.error(`[tifo] payments: the automatic refund of ${o.id} did not go through (${r.reason}); the request waits in /admin`);
+        } finally {
+          this.autoRefunding.delete(o.id);
+        }
+      }
+    }
+    await this.opts.onRequest?.({ kind: 'received', request: rq, order: o }).catch((e) => console.error(`[tifo] payments: the emails for refund request ${rq.id} failed (${(e as Error).message})`));
+    return { ok: true, state: 'requested' };
+  }
+
+  /**
+   * The owner answers a request (/admin). Approve: the order is refunded
+   * through refund() (late or not: the request was made in time), which ends
+   * the pass, closes the request and emails the fan. If the refund does not
+   * go through, the request stays open and the reason is given back. Decline:
+   * needs a reason, which is emailed to the fan.
+   */
+  async decideRequest(id: string, action: 'approve' | 'decline', reason: string | null): Promise<RefundDecision> {
+    const rq = await this.repo.requestById(id);
+    if (!rq) return { ok: false, reason: 'none' };
+    if (rq.status !== 'pending') return { ok: false, reason: 'decided' };
+    if (action === 'approve') {
+      const r = await this.refund(rq.orderId, true);
+      if (!r.ok) return { ok: false, reason: r.reason };
+      return { ok: true, status: 'approved' };
+    }
+    const why = (reason ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (why.length < 3) return { ok: false, reason: 'reason' };
+    const now = this.pro.now();
+    if (!(await this.repo.decideRequest(rq.id, 'declined', { reason: why, auto: false }, now))) return { ok: false, reason: 'decided' };
+    const order = await this.repo.get(rq.orderId);
+    if (order) {
+      await this.opts.onRequest?.({ kind: 'declined', request: { ...rq, status: 'declined', declineReason: why, decidedAt: now.toISOString() }, order })
+        .catch((e) => console.error(`[tifo] payments: the email for declined request ${rq.id} failed (${(e as Error).message})`));
+    }
+    return { ok: true, status: 'declined' };
+  }
+
+  /** /admin: the refund requests, the open ones first. */
+  async refundRequests(): Promise<RefundRequestRow[]> {
+    return this.repo.listRequests(100);
+  }
+
+  /**
+   * Send an order's receipt to its owner again. 'wait' when it was sent a
+   * few minutes ago; 'none' for anything that is not this account's paid (or
+   * refunded) order.
+   */
+  async resendReceipt(userId: string, orderId: string): Promise<'sent' | 'wait' | 'none'> {
+    const o = await this.repo.get(orderId);
+    if (!o || o.userId !== userId || (o.status !== 'paid' && o.status !== 'refunded') || !this.opts.onPaid) return 'none';
+    const now = this.pro.now().getTime();
+    const last = this.receiptSent.get(o.id);
+    if (last !== undefined && Math.abs(now - last) < RECEIPT_AGAIN_MS) return 'wait';
+    this.receiptSent.set(o.id, now);
+    if (this.receiptSent.size > 5000) this.receiptSent.clear();
+    const pass = o.passId ? (await this.pro.repo.allPasses(userId)).find((p) => p.id === o.passId) ?? null : null;
+    const sub = o.status === 'paid' ? await this.repo.subFor(userId) : null;
+    const renewing = sub && sub.status === 'active' ? sub : null;
+    try {
+      await this.opts.onPaid(o, pass && !pass.revokedAt ? pass.endsAt : null, renewing, renewing?.nextChargeAt ?? null);
+    } catch (e) {
+      console.error(`[tifo] payments: sending the receipt for ${o.id} again failed (${(e as Error).message})`);
+      this.receiptSent.delete(o.id);
+      return 'none';
+    }
+    return 'sent';
   }
 
   // ----------------------------------------------------------- auto-renew ---
@@ -848,7 +1186,9 @@ export class PaymentService {
     }
     const sub = await this.repo.saveSub({
       userId: order.userId, token, method: p.sourceType, brand: t.brand ?? p.company ?? null, lastFour: t.lastFour, expMonth: t.month, expYear: t.year,
-      amount: order.amount, days: order.days, lang: order.lang, testMode: order.testMode,
+      // Each renewal is the regular price for the plan's days, whatever the first month cost or however long a
+      // founder's first month ran: what the box said before the fan ticked it.
+      amount: regularHalalas(), days: order.days, lang: order.lang, testMode: order.testMode,
       optedInAt: new Date(order.keepAt ?? now), nextChargeAt: new Date(pass.endsAt), now,
     });
     console.log(`[tifo] payments: auto-renew started with order ${order.id}`);
@@ -924,6 +1264,8 @@ export class PaymentService {
     this.running = true;
     try {
       await this.emptyTrash().catch(() => 0);
+      // A refund email the mail service refused earlier (nothing to do while payments are off).
+      if (this.on()) await this.sweepRefundMails().catch(() => {});
       if (!this.renewOn()) return out;
       const now = this.pro.now();
       const due = await this.repo.subsDue(new Date(now.getTime() + REMIND_DAYS * DAY_MS + REMIND_EARLY_MS), 500);
@@ -1018,7 +1360,14 @@ export class PaymentService {
           // The promise: an email REMIND_DAYS before every renewal. Late with it, the renewal moves, never the promise.
           const forDate = new Date(Math.max(due, now.getTime() + REMIND_DAYS * DAY_MS));
           if (!(await this.repo.claimReminder(sub.id, forDate, now))) return;
-          const sent = await this.opts.notify?.({ kind: 'reminder', sub: { ...sub, nextChargeAt: forDate.toISOString() }, chargeAt: forDate.toISOString() }).catch(() => false);
+          // The first renewal after a founder's longer first month says so: 60 days went by, not 30.
+          const opened = sub.cycle === 1
+            ? (await this.repo.recentFor(sub.userId, new Date(0)).catch(() => [])).find((o) => o.status === 'paid' && o.kind !== 'renewal' && o.bonusDays > 0)
+            : undefined;
+          const sent = await this.opts.notify?.({
+            kind: 'reminder', sub: { ...sub, nextChargeAt: forDate.toISOString() }, chargeAt: forDate.toISOString(),
+            ...(opened ? { firstDays: opened.days + opened.bonusDays } : {}),
+          }).catch(() => false);
           if (sent) {
             out.reminded++;
           } else {
@@ -1090,8 +1439,21 @@ export class PaymentService {
  * Payments v2: <template data-pay="renew"> blocks are the auto-renew terms,
  * shown only when Pro is on sale and auto-renew is on; <template
  * data-pay="once"> blocks say there is no renewal, shown on sale without it.
+ *
+ * The launch (proLaunch.ts): <template data-pay="launch"> blocks are the
+ * launch price's terms, shown on sale while the launch price runs, with the
+ * two prices and the date written in ({{launchPrice}}, {{regularPrice}},
+ * {{launchUntil:en}}, {{launchUntil:ar}}); <template data-pay="founders">
+ * blocks are the founders offer's terms, shown on sale while that offer is on.
  */
-export function payLegal(html: string, onSale: boolean, renew = false): string {
+export interface PayLegalMore {
+  /** The launch price as it runs now: both prices in halalas and the day it ends. Null or absent: none. */
+  launch?: { price: number; regular: number; until: string } | null;
+  /** The founders offer is on (PRO_FOUNDERS_BONUS). */
+  founders?: boolean;
+}
+
+export function payLegal(html: string, onSale: boolean, renew = false, more: PayLegalMore = {}): string {
   const block = (name: string): RegExp => new RegExp(`<template data-pay="${name}">([\\s\\S]*?)<\\/template>\\n?`, 'g');
   const soon = /<p data-pay="soon">[\s\S]*?<\/p>\n?/g;
   const keep = (h: string, name: string, show: boolean): string => h.replace(block(name), show ? '$1' : '');
@@ -1099,5 +1461,18 @@ export function payLegal(html: string, onSale: boolean, renew = false): string {
   out = keep(out, 'sale', onSale);
   out = keep(out, 'renew', onSale && renew);
   out = keep(out, 'once', onSale && !renew);
+  const l = onSale ? more.launch ?? null : null;
+  out = keep(out, 'launch', !!l);
+  out = keep(out, 'founders', onSale && more.founders === true);
+  if (l) {
+    const sar = (h: number): string => (h % 100 === 0 ? String(h / 100) : (h / 100).toFixed(2));
+    const day = (lang: string): string =>
+      new Intl.DateTimeFormat(lang, { timeZone: 'Asia/Riyadh', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(l.until));
+    out = out
+      .replace(/\{\{launchPrice\}\}/g, sar(l.price))
+      .replace(/\{\{regularPrice\}\}/g, sar(l.regular))
+      .replace(/\{\{launchUntil:en\}\}/g, day('en-GB'))
+      .replace(/\{\{launchUntil:ar\}\}/g, day('ar-SA-u-ca-gregory-nu-latn'));
+  }
   return out;
 }

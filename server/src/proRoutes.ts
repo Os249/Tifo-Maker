@@ -13,6 +13,7 @@ import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, proMode, previewUse
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
 import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarizeAll } from './proPrice';
 import type { PriceAnswer } from './proRepo';
+import { priceAt, type FounderView, type PriceNow } from './proLaunch';
 import type { UserRow } from './repo';
 
 export interface ProRouteDeps {
@@ -38,8 +39,22 @@ export interface ProRouteDeps {
   checkoutKind?: () => 'invoice' | 'form';
   /** Whether "Keep Pro on" is offered (payments v2). */
   autoRenew?: () => boolean;
+  /** What a month costs now, and how the launch price is shown (proLaunch.ts priceAt). Absent: the server's clock decides. */
+  price?: () => PriceNow;
+  /**
+   * The founders offer as this account sees it (proLaunch.ts): open to it, or
+   * taken with its first purchase. Null for everyone else, so nobody's answer
+   * changes unless they are a founder after the launch.
+   */
+  founderFor?: (userId: string, canBuy: boolean) => Promise<FounderView | null>;
   /** Whether this account has (or had) auto-renew: its account page then shows it (payments v2). */
   hasRenewal?: (userId: string) => Promise<boolean>;
+  /**
+   * What this account bought and a refund it has not been shown yet (19 Nov
+   * 2026): the account page then lists the purchases, and the site says once
+   * that a refund ended Pro. Null, or nothing in it, for everyone else.
+   */
+  payInfo?: (userId: string) => Promise<{ purchases: boolean; refundNotice: { order: string; amount: number; at: string; test: boolean } | null } | null>;
 }
 
 const acctOf = (u: UserRow): ProAccount => ({ id: u.id, username: u.username, email: u.email, emailVerified: !!u.emailVerifiedAt });
@@ -75,14 +90,19 @@ const COUNT_FOR_MS = 60_000;
 const ADMIN_PRICE_ROWS = 300;
 
 /** The parts of the offer the Pro page shows: Free against Pro, one price, and whether this visitor can buy it. */
-function publicOffer(paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false) {
+function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false) {
   return {
     // Only said where Pro can be bought: the page's words follow them.
     ...(paymentsOpen && checkout === 'form' ? { checkout } : {}),
-    ...(paymentsOpen && autoRenew ? { autoRenew } : {}),
+    // What every renewal costs: the regular price, whatever the first month costs.
+    ...(paymentsOpen && autoRenew ? { autoRenew, renewPrice: p.regular / 100 } : {}),
+    // The launch price, while it runs: the regular price it gives way to and the day it does. 'strike' (the
+    // regular price crossed out) only with a discount licence, whose number then shows (proLaunch.ts priceDisplay).
+    ...(p.launch && p.until ? { launch: { regular: p.regular / 100, until: p.until, display: p.display, ...(p.licence ? { licence: p.licence } : {}) } } : {}),
     limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
     currency: OFFER.currency,
-    monthly: { price: OFFER.monthly.price, days: OFFER.monthly.days },
+    // What Moyasar charges for an order made now.
+    monthly: { price: p.halalas / 100, days: OFFER.monthly.days },
     gift: { days: OFFER.gift.days },
     paymentsOpen,
   };
@@ -94,6 +114,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
   const { pro } = deps;
   const cfg = deps.routeConfig ?? {};
   const canBuy = (username: string | null): boolean => deps.paymentsOpenFor?.(username) ?? false;
+  const priceNow = (): PriceNow => deps.price?.() ?? priceAt(pro.now());
 
   /**
    * Pro as the caller sees it. Signed out, whether Pro is open to everyone
@@ -107,17 +128,22 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId) {
       const open = proMode() === 'on';
-      return open ? { live: true, signedIn: false, offer: publicOffer(deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
+      return open ? { live: true, signedIn: false, offer: publicOffer(priceNow(), deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
     }
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user) return { live: false, signedIn: true, soon: soonOffer() };
-    if (!pro.live(user.username)) return { live: false, signedIn: true, soon: soonOffer(), notified: await pro.repo.notified(user.id) };
+    // Only said to an account that bought something: nobody else's answer changes.
+    const info = deps.payInfo ? await deps.payInfo(user.id).catch(() => null) : null;
+    const bought = { ...(info?.purchases ? { purchases: true } : {}), ...(info?.refundNotice ? { refundNotice: info.refundNotice } : {}) };
+    if (!pro.live(user.username)) return { live: false, signedIn: true, soon: soonOffer(), notified: await pro.repo.notified(user.id), ...bought };
     const acct = acctOf(user);
-    const [holding, gift, notified, renewal] = await Promise.all([
+    const buys = canBuy(user.username);
+    const [holding, gift, notified, renewal, founder] = await Promise.all([
       pro.plan(user.id),
       pro.giftFor(acct),
       pro.repo.notified(user.id),
       deps.hasRenewal ? deps.hasRenewal(user.id).catch(() => false) : Promise.resolve(false),
+      deps.founderFor ? deps.founderFor(user.id, buys).catch(() => null) : Promise.resolve(null),
     ]);
     const { plan, pass } = holding;
     const allowances = await pro.allowances(user.id, holding);
@@ -131,9 +157,11 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       allowances,
       gift,
       notified,
-      offer: publicOffer(canBuy(user.username), deps.checkoutKind?.(), deps.autoRenew?.()),
+      offer: publicOffer(priceNow(), buys, deps.checkoutKind?.(), deps.autoRenew?.()),
       // Only said to an account that has it: nobody else's answer changes.
       ...(renewal ? { renewal: true } : {}),
+      ...(founder ? { founder } : {}),
+      ...bought,
       soon: soonOffer(),
       now: pro.now().toISOString(),
     };

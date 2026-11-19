@@ -26,6 +26,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'nav.events': { en: 'Events', ar: 'المسابقات' },
   // Every public header's link to /pro while it is a coming-soon page (8 Nov 2026).
   'nav.proSoon': { en: 'Pro · soon', ar: 'المميّزة · قريباً' },
+  // Once Pro is on sale to the visitor (server/src/routes.ts pagesOf, src/ui/pro.ts proNavOnSale).
+  'nav.pro': { en: 'Pro', ar: 'المميّزة' },
   'nav.terms': { en: 'Terms', ar: 'الشروط' },
   'nav.privacy': { en: 'Privacy', ar: 'الخصوصية' },
   'nav.legal': { en: 'Legal', ar: 'الشروط والخصوصية' },
@@ -2654,6 +2656,29 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     en: 'Your tifo in its ground at the sizes clients ask for (4:5, 3:4, 1:1, 16:9, 9:16), each framed the way you want, and the tifo art on a clear background.',
     ar: 'تيفوك في ملعبه بالمقاسات اللي يطلبها العميل (4:5، 3:4، 1:1، 16:9، 9:16)، كل مقاس تأطّره على كيفك، ورسمة التيفو بخلفية شفافة.',
   },
+  // ---- the part of the tifo to show, in every Pro picture and film (src/ui/tifoFocus.ts) ----
+  'focus.label': { en: 'Part to show', ar: 'الجزء اللي يطلع' },
+  'focus.hint': {
+    en: 'Drag a box over the part of your tifo you want the camera on.',
+    ar: 'اسحب مربع على الجزء اللي تبي الكاميرا عليه من تيفوك.',
+  },
+  'focus.hintRound': {
+    en: 'Your tifo goes round the ground, so no one picture holds all of it. Drag a box over the part you want shown.',
+    ar: 'تيفوك يلف الملعب، وما فيه صورة وحدة تشيله كله. اسحب مربع على الجزء اللي تبيه يطلع.',
+  },
+  'focus.on': {
+    en: 'The camera stays on this part, in the pictures and in the film, vertical too. Drag the box to move it.',
+    ar: 'الكاميرا تثبت على هالجزء في الصور وفي الفيلم، والطولي بعد. اسحب المربع عشان تحرّكه.',
+  },
+  'focus.few': {
+    en: 'There are too few cards there. Pick a part with more of your tifo in it.',
+    ar: 'الكروت هناك قليلة. اختر جزء فيه أكثر من تيفوك.',
+  },
+  'focus.all': { en: 'Let the camera choose', ar: 'خلّ الكاميرا تختار' },
+  'focus.aria': {
+    en: 'Your tifo, laid flat. Drag to mark the part to show. The arrow keys move the box, Shift with an arrow resizes it, and Delete clears it.',
+    ar: 'تيفوك مفرود. اسحب عشان تحدد الجزء اللي يطلع. الأسهم تحرّك المربع، وShift مع السهم يغيّر حجمه، وDelete يشيله.',
+  },
   'pack.title': { en: 'Designer pack', ar: 'باقة المصمم' },
   'pack.lead': { en: '{name} · {w} × {h}', ar: '{name} · ⁦{w} × {h}⁩' },
   'pack.preview': {
@@ -2959,18 +2984,22 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'ستايلات للصور، وخطوط مميّزة، وكلامك على شاشات الملعب',
   },
   'pro.perk.kit': { en: "Club kit: your club's colours, logos and font in one tap", ar: 'هوية النادي: ألوان ناديك وشعاراته وخطه بضغطة' },
-  'pro.perk.noLimits': { en: 'No limit cards in your way', ar: 'بدون رسائل الحدود في طريقك' },
+  'pro.perk.noLimits': { en: 'Higher limits on every AI tool', ar: 'حدود أعلى في كل أدوات الذكاء' },
   'pro.perk.badge': { en: 'The Supporter crown beside your name, with Pro monthly', ar: 'تاج الداعم جنب اسمك، مع المميّزة الشهرية' },
   'pro.act.notNow': { en: 'Not now', ar: 'مو الحين' },
   'pro.act.useGift': { en: 'Use my Pro gift', ar: 'استخدم هديتي المميّزة' },
-  'pro.act.getPro': { en: 'Get Pro for SAR {price} a month', ar: 'اشترك بـ{price} ريال بالشهر' },
+  'pro.act.getPro': { en: 'Get Pro for SAR {price}', ar: 'اشترك بـ{price} ريال' },
   'pro.act.notify': { en: 'Tell me when Pro opens', ar: 'علّمني إذا فتحت المميّزة' },
   'pro.act.notified': { en: "We'll tell you", ar: 'بنعلّمك' },
   'pro.act.seePage': { en: 'See all of Pro', ar: 'شوف كل التفاصيل' },
   'pro.act.useStd': { en: 'Use a standard design', ar: 'استخدم تصميم عادي' },
-  'pro.notify.done': { en: "Done. We'll email you the day Pro goes on sale.", ar: 'تم. بنرسل لك إيميل يوم تنزل المميّزة للبيع.' },
+  'pro.notify.done': { en: "Done. We'll email your account's verified address when Pro goes on sale.", ar: 'تم. بنرسل على إيميل حسابك الموثّق لما تنزل المميّزة للبيع.' },
   'pro.notify.failed': { en: 'That did not save. Try again.', ar: 'ما انحفظ. جرّب مرة ثانية.' },
-  'pro.priceLine': { en: 'Pro is SAR {price} a month, and it never renews by itself.', ar: 'المميّزة بـ{price} ريال بالشهر، وما تتجدد لحالها أبد.' },
+  'pro.priceLine': { en: "Pro is SAR {price} for {days} days, and it doesn't renew by itself.", ar: 'المميّزة بـ{price} ريال لمدة {days} يوم، وما تتجدد لحالها.' },
+  'pro.priceLineRenew': {
+    en: 'Pro is SAR {price} for {days} days. It renews only if you choose that when you pay.',
+    ar: 'المميّزة بـ{price} ريال لمدة {days} يوم، وما تتجدد إلا إذا أنت اخترت وقت الدفع.',
+  },
   'pro.sheet.whatTitle': { en: 'What Pro adds', ar: 'وش تضيف المميّزة' },
   'pro.sheet.whatLead': { en: 'Everything free stays free. Pro adds:', ar: 'كل شي مجاني يبقى مجاني. والمميّزة تضيف:' },
   'pro.export.title1': { en: 'This export uses a Pro item', ar: 'هالتصدير فيه ميزة مميّزة' },
@@ -3085,6 +3114,101 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'عندك هدية مميّزة لمدة {n} أيام تنتظرك، وما تبدأ إلا إذا ضغطت ابدأ.',
   },
   'ac.pro.giftEnded': { en: 'Your Pro gift ended on {date}.', ar: 'انتهت هديتك المميّزة يوم {date}.' },
+  // "Pro and purchases" (src/ui/proAccount.ts, 19 Nov 2026): the section's name
+  // once Pro can be bought or something was; the purchases, receipts and refunds.
+  'ac.pro.titleBuy': { en: 'Pro and purchases', ar: 'المميّزة ومشترياتك' },
+  'ac.pro.daysLeft': { en: '{n} days left', ar: 'باقي {n} يوم' },
+  'ac.pro.dayLeft': { en: '1 day left', ar: 'باقي يوم واحد' },
+  'ac.pro.lastDay': { en: 'Ends today', ar: 'تنتهي اليوم' },
+  'pu.title': { en: 'Purchases', ar: 'مشترياتك' },
+  'pu.item': { en: 'Pro, {days} days', ar: 'المميّزة، {days} يوم' },
+  'pu.itemBonus': { en: 'Pro, {days} days + {bonus} founder days free', ar: 'المميّزة، {days} يوم + {bonus} يوم هدية المؤسسين' },
+  'ac.pro.founderOpen': {
+    en: 'Founder offer: buy Pro before {date} (Riyadh time) and your first month is {total} days, not {days}.',
+    ar: 'عرض المؤسسين: اشترِ المميّزة قبل {date} (بتوقيت الرياض) وأول شهر لك يصير {total} يوم بدل {days}.',
+  },
+  'ac.pro.founderUsed': {
+    en: 'Founder: your first purchase got {bonus} extra days free, {total} days in all.',
+    ar: 'مؤسس: أول شراء لك أخذ {bonus} يوم زيادة مجانًا، والمجموع {total} يوم.',
+  },
+  'pu.itemRenewal': { en: 'Pro, {days} days (auto-renewal)', ar: 'المميّزة، {days} يوم (تجديد تلقائي)' },
+  'pu.price': { en: 'SAR {price}', ar: '{price} ريال' },
+  'pu.test': { en: 'Test payment', ar: 'دفعة تجريبية' },
+  'pu.st.paid': { en: 'Paid', ar: 'مدفوع' },
+  'pu.st.refunded': { en: 'Refunded', ar: 'مسترد' },
+  'pu.st.failed': { en: "Didn't go through", ar: 'ما تمت' },
+  'pu.st.checking': { en: 'Being checked', ar: 'قيد المراجعة' },
+  'pu.failedNote': { en: 'Nothing was charged.', ar: 'ما انخصم منك شي.' },
+  'pu.checkingNote': {
+    en: "We're checking this payment by hand and will email you. You don't need to do anything.",
+    ar: 'نراجع هالدفعة يدويًا وبنرسل لك إيميل. ما تحتاج تسوي شي.',
+  },
+  'pu.m.card': { en: 'Card', ar: 'بطاقة' },
+  'pu.m.applepay': { en: 'Apple Pay', ar: 'Apple Pay' },
+  'pu.m.stcpay': { en: 'STC Pay', ar: 'STC Pay' },
+  'pu.m.samsungpay': { en: 'Samsung Pay', ar: 'Samsung Pay' },
+  'pu.b.mada': { en: 'mada', ar: 'مدى' },
+  'pu.b.visa': { en: 'Visa', ar: 'فيزا' },
+  'pu.b.master': { en: 'Mastercard', ar: 'ماستركارد' },
+  'pu.b.amex': { en: 'American Express', ar: 'أمريكان إكسبريس' },
+  'pu.receipt': { en: 'Receipt', ar: 'الإيصال' },
+  'pu.r.item': { en: 'Item', ar: 'المنتج' },
+  'pu.r.amount': { en: 'Amount', ar: 'المبلغ' },
+  'pu.r.paid': { en: 'Paid', ar: 'تاريخ الدفع' },
+  'pu.r.how': { en: 'Paid with', ar: 'طريقة الدفع' },
+  'pu.r.until': { en: 'Pro until', ar: 'المميّزة لين' },
+  'pu.r.refunded': { en: 'Refunded', ar: 'تاريخ الاسترداد' },
+  'pu.r.ref': { en: 'Reference', ar: 'رقم المرجع' },
+  'pu.send': { en: 'Email me this receipt', ar: 'أرسل الإيصال على إيميلي' },
+  'pu.sending': { en: 'Sending…', ar: 'جاري الإرسال…' },
+  'pu.sent': { en: 'Sent to your email.', ar: 'أرسلناه على إيميلك.' },
+  'pu.sendWait': { en: 'We sent it a moment ago. Check your inbox.', ar: 'أرسلناه قبل شوي. شيّك على إيميلك.' },
+  'pu.sendNoEmail': { en: 'Add an email to your account first, then try again.', ar: 'أضف إيميل لحسابك أول، وبعدها حاول مرة ثانية.' },
+  'pu.sendFailed': { en: "That didn't send. Try again.", ar: 'ما انرسل. حاول مرة ثانية.' },
+  'pu.rf.open': { en: 'You can ask for a refund until {date}.', ar: 'تقدر تطلب استرداد لين {date}.' },
+  'pu.rf.openUsed': {
+    en: "Pro has been used on this month, so a refund isn't promised. You can still ask until {date} and we'll look at it.",
+    ar: 'المميّزة استُخدمت بهالشهر، فالاسترداد مو مضمون. بس تقدر تطلب لين {date} ونراجع طلبك.',
+  },
+  'pu.rf.late': { en: 'The {days} days for a refund ended on {date}.', ar: 'مهلة الاسترداد ({days} أيام) انتهت يوم {date}.' },
+  'pu.rf.requested': {
+    en: "Refund requested on {date}. We'll answer by email within 3 working days, and Pro stays on until then.",
+    ar: 'طلبت الاسترداد يوم {date}. بنرد عليك بالإيميل خلال 3 أيام عمل، والمميّزة تبقى معك لين وقتها.',
+  },
+  'pu.rf.declined': { en: "Your refund request wasn't approved: {reason}", ar: 'ما تمت الموافقة على طلب الاسترداد: {reason}' },
+  'pu.rf.refunded': {
+    en: 'Refunded on {date}. The money goes back the way you paid, usually within a few working days depending on your bank.',
+    ar: 'تم الاسترداد يوم {date}. المبلغ يرجع على نفس طريقة الدفع، وغالبًا خلال كم يوم عمل حسب بنكك.',
+  },
+  'pu.rf.ask': { en: 'Request a refund', ar: 'اطلب استرداد' },
+  'pu.rf.confirm': {
+    en: "Ask for SAR {price} back? If it's approved, this month of Pro ends.",
+    ar: 'تبي تسترد {price} ريال؟ إذا تمت الموافقة، ينتهي شهر المميّزة هذا.',
+  },
+  'pu.rf.note': { en: 'Anything we should know? (optional)', ar: 'فيه شي تبينا نعرفه؟ (اختياري)' },
+  'pu.rf.send': { en: 'Send request', ar: 'أرسل الطلب' },
+  'pu.rf.sending': { en: 'Sending…', ar: 'جاري الإرسال…' },
+  'pu.rf.doneAsked': {
+    en: "Request sent. We've emailed you a confirmation and will answer within 3 working days.",
+    ar: 'انرسل طلبك. أرسلنا لك إيميل تأكيد، وبنرد عليك خلال 3 أيام عمل.',
+  },
+  'pu.rf.doneRefunded': {
+    en: 'Refunded. The money goes back the way you paid, and this month of Pro has ended.',
+    ar: 'تم الاسترداد. المبلغ يرجع على نفس طريقة الدفع، وشهر المميّزة هذا انتهى.',
+  },
+  'pu.rf.gone': { en: "This order can't be refunded from here any more.", ar: 'هالطلب ما عاد ينفع استرداده من هنا.' },
+  'pu.rf.failed': {
+    en: "That didn't go through. Try again, or reply to your receipt email.",
+    ar: 'ما تمت العملية. حاول مرة ثانية، أو رد على إيميل الإيصال.',
+  },
+  // The one-time notice after a refund (the account page and My projects).
+  'rn.title': { en: 'Your Pro payment was refunded', ar: 'رجّعنا لك مبلغ المميّزة' },
+  'rn.body': {
+    en: 'We refunded SAR {price} on {date}, so that month of Pro has ended. The money goes back the way you paid, usually within a few working days depending on your bank.',
+    ar: 'رجّعنا لك {price} ريال يوم {date}، فشهر المميّزة حقها انتهى. المبلغ يرجع على نفس طريقة الدفع، وغالبًا خلال كم يوم عمل حسب بنكك.',
+  },
+  'rn.test': { en: 'It was a test payment: no real money moved.', ar: 'كانت دفعة تجريبية: ما تحرّك أي مبلغ حقيقي.' },
+  'rn.link': { en: 'See your purchases', ar: 'شوف مشترياتك' },
 
   // The Pro page (/pro).
   'meta.pro.title': { en: 'Pro · TifoMaker', ar: 'المميّزة · تيفو ميكر' },
@@ -3113,7 +3237,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.row.kit': { en: 'Club kit', ar: 'هوية النادي' },
   'pp.row.badge': { en: 'Supporter crown', ar: 'تاج الداعم' },
   'pp.row.free': { en: 'Editor, 3D, Match Day, PDF, CSV, saving and publishing', ar: 'المحرر والـ3D ويوم المباراة وPDF وCSV والحفظ والنشر' },
-  'pp.unlimited': { en: 'Unlimited', ar: 'بلا حدود' },
+  'pp.unlimited': { en: 'Free', ar: 'مجانية' },
   'pp.included': { en: 'Included', ar: 'موجودة' },
   'pp.notIncluded': { en: 'Not included', ar: 'غير موجودة' },
   'pp.plans': { en: 'Plans', ar: 'الباقات' },
@@ -3169,7 +3293,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'لذكاء Cloudflare الاصطناعي، يقصّها ويرجّعها. وإحنا ما نحتفظ فيها.',
   },
   'pp.faq.q5': { en: 'How will I pay?', ar: 'كيف بدفع؟' },
-  'pp.faq.a5': { en: 'With mada, Apple Pay or STC Pay, when Pro goes on sale.', ar: 'بمدى أو Apple Pay أو STC Pay، لما تنزل المميّزة للبيع.' },
+  'pp.faq.a5': { en: 'With mada, Visa or Mastercard, when Pro goes on sale.', ar: 'بمدى أو فيزا أو ماستركارد، لما تنزل المميّزة للبيع.' },
   'pp.faq.q6': { en: 'Does the 7-day gift run out if I wait?', ar: 'هل هدية الـ7 أيام تروح لو تأخرت؟' },
   'pp.faq.a6': {
     en: 'No. It waits until you press Start, and the 7 days begin then. One gift per account.',
@@ -3221,7 +3345,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف الإضافات اللي في عمودها تحت، بدفعة وحدة، وبدون شي تلغيه.',
   },
   'pb.step1.t': { en: "Pay once on Moyasar's secure page", ar: 'ادفع مرة وحدة في صفحة ميسّر الآمنة' },
-  'pb.step1.b': { en: 'Apple Pay, mada, Visa, Mastercard or STC Pay. Your card never reaches us.', ar: 'تدفع بـApple Pay أو STC Pay أو مدى أو فيزا أو ماستركارد، وبطاقتك ما توصل لنا أبد.' },
+  'pb.step1.b': { en: 'mada, Visa or Mastercard, and Apple Pay where Moyasar offers it. Your card never reaches us.', ar: 'تدفع بمدى أو فيزا أو ماستركارد، وبـApple Pay إذا كان متاح عند ميسّر. وبطاقتك ما توصل لنا أبد.' },
   'pb.step2.t': { en: 'Pro turns on straight away', ar: 'المميّزة تشتغل على طول' },
   'pb.step2.b': { en: 'Back on TifoMaker, everything in the Pro column is yours, and the receipt comes by email.', ar: 'ترجع لتيفو ميكر وكل شي في عمود المميّزة صار لك، والإيصال يوصلك على الإيميل.' },
   'pb.step3.t': { en: 'It ends by itself', ar: 'تنتهي لحالها' },
@@ -3232,11 +3356,44 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pb.price': { en: 'SAR {price}', ar: '{price} ريال' },
   'pb.per': { en: 'for {days} days', ar: 'لمدة {days} يوم' },
   'pb.once': { en: 'One payment. It never renews by itself.', ar: 'دفعة وحدة، وما تتجدد لحالها أبد.' },
+  // The launch price (server/src/proLaunch.ts). Plain wording by default: a price and the day it changes,
+  // with no crossed-out price and no word "discount".
+  'pb.launch': { en: 'Launch price. From {date} the price will be SAR {regular}.', ar: 'سعر الإطلاق. ومن يوم {date} يصير السعر {regular} ريال.' },
+  // Only with PRO_PRICE_DISPLAY=strike and a discount licence number.
+  'pb.launch.licence': {
+    en: 'Launch price until {date}; then SAR {regular}. Discount licence no. {licence}.',
+    ar: 'سعر الإطلاق لين {date}، وبعدها {regular} ريال. رقم ترخيص التخفيضات: {licence}.',
+  },
+  'pb.launch.was': { en: 'Regular price: SAR {regular}', ar: 'السعر العادي: {regular} ريال' },
+  'pb.vat': { en: 'This is the whole price: no VAT is added.', ar: 'هذا السعر كامل، وما تنضاف عليه ضريبة قيمة مضافة.' },
+  // The founders offer, to a founder who can still take it.
+  'pb.founder': {
+    en: 'Founder: you get 2 months for the price of 1, until {date} (Riyadh time).',
+    ar: 'مؤسس: لك شهرين بسعر شهر، لين {date} (بتوقيت الرياض).',
+  },
+  'pb.founder.terms': {
+    en: 'Pay before then and this first purchase is {total} days, not {days}. Once, for your account. If you get a refund, the extra days end with it.',
+    ar: 'ادفع قبلها وأول شراء لك يصير {total} يوم بدل {days}. مرة وحدة، ولحسابك أنت. وإذا استرديت المبلغ تروح الأيام الزيادة معه.',
+  },
+  'pb.paid.founder': {
+    en: 'Payment received! Pro is on until {date}: {total} days, with your free founder month. Your receipt is on its way to your email.',
+    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}: {total} يوم، ومعها شهر المؤسسين المجاني. والإيصال في طريقه لإيميلك.',
+  },
+  // "Stop these emails", from the founders email's link (/pro?nomail=...).
+  'pb.nomail.working': { en: 'Stopping these emails…', ar: 'جاري إيقاف هالرسائل…' },
+  'pb.nomail.done': {
+    en: "Done. You won't get emails about Pro's news and offers. Receipts and renewal reminders for what you buy still come.",
+    ar: 'تم. ما راح توصلك رسائل عن أخبار المميّزة وعروضها. والإيصالات وتذكيرات التجديد لمشترياتك تبقى توصلك.',
+  },
+  'pb.nomail.failed': {
+    en: "This link didn't work: it may be old. Use the Feedback button below and we'll stop them for you.",
+    ar: 'الرابط ما اشتغل، يمكن إنه قديم. استخدم زر الملاحظات تحت ونوقفها لك.',
+  },
   'pb.buy': { en: 'Get Pro for SAR {price}', ar: 'اشترك بـ{price} ريال' },
   'pb.renew': { en: 'Add a month for SAR {price}', ar: 'أضف شهر بـ{price} ريال' },
   'pb.renewNote': { en: 'The new month starts when this one ends, so no day is lost.', ar: 'الشهر الجديد يبدأ لما يخلص الحالي، فما يضيع عليك ولا يوم.' },
   'pb.going': { en: 'Taking you to the payment page…', ar: 'جاري تحويلك لصفحة الدفع…' },
-  'pb.methods': { en: "You pay on Moyasar's secure page: Apple Pay, mada, cards or STC Pay.", ar: 'تدفع في صفحة ميسّر الآمنة بـApple Pay أو STC Pay أو مدى أو البطاقة.' },
+  'pb.methods': { en: "You pay on Moyasar's secure page, by mada or a card.", ar: 'تدفع في صفحة ميسّر الآمنة بمدى أو البطاقة.' },
   'pb.signin': { en: 'Sign in to get Pro', ar: 'سجّل دخولك عشان تشترك' },
   'pb.err.verify': { en: 'Verify your email first: the receipt goes there.', ar: 'وثّق بريدك أول، لأن الإيصال يوصلك عليه.' },
   'pb.err.held': { en: 'You have Pro until {date}. You can add a month in its last week.', ar: 'عندك المميّزة لين {date}. تقدر تضيف شهر في آخر أسبوع منها.' },
@@ -3262,13 +3419,13 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'ميسّر ما أكد الدفع للحين. إذا دفعت، المميّزة بتشتغل لحالها خلال دقايق والإيصال بيوصلك على الإيميل.',
   },
   'pb.faq.a5': {
-    en: "On Moyasar's secure payment page, with Apple Pay, mada, Visa, Mastercard or STC Pay. Your card details go to Moyasar, never to us.",
-    ar: 'في صفحة الدفع الآمنة حقت ميسّر، بـApple Pay أو STC Pay أو مدى أو فيزا أو ماستركارد. وبيانات بطاقتك تروح لميسّر، وما توصل لنا أبد.',
+    en: "On Moyasar's secure payment page, with mada, Visa or Mastercard, and Apple Pay where Moyasar offers it. Your card details go to Moyasar, never to us.",
+    ar: 'في صفحة الدفع الآمنة حقت ميسّر، بمدى أو فيزا أو ماستركارد، وبـApple Pay إذا كان متاح عند ميسّر. وبيانات بطاقتك تروح لميسّر، وما توصل لنا أبد.',
   },
   'pb.faq.q7': { en: 'Can I get my money back?', ar: 'أقدر أسترجع فلوسي؟' },
   'pb.faq.a7': {
-    en: "Yes. Within 7 days of paying, if you haven't used Pro, reply to your receipt email and you get all of it back, to the way you paid.",
-    ar: 'إيه. خلال 7 أيام من الدفع، إذا ما استخدمت المميّزة، رد على إيميل الإيصال وترجع لك فلوسك كاملة على نفس طريقة الدفع.',
+    en: 'Yes. Within 7 days of paying, if you haven\'t used Pro, you get all of it back, to the way you paid. Ask on your account page, under "Pro and purchases", or reply to your receipt email.',
+    ar: 'إيه. خلال 7 أيام من الدفع، إذا ما استخدمت المميّزة، ترجع لك فلوسك كاملة على نفس طريقة الدفع. اطلبها من صفحة حسابك، تحت «المميّزة ومشترياتك»، أو رد على إيميل الإيصال.'
   },
 
   // Moyasar's payment form on /pro (payments v2, 16 Nov 2026; server/src/payments.ts
@@ -3337,13 +3494,17 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'دفعة وحدة، وما تتجدد إلا إذا علّمت على «خلّ المميّزة شغّالة» وقت الدفع.',
   },
   'pr.faq.a2': {
-    en: 'Only if you ask it to. Tick "Keep Pro on" when you pay and it renews every 30 days at the same price: we email you 3 days before each renewal, and you can turn it off with one click, from that email or your account. Leave it unticked and the month ends on its own.',
-    ar: 'بس إذا أنت طلبت. علّم على «خلّ المميّزة شغّالة» وقت الدفع وبتتجدد كل 30 يوم بنفس السعر: نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر توقفها بضغطة وحدة من الإيميل نفسه أو من حسابك. وإذا ما علّمت عليها، الشهر ينتهي لحاله.',
+    en: 'Only if you ask it to. Tick "Keep Pro on" when you pay and it renews every 30 days at the renewal price shown beside the box, until you cancel: we email you 3 days before each renewal, and you can turn it off with one click, from that email or your account. Leave it unticked and the month ends on its own.',
+    ar: 'بس إذا أنت طلبت. علّم على «خلّ المميّزة شغّالة» وقت الدفع وبتتجدد كل 30 يوم بسعر التجديد المكتوب جنب المربع، لين تلغي: نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر توقفها بضغطة وحدة من الإيميل نفسه أو من حسابك. وإذا ما علّمت عليها، الشهر ينتهي لحاله.',
   },
   'pr.keep': { en: 'Keep Pro on: renew every {days} days', ar: 'خلّ المميّزة شغّالة: تجديد كل {days} يوم' },
   'pr.keep.terms': {
-    en: 'SAR {price} on {date}, then every {days} days. We email you 3 days before each renewal, and you can cancel with one click; Pro then stays on until the days you paid for end.',
-    ar: '{price} ريال يوم {date}، وبعدها كل {days} يوم. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+    en: 'SAR {now} now, then SAR {price} every {days} days until you cancel. The first renewal is on {date}. We email you 3 days before each renewal, and you can cancel with one click; Pro then stays on until the days you paid for end.',
+    ar: '{now} ريال الحين، وبعدها {price} ريال كل {days} يوم لين تلغي. أول تجديد يوم {date}. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+  },
+  'pr.keep.termsFounder': {
+    en: 'SAR {now} now for your first {total} days as a founder, then SAR {price} every {days} days until you cancel. The first renewal is on {date}. We email you 3 days before each renewal, and you can cancel with one click; Pro then stays on until the days you paid for end.',
+    ar: '{now} ريال الحين لأول {total} يوم لك كمؤسس، وبعدها {price} ريال كل {days} يوم لين تلغي. أول تجديد يوم {date}. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
   },
   'pr.keep.methods': { en: 'Renews with: {methods}.', ar: 'التجديد يشتغل مع: {methods}.' },
   'pr.keep.noMada': {

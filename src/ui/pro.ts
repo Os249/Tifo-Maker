@@ -134,6 +134,31 @@ export function chipText(state: ProState, now = Date.now()): string | null {
 }
 
 /**
+ * The header's "Pro · soon" link says just "Pro" once Pro is on sale to this
+ * visitor. When it is on sale to everyone the server already sends the page
+ * that way (routes.ts pagesOf); this covers an account that can buy before
+ * that (the owner's preview).
+ */
+export function proNavOnSale(state: ProState | null): void {
+  if (!state?.offer?.paymentsOpen) return;
+  document.querySelectorAll<HTMLElement>('[data-i18n="nav.proSoon"]').forEach((el) => {
+    el.setAttribute('data-i18n', 'nav.pro');
+    el.textContent = t('nav.pro');
+  });
+}
+
+/** A moment as a fan in Saudi Arabia reads it, whatever the device's clock: "4 December 2026, 12:00". */
+export function whenRiyadh(iso: string, time = true): string {
+  return new Intl.DateTimeFormat(getLang() === 'ar' ? 'ar-SA-u-ca-gregory-nu-latn' : 'en-GB', {
+    timeZone: 'Asia/Riyadh', day: 'numeric', month: 'long', year: 'numeric',
+    ...(time ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
+  }).format(new Date(iso));
+}
+
+/** A price as it is written: 19 or 13.99, never 13.9. */
+export const money = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+
+/**
  * Keep a countdown chip in `host`, before `before` when given. Hidden unless
  * a pass is running. Follows sign-in, a gift accepted elsewhere on the page,
  * and the clock (once a minute).
@@ -154,6 +179,7 @@ export function mountProChip(host: HTMLElement, before?: Element | null): void {
   const load = async (fresh = false): Promise<void> => {
     // Signed out there is no pass to count down: no request at all.
     state = isSignedIn() ? await fetchPro(fresh).catch(() => null) : null;
+    proNavOnSale(state);
     paint();
   };
   void load();

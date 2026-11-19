@@ -79,6 +79,12 @@ export interface FilmPlanInput {
    */
   hold?: { fillW: number; fillH: number; centreY: number; centreX?: number };
   /**
+   * The fan chose the part of the tifo to show (`points` and `footprint` are
+   * that part's): a vertical film holds on it, whole, like a landscape one,
+   * with no pan across it and no pull-back.
+   */
+  fixed?: boolean;
+  /**
    * Whether the camera at `from` sees the card at `to` (nothing the ground
    * built in between). With it, the hold comes down until a roof's front
    * edge or the tier above no longer hides the tifo's top rows.
@@ -267,7 +273,7 @@ export function planFilm(input: FilmPlanInput): FilmPlan {
   // A vertical film is framed on the tifo's height, not its width: closer and
   // lower, the stand fills the frame top to bottom, the tifo runs wider than
   // the picture and the camera pans across it to the middle (TALL).
-  const tall = portrait && !input.hold && !!fp && !!input.points?.length;
+  const tall = portrait && !input.hold && !input.fixed && !!fp && !!input.points?.length;
   // (A vertical film's hold shows a slice of the tifo, but from too close a
   // wide one wraps round the lens.)
   const near = tall
@@ -385,7 +391,7 @@ export function planFilm(input: FilmPlanInput): FilmPlan {
     // its width (and so shows twice that in height: the stand round it, the
     // lights and a strip of pitch), and a raked stand's height never takes
     // more than its share.
-    const h = input.hold ?? { fillW: holdFill(aspect), fillH: portrait ? 0.42 : 0.8, centreY: portrait ? 0.02 : -0.04 };
+    const h = input.hold ?? { fillW: holdFill(aspect), fillH: portrait ? (input.fixed ? 0.6 : 0.42) : 0.8, centreY: portrait ? 0.02 : -0.04 };
     let f = frameOn(input.points, P1, tgt, aspect, h.fillW, h.fillH, h.centreY, h.centreX ?? 0);
     // A poster's tifo too wide for the lens from here (a hall's stand, near):
     // from further back along the way the push came in, until it fits.

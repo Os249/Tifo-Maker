@@ -2808,7 +2808,7 @@ export function openMatchDaySimulator(
     // Pro: what Record makes, Match Day's film or the recording (ui/proFilm.ts).
     if (live && !filmChoice) {
       const fields = [recDur, recFps, recRes, recCam].map((el) => el.closest<HTMLElement>('.mds-field')).filter((el): el is HTMLElement => !!el);
-      filmChoice = await import('../../ui/proFilm').then((m) => m.mountMatchDayFilmChoice(secRecord.body, fields, { map, store }), () => null);
+      filmChoice = await import('../../ui/proFilm').then((m) => m.mountMatchDayFilmChoice(secRecord.body, fields, { map, store, template }), () => null);
       if (closed) return;
     }
     filmChoice?.setLive(live, proRunning());
@@ -2902,7 +2902,9 @@ export function openMatchDaySimulator(
       ]);
       if (!built || signal.aborted || sim.isRecording()) return null;
       const s = FILM_SIZES[film];
-      const c = await filmStill(sim.filmHost(), Math.round(s.width / 2), Math.round(s.height / 2));
+      // On the part the fan chose to show, as the film will be (ui/tifoFocus.ts).
+      sim.setTifoFocus(filmChoice?.part() ?? null);
+      const c = await filmStill(sim.filmHost(), Math.round(s.width / 2), Math.round(s.height / 2)).finally(() => sim.setTifoFocus(null));
       const g = c.getContext('2d')!;
       const marked = !noMarkChk.checked;
       if (marked) drawWatermark(g, c.width, c.height, 'tifomaker.org');
@@ -2957,7 +2959,7 @@ export function openMatchDaySimulator(
       // Pro: Match Day's film of the tifo, drawn frame by frame (ui/proFilm.ts).
       const { filmFromMatchDay } = await import('../../ui/proFilm');
       const { phaseChoice } = await import('../../ui/proPhases');
-      const outcome = await filmFromMatchDay(sim, { shape: film, reveal: { kind: 'mode', mode: state.reveal }, mark: !noMarkChk.checked, creditLine: currentCredit().text || undefined, name: 'tifo-matchday-film', phases: phaseChoice() ?? undefined });
+      const outcome = await filmFromMatchDay(sim, { shape: film, reveal: { kind: 'mode', mode: state.reveal }, mark: !noMarkChk.checked, creditLine: currentCredit().text || undefined, name: 'tifo-matchday-film', phases: phaseChoice() ?? undefined }, filmChoice?.part() ?? null);
       recBtn.disabled = false;
       recordBtn2.disabled = false;
       toast(outcome.message);

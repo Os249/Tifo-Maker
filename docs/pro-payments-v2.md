@@ -12,6 +12,10 @@ Code: `server/src/payments.ts` (the rules and switches, with the long notes),
 `src/ui/proAccount.ts` (the account page). Tests: `server/test/payments2.test.mts`,
 `e2e-pay-form.mjs`, with the stand-in Moyasar in `scripts/fake-moyasar.mjs`.
 
+Refund emails, the account page's purchases and refund requests came after
+this (19 Nov 2026): see `docs/pro-refunds.md`. The launch price, the founders
+list and email, and the founders bonus are in `docs/pro-launch.md`.
+
 ## The variables
 
 | Variable | What it does | Default |

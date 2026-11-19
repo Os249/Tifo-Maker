@@ -459,8 +459,12 @@ async function loadAll(){
     api('/api/admin/pro'),
     api('/api/admin/pro/prices'),
     api('/api/admin/pro/orders'),
-    api('/api/admin/pro/subscriptions')
+    api('/api/admin/pro/subscriptions'),
+    api('/api/admin/pro/refund-requests'),
+    api('/api/admin/pro/launch')
   ]);
+  LAUNCH = results[14].ok && results[14].data ? results[14].data : { error: results[14].status };
+  REQS = results[13].ok && results[13].data ? results[13].data : { error: results[13].status };
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
   QUEUE = results[8].ok && results[8].data ? results[8].data : { error: results[8].status };
   PRO = results[9].ok && results[9].data ? results[9].data : { error: results[9].status };
@@ -1829,6 +1833,7 @@ function proTab(){
   html += kpi('Asked to hear when Pro opens', st.notify || 0, 'one per account', true);
   html += kpi('Said what Pro is worth', (PRICES && PRICES.total) || 0, 'on the coming-soon page', true);
   html += '</div>';
+  html += launchHtml();
   html += ordersHtml();
   html += subsHtml();
   html += pricesHtml();
@@ -1872,13 +1877,95 @@ async function proReload(){
     api('/api/admin/pro' + (PRO_LOOKUP ? '?username=' + encodeURIComponent(PRO_LOOKUP) : '')),
     api('/api/admin/pro/prices'),
     api('/api/admin/pro/orders'),
-    api('/api/admin/pro/subscriptions')
+    api('/api/admin/pro/subscriptions'),
+    api('/api/admin/pro/refund-requests'),
+    api('/api/admin/pro/launch')
   ]);
+  LAUNCH = both[5].ok && both[5].data ? both[5].data : { error: both[5].status };
+  REQS = both[4].ok && both[4].data ? both[4].data : { error: both[4].status };
   SUBS = both[3].ok && both[3].data ? both[3].data : { error: both[3].status };
   PRO = both[0].ok && both[0].data ? both[0].data : { error: both[0].status };
   PRICES = both[1].ok && both[1].data ? both[1].data : { error: both[1].status };
   ORDERS = both[2].ok && both[2].data ? both[2].data : { error: both[2].status };
   paintSection();
+}
+
+/* ---- the launch: the price, the founders, their one email (server/src/proLaunch.ts) ----
+   Before Pro is on sale: who would be a founder, and the email as it would
+   go. After: how the emails went and who bought in time. "Send now" is the
+   fallback for the job that sends them by itself; it is still once per
+   account. Usernames are the only thing listed: never an address. */
+var LAUNCH = null;
+var LAUNCH_MSG = '';
+var LAUNCH_SRC = { notify: 'asked to be told', price: 'answered the price question', both: 'both' };
+function riyadh(iso){
+  if (!iso) return '';
+  try { return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Riyadh', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) + ' Riyadh'; }
+  catch(e){ return String(iso); }
+}
+function launchHtml(){
+  if (!LAUNCH || LAUNCH.error) return '';
+  var L = LAUNCH, p = L.price || {}, f = L.founders || { rows: [] }, w = L.window || {};
+  var html = '<h2 class="sec">Launch and founders</h2>';
+  html += '<p class="lede">' + (L.launchedAt
+    ? 'Pro went on sale on ' + esc(riyadh(L.launchedAt)) + '.' + (w.bonusOn ? ' The founders offer ' + (L.ended ? 'ended' : 'ends') + ' on ' + esc(riyadh(L.deadline)) + '.' : '')
+    : (L.public ? 'Pro is on sale: the launch is being recorded now.' : 'Not launched. The launch is recorded, and the founders emailed, the first time the server finds Pro on sale for real: PRO_PAYMENTS=on, a live Moyasar key and PRO_MODE=on. Nothing happens on a test key or in preview.')) + '</p>';
+  html += '<p class="note"><b>Price now: SAR ' + esc(String(p.now)) + '</b> for 30 days. '
+    + (p.launch ? 'That is the launch price; SAR ' + esc(String(p.regular)) + ' from ' + esc(riyadh(p.until)) + ', by itself.'
+      : p.untilInvalid ? 'PRO_LAUNCH_PRICE_UNTIL is set but is not a date (use 2027-01-15), so there is no launch price.'
+      : p.untilPassed ? 'The launch price ended on ' + esc(riyadh(p.until)) + '; PRO_LAUNCH_PRICE_UNTIL can be removed.'
+      : 'No launch price: set PRO_LAUNCH_PRICE_UNTIL to the first day at SAR ' + esc(String(p.regular)) + ' (a Riyadh date like 2027-01-15) to sell at SAR ' + esc(String(p.launchPrice)) + ' until then.')
+    + ' Auto-renew always renews at SAR ' + esc(String(p.regular)) + '. '
+    + (p.display === 'strike' ? 'The regular price is shown crossed out, with discount licence no. ' + esc(String(p.licence)) + '.' : 'Shown in plain words, with no crossed-out price.') + '</p>';
+  if (p.strikeRefused) html += '<div class="callout warn"><b>PRO_PRICE_DISPLAY=strike is set without a licence number.</b> The crossed-out price is not shown. It needs PRO_DISCOUNT_LICENCE (the Ministry of Commerce discount licence number), which the page then prints.</div>';
+  if (!w.bonusOn) html += '<div class="callout"><b>The founders offer is off</b> (PRO_FOUNDERS_BONUS is not on). Founders still get their one email saying Pro is open, with no offer in it, and nobody gets extra days. With it on: a founder who pays within ' + fmt(w.hours) + ' hours of the launch gets ' + fmt(w.bonusDays) + ' extra days on that first purchase, once per account.</div>';
+  if (!L.mailLive) html += '<div class="callout warn"><b>Email is not being delivered</b> (no mail key), so no founder email goes out. They wait; none is marked sent.</div>';
+  html += '<div class="grid">';
+  html += kpi('Founders', f.total || 0, fmt(f.notify || 0) + ' asked to be told, ' + fmt(f.price || 0) + ' answered the price question, ' + fmt(f.both || 0) + ' both', true);
+  if (L.mail){
+    html += kpi('Emails sent', L.mail.sent, fmt(L.mail.waiting) + ' waiting', true);
+    html += kpi('Not sent', L.mail.failed + L.mail.unknown + L.mail.skipped, fmt(L.mail.failed) + ' failed, ' + fmt(L.mail.unknown) + ' not known, ' + fmt(L.mail.skipped) + ' skipped', true);
+    html += kpi('Founders who bought in time', L.bought.inTime, fmt(L.bought.refunded) + ' refunded since', true);
+  }
+  html += '</div>';
+  if (!L.launchedAt) html += '<p class="note">This is the list as it would be taken if Pro went on sale now: signed-in accounts with a verified email. Guests who answered signed out have no address and are not on it.</p>';
+  if (L.mail && L.mail.unknown) html += '<div class="callout warn"><b>' + fmt(L.mail.unknown) + ' not known.</b> The server stopped between taking a founder and sending. It is not sent again, so that nobody gets it twice; write to them yourself if it matters.</div>';
+  if ((f.rows || []).length){
+    html += '<details><summary>The ' + fmt(f.rows.length) + ' founder' + (f.rows.length === 1 ? '' : 's') + '</summary><table class="tbl"><thead><tr><th>Who</th><th>How</th><th>Email</th><th>Bought in time</th></tr></thead><tbody>';
+    for (var i = 0; i < f.rows.length; i++){
+      var r = f.rows[i];
+      html += '<tr><td>' + (r.username ? '@' + esc(r.username) : '<span class="dim">?</span>') + '</td><td>' + esc(LAUNCH_SRC[r.source] || r.source) + '</td><td>' + esc(r.mail) + '</td><td>' + (r.bought ? 'Yes' : '<span class="dim">no</span>') + '</td></tr>';
+    }
+    html += '</tbody></table></details>';
+  }
+  html += '<details id="launch-mail"><summary>The founders email, as it would go now</summary>'
+    + '<p class="note"><b>Subject:</b> ' + esc((L.email && L.email.subject) || '') + '</p>'
+    + '<iframe id="launch-frame" title="The founders email" sandbox="" style="width:100%;height:900px;border:1px solid #8884;border-radius:8px;background:#f3f4f6"></iframe></details>';
+  if (L.launchedAt && L.mail && !L.ended && (L.mail.waiting || L.mail.failed)) {
+    html += '<p class="note"><button type="button" id="launch-send">Send now</button> The server sends these by itself, a few a minute. This runs it now and tries the failed ones again. Nobody who has had the email gets it twice.</p>';
+  }
+  html += '<p id="launch-out" class="note" role="status" aria-live="polite">' + esc(LAUNCH_MSG) + '</p>';
+  return html;
+}
+function wireLaunch(){
+  var frame = el('launch-frame');
+  /* The email's own HTML, in a frame that can run nothing. */
+  if (frame && LAUNCH && LAUNCH.email) frame.srcdoc = LAUNCH.email.html || '';
+  var send = el('launch-send');
+  if (send) send.addEventListener('click', async function(){
+    if (send.getAttribute('data-sure') !== '1'){
+      send.setAttribute('data-sure', '1');
+      send.textContent = 'Sure? Send to the founders now';
+      return;
+    }
+    send.disabled = true;
+    var r = await post('/api/admin/pro/launch/send', {});
+    var d = r.data || {};
+    LAUNCH_MSG = r.ok
+      ? fmt(d.sent || 0) + ' sent, ' + fmt(d.failed || 0) + ' failed, ' + fmt(d.skipped || 0) + ' skipped.' + (d.held === 'budget' ? ' The rest wait for the day\\'s email allowance.' : d.held === 'mail' ? ' Email is not being delivered.' : d.held === 'ended' ? ' The offer has ended: it is not sent any more.' : '')
+      : 'Not sent (' + ((r.data && r.data.error) || ('HTTP ' + r.status)) + ').';
+    proReload();
+  });
 }
 
 /* ---- buying Pro (payments v1): the switches, the orders, refunds ----
@@ -1912,7 +1999,9 @@ function ordersHtml(){
       (st.checkout === 'form' ? 'the payment form on /pro (' + (st.methods || []).join(', ') + ')' : 'the hosted invoice page')
       + '; ' + (st.verify === 'webhook' ? 'NO secret key on the server: Pro is given from the webhook alone, and refunds are made in the Moyasar dashboard' : 'every payment is read back from Moyasar with the secret key')
       + (st.proxy ? '; calls to Moyasar go through the fixed-IP proxy' : '')
-      + '; auto-renew is ' + (st.autoRenew ? 'ON' + (st.autoRenewMada ? ' (mada included)' : ' (mada excluded)') : 'off') + '.') + '</p>';
+      + '; auto-renew is ' + (st.autoRenew ? 'ON' + (st.autoRenewMada ? ' (mada included)' : ' (mada excluded)') : 'off')
+      + '; refund requests ' + (st.autoRefund ? 'are refunded AUTOMATICALLY when in time and unused (PRO_AUTO_REFUND)' : 'wait for you') + '.') + '</p>';
+    if (st.autoRefundAsked && !st.autoRefund) html += '<div class="callout warn"><b>PRO_AUTO_REFUND=on is set but not in use.</b> Refunding from here needs the secret key (not MOYASAR_VERIFY=webhook). Requests wait for you.</div>';
     if (st.formRefused) html += '<div class="callout warn"><b>PRO_CHECKOUT=form is set but not in use.</b> MOYASAR_PUBLISHABLE_KEY is missing, or is a test key beside a live secret key (or the reverse). Get Pro still goes to the hosted page.</div>';
     if (st.autoRenewAsked && !st.autoRenew) html += '<div class="callout warn"><b>PRO_AUTORENEW=on is set but not in use.</b> It needs the payment form (PRO_CHECKOUT=form with a matching publishable key) and the secret key.</div>';
     if (st.checkout === 'form' && (st.methods || []).indexOf('applepay') < 0 && !st.applePayFile) html += '<p class="note">Apple Pay is not offered: add it to MOYASAR_METHODS and set APPLE_PAY_DOMAIN_ASSOCIATION once the domain is registered with Moyasar.</p>';
@@ -1926,6 +2015,7 @@ function ordersHtml(){
   html += kpi('Refunded', n.refunded || 0, 'within ' + fmt(ORDERS.refundDays || 7) + ' days, unused', true);
   html += kpi('Test orders', n.test || 0, 'test keys, no money', true);
   html += '</div>';
+  html += requestsHtml();
   var rows = ORDERS.orders || [];
   if (!rows.length) return html + '<p class="empty">No orders yet.</p>';
   html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Who</th><th>Amount</th><th>Status</th><th>How</th><th>Pro used</th><th></th></tr></thead><tbody>';
@@ -1940,6 +2030,7 @@ function ordersHtml(){
       + (o.username ? '@' + esc(o.username) : '<span class="dim">account deleted</span>') + '</td><td>SAR ' + esc(String(o.amount))
       + (o.refunded ? ' <span class="dim">(' + esc(String(o.refunded)) + ' back)</span>' : '') + '</td><td>'
       + (lab[1] ? '<span class="' + lab[1] + '">' + esc(lab[0]) + '</span>' : esc(lab[0]))
+      + (o.told === true ? '<br><span class="dim">fan emailed</span>' : o.told === false ? '<br><span class="warn">fan not emailed yet</span>' : '')
       + (o.note ? '<br><span class="dim">' + esc(o.note) + '</span>' : '') + '</td><td>' + esc(ORDER_METHOD[o.method] || o.method || '')
       + (o.kind === 'renewal' ? ' <span class="dim">renewal</span>' : o.keep ? ' <span class="dim">asked to renew</span>' : '') + '</td><td>'
       + (o.used == null ? '<span class="dim">no pass</span>' : o.used ? '<b>' + fmt(o.used) + ' uses</b>' : 'not yet') + '</td><td>' + act + '</td></tr>';
@@ -1963,7 +2054,7 @@ function wireOrders(){
       b.disabled = true;
       b.textContent = 'Refunding...';
       var r = await post('/api/admin/pro/refund', { orderId: b.getAttribute('data-order'), late: b.getAttribute('data-late') === '1' });
-      if (r.ok){ ORDER_MSG = 'Refunded. The money goes back the way it was paid, and the pass has ended.'; proReload(); return; }
+      if (r.ok){ ORDER_MSG = 'Refunded. The money goes back the way it was paid, the pass has ended, and the fan has been emailed.'; proReload(); return; }
       ORDER_MSG = '';
       b.disabled = false;
       b.removeAttribute('data-sure');
@@ -1971,6 +2062,97 @@ function wireOrders(){
       el('order-out').innerHTML = '<b class="warn">Not refunded.</b> ' + esc((r.data && (r.data.reason || r.data.error)) || ('HTTP ' + r.status))
         + (r.data && r.data.reason === 'dashboard' ? ': this server has no secret key (MOYASAR_VERIFY=webhook). Refund it in the Moyasar dashboard; the webhook then ends the pass here.' : '')
         + (r.data && r.data.reason === 'failed' ? ': Moyasar refused it. Try once more, or refund from Moyasar\\'s dashboard (this page notices it).' : '');
+    });
+  }
+}
+
+/* ---- refund requests: what fans asked for from their account page ----
+   server/src/payments.ts requestRefund and decideRequest. Approve refunds the
+   order through Moyasar (the pass ends and the fan is emailed); Decline needs
+   a reason, which is emailed to the fan. What a fan wrote goes through esc(). */
+var REQS = null;
+var REQ_MSG = '';
+function requestsHtml(){
+  if (!REQS || REQS.error) return '';
+  var rows = REQS.requests || [];
+  var open = rows.filter(function(x){ return x.status === 'pending'; });
+  if (!rows.length) return '';
+  var html = '<h2 class="sec">Refund requests</h2>';
+  html += '<p class="lede">' + (open.length
+    ? fmt(open.length) + ' waiting for you. The fan was told to expect an answer within 3 working days.'
+    : 'None waiting.') + (REQS.auto ? ' PRO_AUTO_REFUND is on: a request in time, with Pro unused, from an account never refunded before, is refunded without you.' : '') + '</p>';
+  html += '<table class="tbl"><thead><tr><th>Asked (UTC)</th><th>Who</th><th>Order</th><th>Pro</th><th>They wrote</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < rows.length; i++){
+    var q = rows[i], o = q.order || {};
+    var usedNow = q.usedNow == null ? q.usedThen : q.usedNow;
+    var used = usedNow ? '<b>used</b> <span class="dim">(' + fmt(usedNow) + ' use' + (usedNow === 1 ? '' : 's') + (q.usedNow != null && q.usedNow !== q.usedThen ? ', ' + fmt(q.usedThen) + ' when asked' : '') + ')</span>' : 'not used';
+    var act;
+    if (q.status === 'pending'){
+      act = '<button type="button" class="req-approve" data-req="' + esc(q.id) + '" data-amount="' + esc(String(o.amount)) + '">Approve</button> '
+        + '<button type="button" class="req-decline" data-req="' + esc(q.id) + '">Decline</button>';
+    } else {
+      act = q.status === 'approved' ? '<span class="dim">Approved' + (q.auto ? ' automatically' : '') + ' ' + esc(String(q.answeredAt || '').slice(0, 10)) + '</span>'
+        : '<span class="dim">Declined ' + esc(String(q.answeredAt || '').slice(0, 10)) + ': ' + esc(q.declineReason || '') + '</span>';
+    }
+    html += '<tr><td>' + esc(String(q.askedAt || '').slice(0, 16).replace('T', ' ')) + (o.test ? ' <b class="dim">TEST</b>' : '') + '</td><td>'
+      + (q.username ? '@' + esc(q.username) : '<span class="dim">account deleted</span>') + '</td><td>SAR ' + esc(String(o.amount == null ? '?' : o.amount))
+      + '<br><span class="dim">paid ' + esc(String(o.paidAt || '').slice(0, 10)) + (o.daysSincePaid == null ? '' : ', ' + fmt(o.daysSincePaid) + ' day' + (o.daysSincePaid === 1 ? '' : 's') + ' ago')
+      + (o.inTime ? ', asked in time' : ', asked LATE') + '</span></td><td>' + used + '</td><td>' + (q.note ? esc(q.note) : '<span class="dim">nothing</span>') + '</td><td>' + act + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  html += '<p class="note">"Not used" means nothing was counted against the allowances of the pass this order bought (AI designs, Polishes, cut-outs, stadium photos, reviews, chat). It cannot see exports made with Pro items (the film, the poster, the pack), fonts, styles or kits, so ask if unsure. Approve refunds the whole order; the pass ends and the fan gets the refund email. Decline emails the fan your reason.</p>';
+  html += '<p id="req-out" class="note" role="status" aria-live="polite">' + esc(REQ_MSG) + '</p>';
+  return html;
+}
+function wireRequests(){
+  var ok = document.querySelectorAll('.req-approve');
+  for (var i = 0; i < ok.length; i++){
+    ok[i].addEventListener('click', async function(e){
+      var b = e.currentTarget;
+      /* Two presses, like Refund: the first asks, the second moves the money. */
+      if (b.getAttribute('data-sure') !== '1'){
+        b.setAttribute('data-sure', '1');
+        b.textContent = 'Sure? Refund SAR ' + b.getAttribute('data-amount');
+        return;
+      }
+      b.disabled = true;
+      b.textContent = 'Refunding...';
+      var r = await post('/api/admin/pro/refund-request', { id: b.getAttribute('data-req'), action: 'approve' });
+      if (r.ok){ REQ_MSG = 'Approved and refunded. The pass has ended and the fan has been emailed.'; proReload(); return; }
+      REQ_MSG = '';
+      b.disabled = false;
+      b.removeAttribute('data-sure');
+      b.textContent = 'Approve';
+      var why = (r.data && r.data.reason) || '';
+      el('req-out').innerHTML = '<b class="warn">Not refunded.</b> ' + esc(why || (r.data && r.data.error) || ('HTTP ' + r.status))
+        + (why === 'dashboard' ? ': this server has no secret key (MOYASAR_VERIFY=webhook). Refund it in the Moyasar dashboard; the webhook then ends the pass, closes this request and emails the fan.' : '')
+        + (why === 'failed' ? ': Moyasar refused it. Try once more, or refund from Moyasar\\'s dashboard (this page notices it).' : '')
+        + (why === 'off' ? ': payments are switched off, so nothing can be refunded from here.' : '');
+    });
+  }
+  var no = document.querySelectorAll('.req-decline');
+  for (var j = 0; j < no.length; j++){
+    no[j].addEventListener('click', async function(e){
+      var b = e.currentTarget, cell = b.parentNode;
+      /* The first press opens the reason; it is emailed to the fan, so it has to be written. */
+      var box = cell.querySelector('.req-why');
+      if (!box){
+        box = document.createElement('input');
+        box.type = 'text';
+        box.className = 'req-why';
+        box.maxLength = 500;
+        box.placeholder = 'Reason (emailed to the fan)';
+        box.setAttribute('aria-label', 'Reason for declining, emailed to the fan');
+        cell.insertBefore(box, b);
+        b.textContent = 'Send decline';
+        box.focus();
+        return;
+      }
+      if (box.value.trim().length < 3){ el('req-out').textContent = 'Write the reason first: the fan is emailed it.'; box.focus(); return; }
+      b.disabled = true;
+      var r = await post('/api/admin/pro/refund-request', { id: b.getAttribute('data-req'), action: 'decline', reason: box.value });
+      REQ_MSG = r.ok ? 'Declined. The fan has been emailed your reason, and keeps Pro.' : 'Not declined (' + ((r.data && (r.data.reason || r.data.error)) || ('HTTP ' + r.status)) + ').';
+      proReload();
     });
   }
 }
@@ -2141,7 +2323,9 @@ async function downloadPricesCsv(){
   out.textContent = 'Downloaded ' + fmt(rows.length) + ' answer' + (rows.length === 1 ? '' : 's') + '.';
 }
 function wirePro(){
+  wireLaunch();
   wireOrders();
+  wireRequests();
   wireSubs();
   var csv = el('price-csv');
   if (csv) csv.addEventListener('click', function(){ void downloadPricesCsv(); });
