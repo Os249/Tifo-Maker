@@ -202,15 +202,17 @@ const MAIL_GAP_MS = 700;
 export const founderDeadline = (launchedAt: Date): Date => new Date(launchedAt.getTime() + FOUNDER_WINDOW_HOURS * HOUR_MS);
 
 /**
- * PRO_FOUNDERS_BONUS=on: the founders offer (an extra month for buying within
- * 72 hours) is made and kept. OFF unless set, because a time-limited "extra
- * month free" may count as a promotional offer that needs the Ministry of
- * Commerce's approval (docs/pro-launch.md, "Legal reading"): that is the
- * owner's call. Off, the founders still get their one email saying Pro is
- * open, as they were promised, with no offer in it, and nobody gets extra
+ * The founders offer starts by itself with the launch: the moment Pro is on
+ * sale to everyone, the founders have 72 hours (Osamh's decision, 20 Nov
+ * 2026). There is nothing to switch on.
+ *
+ * PRO_FOUNDERS_BONUS=off is the way out, should the Ministry of Commerce say
+ * a time-limited "extra month free" needs its approval as a promotional offer
+ * (docs/pro-launch.md, "Legal reading"). Off, the founders still get their
+ * one email saying Pro is open, with no offer in it, and nobody gets extra
  * days. A bonus already given stays given whatever this says later.
  */
-export const founderBonusOn = (env: NodeJS.ProcessEnv = process.env): boolean => (env.PRO_FOUNDERS_BONUS ?? '').trim().toLowerCase() === 'on';
+export const founderBonusOn = (env: NodeJS.ProcessEnv = process.env): boolean => (env.PRO_FOUNDERS_BONUS ?? '').trim().toLowerCase() !== 'off';
 
 /** With no offer and so no deadline, the "Pro is open" email is still not sent later than this after the launch. */
 const NEWS_MAIL_DAYS = 14;

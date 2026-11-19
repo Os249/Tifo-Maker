@@ -9,7 +9,7 @@
  * the List-Unsubscribe header) that stops emails of this kind for good.
  *
  * It says only what the site does today. With the founders offer on
- * (PRO_FOUNDERS_BONUS) it states the offer, its exact deadline in Riyadh time
+ * (always, unless PRO_FOUNDERS_BONUS=off) it states the offer, its exact deadline in Riyadh time
  * and its terms; without it, it is the news that Pro is open and its price.
  * No crossed-out price and no word "discount" in either version: the launch
  * price is stated as a price with the date it changes.

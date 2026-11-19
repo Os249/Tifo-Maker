@@ -1449,7 +1449,7 @@ export class PaymentService {
 export interface PayLegalMore {
   /** The launch price as it runs now: both prices in halalas and the day it ends. Null or absent: none. */
   launch?: { price: number; regular: number; until: string } | null;
-  /** The founders offer is on (PRO_FOUNDERS_BONUS). */
+  /** The founders offer is on (it is, unless PRO_FOUNDERS_BONUS=off). */
   founders?: boolean;
 }
 

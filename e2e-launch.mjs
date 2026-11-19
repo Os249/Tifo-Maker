@@ -16,9 +16,9 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { fakeMoyasar } from './scripts/fake-moyasar.mjs';
 
-const PORT = 8961;        // on sale for real: the launch price in plain words, the founders offer on, auto-renew on
+const PORT = 8961;        // on sale for real: the launch price in plain words, the founders offer (it comes with the launch), auto-renew on
 const PORT_STRIKE = 8962; // the same with PRO_PRICE_DISPLAY=strike and a licence number
-const PORT_BARE = 8963;   // on sale with none of the launch settings: 19.99, no offer
+const PORT_BARE = 8963;   // on sale with no launch price and the founders offer switched off: 19.99, no offer
 const PORT_SOON = 8964;   // not on sale: the coming-soon page, untouched
 const FAKE = 8965;
 const B = `http://127.0.0.1:${PORT}`;
@@ -59,9 +59,9 @@ const boot = (port, env) => {
 };
 const SALE = { PRO_MODE: 'on', PRO_PAYMENTS: 'on', MOYASAR_SECRET_KEY: SK, MOYASAR_PUBLISHABLE_KEY: PK, PRO_CHECKOUT: 'form', MOYASAR_WEBHOOK_SECRET: 'e2e-webhook-secret-of-some-length' };
 const servers = [
-  boot(PORT, { ...SALE, PRO_AUTORENEW: 'on', PRO_FOUNDERS_BONUS: 'on', PRO_LAUNCH_PRICE_UNTIL: untilDay }),
+  boot(PORT, { ...SALE, PRO_AUTORENEW: 'on', PRO_LAUNCH_PRICE_UNTIL: untilDay }),
   boot(PORT_STRIKE, { ...SALE, PRO_LAUNCH_PRICE_UNTIL: untilDay, PRO_PRICE_DISPLAY: 'strike', PRO_DISCOUNT_LICENCE: '4400012345' }),
-  boot(PORT_BARE, { ...SALE }),
+  boot(PORT_BARE, { ...SALE, PRO_FOUNDERS_BONUS: 'off' }),
   boot(PORT_SOON, {}),
 ];
 const stop = () => { for (const s of servers) { try { s.kill(); } catch { /* gone */ } } moyasar.close(); };
@@ -428,7 +428,7 @@ console.log('\n— the crossed-out price, only with a licence number —');
 }
 
 // =====================================================================
-console.log('\n— on sale with none of the launch settings: SAR 19.99 and no offer —');
+console.log('\n— no launch price, and the founders offer switched off: SAR 19.99 and no offer —');
 {
   const who = await account('lf_bare', BARE);
   await api('/api/pro/notify', who.token, { method: 'POST', body: '{}' }, BARE);

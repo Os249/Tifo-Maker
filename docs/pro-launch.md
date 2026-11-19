@@ -20,7 +20,7 @@ paid), `src/proPage.ts`, `src/ui/proAccount.ts`, `adminPage.ts`. Tests:
 | `PRO_LAUNCH_PRICE_UNTIL` | The first day at the regular price, as a Riyadh date (`2027-01-15`: SAR 13.99 until the end of 14 Jan, SAR 19.99 from 15 Jan). | unset: no launch price, Pro costs SAR 19.99 |
 | `PRO_PRICE_DISPLAY=strike` | Shows SAR 19.99 crossed out beside the launch price. Only together with the next one. | plain words, no crossed-out price |
 | `PRO_DISCOUNT_LICENCE` | The Ministry of Commerce discount licence number. Printed on /pro beside the crossed-out price. | unset |
-| `PRO_FOUNDERS_BONUS=on` | Makes and keeps the founders offer: 30 extra days for a founder who pays within 72 hours of the launch. | off: founders are still emailed that Pro is open, with no offer |
+| `PRO_FOUNDERS_BONUS=off` | Switches the founders offer off: founders are still emailed that Pro is open, with no offer, and nobody gets extra days. | unset: the offer starts by itself with the launch |
 
 The two prices are in `server/src/proPlan.ts` (`OFFER.monthly.price` 19.99,
 `launchPrice` 13.99; 1999 and 1399 halalas).
@@ -99,9 +99,11 @@ waiting, failed, not known, skipped, and how many founders bought in time.
 "Send now" runs the same job at once and gives refused sends another set of
 tries; it cannot send to an account that has had the email.
 
-## The founders bonus (only with `PRO_FOUNDERS_BONUS=on`)
+## The founders bonus
 
-A founder's first purchase gets 30 extra days on the pass it buys: 60 days.
+It starts by itself: the moment Pro is on sale to everyone, the founders have
+72 hours. Nothing is switched on (decided 20 Nov 2026). A founder's first
+purchase in that time gets 30 extra days on the pass it buys: 60 days.
 
 **The rule for "in time", decided by the server's clock when the payment is
 confirmed:**
@@ -163,8 +165,9 @@ copy could be read, it says "secondary".
    it to a commercial registration (secondary:
    [Okaz, 28 Jul 2024](https://www.okaz.com.sa/economy/na/2166814)). No
    official definition was found, and nothing says whether a digital service
-   sold by a freelancer is covered. **This is why the founders offer is
-   behind `PRO_FOUNDERS_BONUS`, off by default.**
+   sold by a freelancer is covered. **The offer is on all the same, by the
+   owner's decision; `PRO_FOUNDERS_BONUS=off` is the way out if the Ministry
+   says it needs approval. Asking it first (1900) is the safe order.**
 4. **E-Commerce Law disclosures** (arts. 6, 7, 8; regulations arts. 6 to 8,
    secondary): the seller's name, address and contact, a register number
    "if any, or of any other publicly available register", the total price
@@ -203,11 +206,10 @@ copy could be read, it says "secondary".
 
 ## Launch day, in order
 
-1. **Decide** (see the hand-over): the founders offer on or off; the day the
-   launch price ends.
+1. **Decide** the day the launch price ends.
 2. Railway → Variables, **before** switching Pro on:
-   `PRO_LAUNCH_PRICE_UNTIL=<date>`, and `PRO_FOUNDERS_BONUS=on` if the offer
-   is to be made. Leave `PRO_PRICE_DISPLAY` and `PRO_DISCOUNT_LICENCE` unset.
+   `PRO_LAUNCH_PRICE_UNTIL=<date>`. The founders offer needs nothing set
+   (`PRO_FOUNDERS_BONUS=off` only if it is NOT to be made). Leave `PRO_PRICE_DISPLAY` and `PRO_DISCOUNT_LICENCE` unset.
 3. Check email is delivering (/admin → Email), and that `PUBLIC_URL` is
    `https://tifomaker.org` (the email's links are built from it).
 4. Still in preview with **test** keys: open /admin → Pro → "Launch and

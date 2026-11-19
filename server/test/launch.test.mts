@@ -114,7 +114,10 @@ class FakeMoyasar implements MoyasarApi {
 }
 
 const LIVE = { PRO_MODE: 'on', PRO_PAYMENTS: 'on', MOYASAR_SECRET_KEY: LIVE_KEY, MOYASAR_PUBLISHABLE_KEY: PK_LIVE, PRO_CHECKOUT: 'form', MOYASAR_WEBHOOK_SECRET: HOOK };
-const OFFER_ON = { ...LIVE, PRO_FOUNDERS_BONUS: 'on' };
+/** The founders offer needs no switch: it starts with the launch. */
+const OFFER_ON = { ...LIVE };
+/** The one way to have no offer. */
+const OFFER_OFF = { ...LIVE, PRO_FOUNDERS_BONUS: 'off' };
 /** The launch price runs until 15 Jan 2027 (Riyadh). */
 const PRICED = { ...OFFER_ON, PRO_LAUNCH_PRICE_UNTIL: '2027-01-15' };
 const RENEW = { ...PRICED, PRO_AUTORENEW: 'on' };
@@ -228,9 +231,10 @@ function world(env: Record<string, string> = PRICED) {
   assert.deepEqual([st.now, st.regular, st.launch, st.display, st.strikeRefused, st.untilInvalid, st.untilPassed], [13.99, 19.99, true, 'plain', true, false, false]);
   assert.equal(priceStatus(new Date('2027-03-01T00:00:00Z'), env).untilPassed, true);
 
-  assert.equal(founderBonusOn({}), false, 'the founders offer is off unless asked for');
-  assert.equal(founderBonusOn({ PRO_FOUNDERS_BONUS: 'yes' }), false, 'only "on" is on');
-  assert.equal(founderBonusOn({ PRO_FOUNDERS_BONUS: 'ON' }), true);
+  assert.equal(founderBonusOn({}), true, 'the founders offer comes with the launch: nothing to switch on');
+  assert.equal(founderBonusOn({ PRO_FOUNDERS_BONUS: 'on' }), true);
+  assert.equal(founderBonusOn({ PRO_FOUNDERS_BONUS: 'no' }), true, 'only "off" is off');
+  assert.equal(founderBonusOn({ PRO_FOUNDERS_BONUS: ' OFF ' }), false);
   assert.deepEqual([FOUNDER_WINDOW_HOURS, FOUNDER_BONUS_DAYS, FOUNDER_GRACE_HOURS], [72, 30, 6]);
   console.log('launch.test: the price and its display checked');
 }
@@ -581,7 +585,7 @@ function world(env: Record<string, string> = PRICED) {
   assert.ok(again.every((r) => r.ok && !r.first));
   assert.equal((await w.proRepo.allPasses(fan.id)).length, 4);
   // The switch off: no offer, no bonus, whatever the list says.
-  const w2 = world(LIVE);
+  const w2 = world(OFFER_OFF);
   const quiet = w2.person('race_quiet');
   await w2.asks(quiet);
   await w2.launch.tick();
@@ -807,7 +811,7 @@ const restore = setEnv(ALL_OFF);
   assert.equal((await boss('POST', '/api/admin/pro/launch/send')).json().held, 'off', 'the admin cannot start a launch while Pro is not on sale');
   assert.equal(outbox.sent.filter((m) => /Pro is open/.test(m.subject)).length, 0);
   const pre =(await boss('GET', '/api/admin/pro/launch')).json();
-  assert.deepEqual([pre.launchedAt, pre.public, pre.founders.total, pre.founders.rows[0].username, pre.price.now, pre.window.bonusOn], [null, false, 1, 'l_fan', 19.99, false]);
+  assert.deepEqual([pre.launchedAt, pre.public, pre.founders.total, pre.founders.rows[0].username, pre.price.now, pre.window.bonusOn], [null, false, 1, 'l_fan', 19.99, true]);
   assert.ok(/Pro is open/.test(pre.email.subject), 'the preview carries the email as it would go');
   for (const url of ['/api/admin/pro/launch', '/api/admin/pro/launch/email']) {
     assert.equal((await get(url, fan.token)).statusCode, 403, `${url} is the admin's`);
