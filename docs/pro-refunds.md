@@ -7,7 +7,9 @@ had an order gets the site exactly as it was.
 
 Code: `server/src/payments.ts` (the section "refunds, told and asked for"),
 `payRepo.ts` (the store), `payRoutes.ts`, `payRefundMail.ts` (the emails),
-`src/ui/proAccount.ts` (the account page), `src/ui/proCards.ts`
+`src/ui/proAccount.ts` (the account page), `src/ui/proPurchases.ts` (its
+purchases list, downloaded only by an account with an order or a refund to
+show, so the page starts no heavier for anyone else), `src/ui/proCards.ts`
 (`mountRefundCard`, the one-time card on My projects), `adminPage.ts` (the
 queue). Tests: `server/test/payments3.test.mts`, `e2e-pay-account.mjs`.
 

@@ -394,7 +394,7 @@ console.log('\n— in Arabic, on a phone —');
   await buy(arFan, { card: MADA });
   const { ctx, p } = await page(arFan.token, { lang: 'ar', w: 390, h: 844 });
   await openAccount(p, B, '/ar/account');
-  check('Arabic: the section and the order are there', await waitFor(p, () => document.getElementById('pro-ac-h')?.textContent === 'المميّزة ومشترياتك' && /المميّزة، 30 يوم/.test(document.querySelector('.pu-what')?.textContent || '') && /مدفوع/.test(document.querySelector('.pu-order .ac-badge')?.textContent || '') && /19\.99 ريال/.test(document.querySelector('.pu-amt')?.textContent || '') && /مدى/.test(document.querySelector('.pu-meta')?.textContent || '')), await text(p, '#pro'));
+  check('Arabic: the section and the order are there', await waitFor(p, () => document.getElementById('pro-ac-h')?.textContent === 'برو ومشترياتك' && /برو، 30 يوم/.test(document.querySelector('.pu-what')?.textContent || '') && /مدفوع/.test(document.querySelector('.pu-order .ac-badge')?.textContent || '') && /19\.99 ريال/.test(document.querySelector('.pu-amt')?.textContent || '') && /مدى/.test(document.querySelector('.pu-meta')?.textContent || '')), await text(p, '#pro'));
   await p.click('.pu-receipt > summary');
   await p.click('[data-act="refund-ask"]');
   await waitFor(p, () => !!document.querySelector('.pu-ask textarea'));

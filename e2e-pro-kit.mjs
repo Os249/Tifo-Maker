@@ -465,10 +465,10 @@ await api('/api/pro/gift/accept', ar.token, { method: 'POST', body: '{}' });
 {
   const { ctx, p } = await browserFor(ar.token, { lang: 'ar' });
   await open(p, ar.design, 'kit_ar wall', { lang: 'ar' });
-  check('in Arabic: "هوية النادي", crowned مميّز', await entryShown(p) && await waitFor(p, () => /^هوية الناديمميّز$/.test(document.querySelector('.kit-entry')?.textContent || '')));
+  check('in Arabic: "هوية النادي", crowned برو', await entryShown(p) && await waitFor(p, () => /^هوية الناديبرو$/.test(document.querySelector('.kit-entry')?.textContent || '')));
   await openSheet(p);
   const words = await p.evaluate(() => ({ dir: document.documentElement.dir, h2: document.querySelector('.kit-sheet h2')?.textContent, save: document.querySelector('.kit-sheet [data-act="new"]')?.textContent, body: document.querySelector('.kit-sheet')?.textContent }));
-  check('…the sheet in Arabic, right to left, no English left', words.dir === 'rtl' && words.h2 === 'هوية الناديمميّز' && words.save === 'احفظ هالتصميم كهوية' && !/[A-Za-z]{3,}/.test(words.body.replace(/Pro|PNG|JPG/g, '')), JSON.stringify(words));
+  check('…the sheet in Arabic, right to left, no English left', words.dir === 'rtl' && words.h2 === 'هوية الناديبرو' && words.save === 'احفظ هالتصميم كهوية' && !/[A-Za-z]{3,}/.test(words.body.replace(/Pro|PNG|JPG/g, '')), JSON.stringify(words));
   await shot(p, '1440-ar-empty');
   await p.click('.kit-sheet [data-act="new"]');
   await waitFor(p, () => !!document.getElementById('kit-name'));

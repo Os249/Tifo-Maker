@@ -180,7 +180,7 @@ console.log('\n— on sale: the header link and the launch price, in plain words
   for (const path of ['/', '/pro', '/community', '/clubs', '/events', '/ar/pro', '/ar/community']) {
     const html = await (await fetch(B + path)).text();
     const ar = path.startsWith('/ar');
-    check(`${path}: the header says just "${ar ? 'المميّزة' : 'Pro'}"`, !/nav\.proSoon/.test(html) && (ar ? /data-i18n="nav\.pro">المميّزة</ : /data-i18n="nav\.pro">Pro</).test(html));
+    check(`${path}: the header says just "${ar ? 'برو' : 'Pro'}"`, !/nav\.proSoon/.test(html) && (ar ? /data-i18n="nav\.pro">برو</ : /data-i18n="nav\.pro">Pro</).test(html));
   }
   const { ctx, p } = await page(null);
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
@@ -375,7 +375,7 @@ console.log('\n— Arabic —');
     const f = await text(p, '#pb-founder');
     check(`${name}: the founders offer in Arabic, with the deadline in Riyadh time`, /^مؤسس: لك شهرين بسعر شهر، لين \d{1,2} \S+ 20\d\d.*\d\d:\d\d \(بتوقيت الرياض\)\./.test(f) && /60 يوم بدل 30/.test(f), f);
     const page_ = await p.evaluate(() => ({ dir: document.documentElement.dir, nav: document.querySelector('.nav-pro span')?.textContent, latin: (document.querySelector('.pb-buy')?.textContent || '').match(/[A-Za-z]{4,}/g) }));
-    check(`${name}: right to left, the header says "المميّزة", no English left in the price box`, page_.dir === 'rtl' && page_.nav === 'المميّزة' && !page_.latin, JSON.stringify(page_));
+    check(`${name}: right to left, the header says "برو", no English left in the price box`, page_.dir === 'rtl' && page_.nav === 'برو' && !page_.latin, JSON.stringify(page_));
     check(`${name}: the page fits`, await fits(p));
     await p.locator('.pp-plan.pro').scrollIntoViewIfNeeded();
     await shot(p, `pro-launch-founder-${name}-ar`);
@@ -390,7 +390,7 @@ console.log('\n— Arabic —');
   await buy(arFounder);
   const { ctx, p } = await page(arFounder.token, { lang: 'ar', w: 390, h: 844 });
   await p.goto(`${B}/ar/account#pro`, { waitUntil: 'networkidle' });
-  check('the account page in Arabic: the founder line and the purchase', await waitFor(p, () => /مؤسس: أول شراء لك أخذ 30 يوم زيادة مجانًا، والمجموع 60 يوم\./.test(document.querySelector('#pro [data-founder="used"]')?.textContent || '') && /المميّزة، 30 يوم \+ 30 يوم هدية المؤسسين/.test(document.querySelector('#pro .pu-order')?.textContent || '') && /13\.99 ريال/.test(document.querySelector('#pro .pu-amt')?.textContent || '')), await text(p, '#pro'));
+  check('the account page in Arabic: the founder line and the purchase', await waitFor(p, () => /مؤسس: أول شراء لك أخذ 30 يوم زيادة مجانًا، والمجموع 60 يوم\./.test(document.querySelector('#pro [data-founder="used"]')?.textContent || '') && /برو، 30 يوم \+ 30 يوم هدية المؤسسين/.test(document.querySelector('#pro .pu-order')?.textContent || '') && /13\.99 ريال/.test(document.querySelector('#pro .pu-amt')?.textContent || '')), await text(p, '#pro'));
   await shot(p, 'account-founder-phone-ar');
   await ctx.close();
 }

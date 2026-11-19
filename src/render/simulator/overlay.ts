@@ -719,7 +719,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   ledLook: { en: 'See them up close', ar: 'شوفها من قريب' },
   ledTry: {
     en: 'Free to try here. A snapshot or video with your boards on asks about Pro first.',
-    ar: 'جرّبها هنا ببلاش. اللقطة أو الفيديو مع لوحاتك يسألك عن المميّز أول.',
+    ar: 'جرّبها هنا ببلاش. اللقطة أو الفيديو مع لوحاتك يسألك عن برو أول.',
   },
   ledItem: { en: 'LED board text', ar: 'نص اللوحات الإعلانية' },
   ledFile: { en: 'Board file for the venue', ar: 'ملف اللوحة للملعب' },
@@ -732,7 +732,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   ledFileSave: { en: 'Save the board file', ar: 'احفظ ملف اللوحة' },
   ledFileSaved: { en: 'Board file saved:', ar: 'انحفظ ملف اللوحة:' },
   ledFileNone: { en: 'Write a message on the boards first.', ar: 'اكتب رسالة على اللوحات أول.' },
-  ledFileFree: { en: 'The board file is part of Pro. Your snapshot and video are free as before, with plain boards.', ar: 'ملف اللوحة من المميّزة. لقطتك وفيديوك مجانيين مثل أول، واللوحات فيها عادية.' },
+  ledFileFree: { en: 'The board file is part of Pro. Your snapshot and video are free as before, with plain boards.', ar: 'ملف اللوحة من برو. لقطتك وفيديوك مجانيين مثل أول، واللوحات فيها عادية.' },
   ledFileItem: { en: 'LED board file', ar: 'ملف اللوحة الإعلانية' },
   noMark: { en: 'Without the tifomaker.org mark', ar: 'بدون علامة tifomaker.org' },
   noMarkShort: { en: 'No mark', ar: 'بدون العلامة' },

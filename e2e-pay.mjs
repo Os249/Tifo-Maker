@@ -219,7 +219,7 @@ console.log('\n— in Arabic, on a phone —');
   const held = await account('pay_held');
   const { ctx, p } = await page(held.token, { lang: 'ar', w: 390, h: 844 });
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
-  check('Arabic: the sale hero and the button', await waitFor(p, () => /خذ المميّزة لمدة شهر/.test(document.getElementById('pp-h')?.textContent || '') && /^اشترك بـ\d+(\.\d\d)? ريال$/.test(document.querySelector('[data-act="buy"]')?.textContent || '')));
+  check('Arabic: the sale hero and the button', await waitFor(p, () => /خذ برو لمدة شهر/.test(document.getElementById('pp-h')?.textContent || '') && /^اشترك بـ\d+(\.\d\d)? ريال$/.test(document.querySelector('[data-act="buy"]')?.textContent || '')));
   const fit = await p.evaluate(() => {
     const btn = document.querySelector('[data-act="buy"]');
     const b = btn.getBoundingClientRect();

@@ -60,8 +60,8 @@ export function founderEmail(m: FounderMailInput): EmailMessage {
   const regular = sar(m.regular);
   const total = days + (m.offer?.bonusDays ?? 0);
   const subject = m.offer
-    ? 'برو انفتحت، وأنت من المؤسسين · Pro is open, and you are a founder'
-    : 'تيفو ميكر برو انفتحت · TifoMaker Pro is open';
+    ? 'برو انفتح، وأنت من المؤسسين · Pro is open, and you are a founder'
+    : 'تيفو ميكر برو انفتح · TifoMaker Pro is open';
   const proAr = `${m.base}/ar/pro`;
   const proEn = `${m.base}/pro`;
 
@@ -72,12 +72,12 @@ export function founderEmail(m: FounderMailInput): EmailMessage {
     ? `The price: SAR ${price} for ${days} days. That is the launch price; from ${day(m.launchUntil, 'en')} the price will be SAR ${regular}.`
     : `The price: SAR ${price} for ${days} days.`;
   const renewAr = m.autoRenew
-    ? `دفعة وحدة، وما تتجدد إلا إذا أنت اخترت «خلّ المميّزة شغّالة» وقت الدفع، والتجديد وقتها بـ${regular} ريال كل ${days} يوم لين توقفه.`
-    : 'دفعة وحدة، وما تتجدد لحالها: ما ينخصم منك شي مرة ثانية.';
+    ? `دفعة وحدة، وما يتجدد إلا إذا أنت اخترت «خلّ برو شغّال» وقت الدفع، والتجديد وقتها بـ${regular} ريال كل ${days} يوم لين توقفه.`
+    : 'دفعة وحدة، وما يتجدد لحاله: ما ينخصم منك شي مرة ثانية.';
   const renewEn = m.autoRenew
     ? `One payment. It renews only if you choose "Keep Pro on" when you pay; renewals are then SAR ${regular} every ${days} days until you turn it off.`
     : 'One payment, and it does not renew by itself: nothing is charged again.';
-  const whatAr = 'برو تضيف على المجاني: تصدير بدون علامة tifomaker.org، وفيلم يوم المباراة بدقة Full HD وفيديو طولي 9:16، وبوستر 4K، وخطوط وستايلات صور مميّزة، وهوية ناديك، وتصاميم ومراجعات أكثر بالذكاء الاصطناعي. وكل شي مجاني يبقى مجاني.';
+  const whatAr = 'برو يضيف على المجاني: تصدير بدون علامة tifomaker.org، وفيلم يوم المباراة بدقة Full HD وفيديو طولي 9:16، وبوستر 4K، وخطوط وستايلات صور من برو، وهوية ناديك، وتصاميم ومراجعات أكثر بالذكاء الاصطناعي. وكل شي مجاني يبقى مجاني.';
   const whatEn = 'Pro adds to what is free: exports without the tifomaker.org mark, the match-day film in Full HD and a vertical 9:16 video, a 4K poster, Pro fonts and portrait styles, your club kit, and more AI designs and reviews. Everything free stays free.';
 
   const offerAr = m.offer
@@ -96,8 +96,8 @@ export function founderEmail(m: FounderMailInput): EmailMessage {
   const sellerEn = smallPrint(`Sold by ${SELLER.en}, a freelancer registered on Saudi Arabia's freelance platform (document ${SELLER.document}). The price is the full amount; no VAT is charged. Contact: ${m.contact}`);
 
   const ar =
-    para('تيفو ميكر برو صارت متاحة للشراء.') +
-    para('وأنت من مؤسسيها: طلبت نعلّمك أول ما تفتح، أو قلت لنا كم يسوى شهر برو عندك، ومن أجوبتكم حددنا السعر. شكرًا لك.') +
+    para('تيفو ميكر برو صار متاح للشراء.') +
+    para('وأنت من مؤسسيه: طلبت نعلّمك أول ما يفتح، أو قلت لنا كم يسوى شهر برو عندك، ومن أجوبتكم حددنا السعر. شكرًا لك.') +
     offerAr +
     para(priceAr) +
     para(renewAr) +
@@ -117,7 +117,7 @@ export function founderEmail(m: FounderMailInput): EmailMessage {
     smallLink("This is an advertisement, sent once. If you'd rather not get emails like it:", m.stopUrl, 'Stop these emails');
 
   const why = {
-    ar: 'وصلتك هذه الرسالة لأنك طلبت من حسابك في تيفو ميكر تعرف أول ما تفتح برو.',
+    ar: 'وصلتك هذه الرسالة لأنك طلبت من حسابك في تيفو ميكر تعرف أول ما يفتح برو.',
     en: 'You received this because, from your TifoMaker account, you asked to hear when Pro opens.',
   };
   return {
@@ -125,7 +125,7 @@ export function founderEmail(m: FounderMailInput): EmailMessage {
     subject,
     html: layoutEmail({ title: subject, siteUrl: m.base, blocks: [{ lang: 'ar', html: ar }, { lang: 'en', html: en }], why }),
     text:
-      `تيفو ميكر برو صارت متاحة للشراء، وأنت من مؤسسيها.\n` +
+      `تيفو ميكر برو صار متاح للشراء، وأنت من مؤسسيه.\n` +
       (m.offer ? `عرض المؤسسين: اشترِ قبل ${when(m.offer.deadline, 'ar')} (بتوقيت الرياض) وتاخذ ${total} يوم بسعر ${days}. مرة وحدة لحسابك، على أول شراء.\n` : '') +
       `${priceAr}\n${renewAr}\n${proAr}\n\n` +
       `TifoMaker Pro is now on sale, and you're one of its founders.\n` +

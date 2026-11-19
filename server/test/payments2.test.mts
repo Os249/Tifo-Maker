@@ -244,7 +244,7 @@ function world(env: Record<string, string> = RENEW_ENV, api: 'fake' | 'none' = '
   // The legal page: the auto-renew terms only when on sale with auto-renew on.
   const legal = readFileSync(new URL('../../legal.html', import.meta.url), 'utf8');
   const off = payLegal(legal, false, true);
-  assert.ok(!/data-pay="(sale|renew|once)"|auto-renew|Keep Pro on|خلّ المميّزة شغّالة/i.test(off), 'not on sale: nothing about renewing, whatever the switch');
+  assert.ok(!/data-pay="(sale|renew|once)"|auto-renew|Keep Pro on|خلّ برو شغّال/i.test(off), 'not on sale: nothing about renewing, whatever the switch');
   const once = payLegal(legal, true, false);
   assert.ok(!/data-pay=/.test(once) && once.includes('It does not renew') && !/Keep Pro on|token/i.test(once), 'on sale without auto-renew: the v1 terms, word for word');
   assert.ok(once.includes('within 7 days of paying') && once.includes('خلال 7 أيام من الدفع'));

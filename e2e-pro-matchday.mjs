@@ -545,7 +545,7 @@ console.log('\n— Arabic, and a phone —');
       over: Math.max(0, ...[...document.querySelectorAll('.mds-overlay *')].filter((e) => e.getClientRects().length && !e.closest('.mds-panel.collapsed')).map((e) => { const b = e.getBoundingClientRect(); return Math.max(b.right - innerWidth, -b.left); })),
     };
   });
-  check('the section in Arabic, with the crown\'s word', ar.dir === 'rtl' && /اللوحات الإعلانية/.test(ar.head) && /مميّز/.test(ar.head) && ar.label === 'الرسالة 1', JSON.stringify(ar));
+  check('the section in Arabic, with the crown\'s word', ar.dir === 'rtl' && /اللوحات الإعلانية/.test(ar.head) && /برو/.test(ar.head) && ar.label === 'الرسالة 1', JSON.stringify(ar));
   check('…the mark option too, and nothing sticks out sideways', /بدون العلامة/.test(ar.mark) && ar.over <= 1, JSON.stringify(ar));
   await shot(p, 'led-arabic-desktop');
   // Too narrow a bar for one more control: the option heads Recording instead.

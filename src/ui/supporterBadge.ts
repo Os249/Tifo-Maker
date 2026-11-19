@@ -1,6 +1,6 @@
 /**
  * The supporter badge (Pro): beside the name of somebody whose Pro month is
- * running, the gold crown and "Pro supporter" / "داعم مميّز", on their
+ * running, the gold crown and "Pro supporter" / "داعم برو", on their
  * published tifo cards, their public tifo page and their profile header. Where
  * a name sits in a tight row (a comment, a card's byline on a phone), the
  * crown alone, with the badge's words spoken and on hover.

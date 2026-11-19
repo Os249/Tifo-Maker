@@ -707,7 +707,7 @@ function world(env: Record<string, string> = PRICED) {
   const base = { to: 'founder@example.test', base: 'https://tifomaker.test', contact: 'owner@example.test', stopUrl: 'https://tifomaker.test/pro?nomail=tok', stopPost: 'https://tifomaker.test/api/pro/mail/stop?t=tok' };
   const deadline = '2026-12-04T09:00:00.000Z'; // 12:00 in Riyadh
   const m = founderEmail({ ...base, price: 1399, regular: 1999, launchUntil: '2027-01-14T21:00:00.000Z', offer: { deadline, bonusDays: 30 }, autoRenew: true });
-  assert.ok(/Pro is open/.test(m.subject) && /برو انفتحت/.test(m.subject));
+  assert.ok(/Pro is open/.test(m.subject) && /برو انفتح/.test(m.subject));
   for (const part of [m.html, m.text!]) {
     assert.ok(part.includes('4 December 2026') && part.includes('12:00') && part.includes('Riyadh time'), 'the exact deadline, in Riyadh time');
     assert.ok(part.includes('60 days for the price of 30'), 'the offer');

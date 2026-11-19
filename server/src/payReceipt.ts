@@ -87,7 +87,7 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
     (r.endsAt ? para(`برو شغّال لين: ${when(r.endsAt, 'ar')}`) : '') +
     para(`رقم المرجع: ${ref}`) +
     (refunded ? para(`هذا الطلب تم استرداده يوم ${dayOf(order.refundedAt ?? paidAt, 'ar')}، وشهر برو حقه انتهى.`) : renewAr) +
-    (refunded ? '' : smallPrint(`تقدر تطلب استرداد كامل المبلغ خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو: من صفحة حسابك، تحت «المميّزة ومشترياتك»، اضغط «اطلب استرداد» (${account})، أو رد على هذي الرسالة أو راسلنا على ${r.contact}.`));
+    (refunded ? '' : smallPrint(`تقدر تطلب استرداد كامل المبلغ خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو: من صفحة حسابك، تحت «برو ومشترياتك»، اضغط «اطلب استرداد» (${account})، أو رد على هذي الرسالة أو راسلنا على ${r.contact}.`));
   const en =
     (test ? para('This is a test receipt: no real money was taken.') : '') +
     para(renewal ? 'Pro has renewed on your account. Thank you!' : 'Thank you! Your payment arrived and Pro is on for your account.') +

@@ -524,7 +524,7 @@ console.log('\n— in Arabic, on a 390px phone —');
       over: document.documentElement.scrollWidth - innerWidth,
     };
   });
-  check('…in Arabic', ar.label === 'المقاس' && ar.opts[0] === 'مقاس شاشتك' && ar.group === '♛ مقاسات مميّزة' && /تيك توك/.test(ar.note) && /بوستر يوم المباراة/.test(ar.poster) && ar.chip === 'مميّز', JSON.stringify(ar));
+  check('…in Arabic', ar.label === 'المقاس' && ar.opts[0] === 'مقاس شاشتك' && ar.group === '♛ مقاسات برو' && /تيك توك/.test(ar.note) && /بوستر يوم المباراة/.test(ar.poster) && ar.chip === 'برو', JSON.stringify(ar));
   check('…with 44px targets', ar.select >= 44 && ar.posterH >= 44, JSON.stringify({ select: ar.select, poster: ar.posterH }));
   check('…and nothing scrolling sideways', ar.over <= 0, String(ar.over));
   await shot(p, 'pexp-panel-390-ar');

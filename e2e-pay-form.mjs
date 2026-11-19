@@ -401,7 +401,7 @@ console.log('\n— in Arabic, on a phone —');
     };
   });
   check('…nothing off the side, the form inside its box, right to left', fit.over <= 0 && fit.formIn && fit.dir === 'rtl', JSON.stringify({ over: fit.over, formIn: fit.formIn, dir: fit.dir }));
-  check('…"Keep Pro on" in Arabic, with the date and the price, no English left', /خلّ المميّزة شغّالة: تجديد كل 30 يوم/.test(fit.terms) && /19\.99 ريال الحين، وبعدها 19\.99 ريال كل 30 يوم لين تلغي/.test(fit.terms) && !fit.latin, fit.terms);
+  check('…"Keep Pro on" in Arabic, with the date and the price, no English left', /خلّ برو شغّال: تجديد كل 30 يوم/.test(fit.terms) && /19\.99 ريال الحين، وبعدها 19\.99 ريال كل 30 يوم لين تلغي/.test(fit.terms) && !fit.latin, fit.terms);
   check('…Moyasar\'s own labels are Arabic too', fit.labels.length > 0 && fit.labels.every((l) => /[؀-ۿ]/.test(l)), fit.labels.join(' | '));
   check('…fields at 16px (no zoom on iPhone) and a 44px Pay button', fit.fonts.every((f) => f >= 16) && fit.payH >= 44, JSON.stringify(fit.fonts));
   await p.locator('.pb-keep').scrollIntoViewIfNeeded();

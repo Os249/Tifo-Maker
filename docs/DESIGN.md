@@ -204,7 +204,7 @@ them.
 One title, one sentence, one blue action, at most one quiet alternative.
 
 ### Pro (`ui/pro.ts`, `ui/pro.css`)
-- **One mark: the gold crown.** "Pro" beside it in English, "مميّز" in
+- **One mark: the gold crown.** "Pro" beside it in English, "برو" in
   Arabic, where there is room (`proChipHtml()`); the crown alone, with its
   name spoken, on a small thumbnail. Gold is `--pro-*` (tokens `--gold-*`):
   `--gold-700` for words on light grounds, `--gold-400` on dark. Gold is
@@ -283,7 +283,7 @@ One title, one sentence, one blue action, at most one quiet alternative.
   its words in the title.
 - **The supporter badge** (`supporterBadgeHtml()`, `ui/supporterBadge.ts`)
   follows a paid month of Pro's name: the crown and "Pro supporter" /
-  "داعم مميّز" on their tifo cards, their public tifo page, their profile
+  "داعم برو" on their tifo cards, their public tifo page, their profile
   header and their account page; the crown alone, its words spoken, in a
   tight row (a comment). It shows what the server says (`ownerSupporter`,
   `supporter`), never a plan or a date, and never for the gift.
@@ -306,7 +306,7 @@ One title, one sentence, one blue action, at most one quiet alternative.
   month of Pro?" (riyals or dollars, the page's language choosing first; an
   optional comment), and "Send my price" is the page's one blue button.
   "Tell me when Pro opens" sits below it, quiet. Every public header carries
-  "♛ Pro · soon" / "♛ المميّزة · قريباً" (`.nav-pro`: the gold crown, the
+  "♛ Pro · soon" / "♛ برو · قريباً" (`.nav-pro`: the gold crown, the
   link's ink). The answers are on /admin → Pro.
 
 ### Tifo events (`src/events.ts`, `ui/eventBand.ts`)

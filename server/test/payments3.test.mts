@@ -677,16 +677,16 @@ function world(env: Record<string, string> = FORM_ENV, api: 'fake' | 'none' = 'f
   const off = payLegal(legal, false, false);
   assert.ok(on.includes('within 7 days of paying') && on.includes('خلال 7 أيام من الدفع'));
   assert.ok(on.includes('under "Pro and purchases", press "Request a refund"') && on.includes('href="/account#pro"'), 'how to ask, from the account page');
-  assert.ok(on.includes('تحت «المميّزة ومشترياتك» اضغط «اطلب استرداد»') && on.includes('href="/ar/account#pro"'), 'and in Arabic');
+  assert.ok(on.includes('تحت «برو ومشترياتك» اضغط «اطلب استرداد»') && on.includes('href="/ar/account#pro"'), 'and in Arabic');
   assert.ok(on.includes('within 3 working days') && on.includes('خلال 3 أيام عمل'));
   assert.ok(!off.includes('Request a refund') && !off.includes('اطلب استرداد') && !off.includes('Pro and purchases'), 'none of it is served while Pro is not on sale');
   const strings = readFileSync(new URL('../../src/ui/i18n/strings.ts', import.meta.url), 'utf8');
-  assert.ok(strings.includes("'ac.pro.titleBuy': { en: 'Pro and purchases', ar: 'المميّزة ومشترياتك' }"), 'the section is called what /legal and the receipt call it');
+  assert.ok(strings.includes("'ac.pro.titleBuy': { en: 'Pro and purchases', ar: 'برو ومشترياتك' }"), 'the section is called what /legal and the receipt call it');
   assert.ok(strings.includes("'pu.rf.ask': { en: 'Request a refund', ar: 'اطلب استرداد' }"));
   const order = { ...(await (async () => { const w = world(); return (await w.buy(w.buyer('promise_fan'))).order; })()) };
   const rc = receiptEmail({ order, to: 'f@example.test', endsAt: null, base: 'https://tifomaker.test', contact: 'help@tifomaker.test' });
   assert.ok(rc.html.includes(`within ${REFUND_DAYS} days of paying if you haven&#39;t used Pro`) && rc.html.includes('under &quot;Pro and purchases&quot;, press &quot;Request a refund&quot;') && rc.html.includes('https://tifomaker.test/account#pro'));
-  assert.ok(rc.html.includes(`خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو`) && rc.html.includes('«المميّزة ومشترياتك»') && rc.html.includes('«اطلب استرداد»'));
+  assert.ok(rc.html.includes(`خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو`) && rc.html.includes('«برو ومشترياتك»') && rc.html.includes('«اطلب استرداد»'));
   assert.ok(rc.text!.includes('ask on your account page (https://tifomaker.test/account#pro)'));
   console.log('payments3.test: /legal, the receipt and the account page promise the same refund');
 }

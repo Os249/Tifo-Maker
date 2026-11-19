@@ -441,12 +441,12 @@ console.log('\n— the words on the seats: seat-aware letters and the seat previ
 console.log('\n— in Arabic, and with Pro running —');
 {
   const e = await editor(fan.token, `/ar/app?project=${fan.design}&e2e=1`, { lang: 'ar' });
-  check('the group is "♛ خطوط مميّزة"', await waitFor(e.p, () => document.querySelector('#text-font > optgroup.pfont-group')?.label === '♛ خطوط مميّزة'));
+  check('the group is "♛ خطوط برو"', await waitFor(e.p, () => document.querySelector('#text-font > optgroup.pfont-group')?.label === '♛ خطوط برو'));
   await e.p.evaluate(() => window.__tifo.objects.select(window.__tifo.objects.list().find((o) => o.kind === 'text').id));
   await e.p.waitForTimeout(300);
   const pk = await pickers(e.p);
-  check('…the crown says مميّز', pk['obj-font'].chip?.shown && pk['obj-font'].chip.text === 'مميّز', JSON.stringify(pk['obj-font'].chip));
-  check('…and the export sheet would say "الخطوط المميّزة"', JSON.stringify(await e.p.evaluate(() => window.__tifoProFonts.items())) === '["الخطوط المميّزة"]');
+  check('…the crown says برو', pk['obj-font'].chip?.shown && pk['obj-font'].chip.text === 'برو', JSON.stringify(pk['obj-font'].chip));
+  check('…and the export sheet would say "خطوط برو"', JSON.stringify(await e.p.evaluate(() => window.__tifoProFonts.items())) === '["خطوط برو"]');
   check('the seat preview, in Arabic', await waitFor(e.p, () => document.querySelector('#obj-controls .qf-title')?.textContent === 'على المقاعد' && /صف/.test(document.querySelector('#obj-controls .qf-where')?.textContent || '')));
   await shot(e.p, 'pf-arabic');
   await e.ctx.close();

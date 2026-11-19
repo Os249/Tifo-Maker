@@ -337,11 +337,11 @@ let styledSeats = '';
   // Arabic, and a phone.
   const { ctx, p } = await editor(fan.token, fan.design, { lang: 'ar' });
   await arm(p);
-  check('in Arabic: "الستايل", "ستنسل" and "بوستر بثلاث ألوان", and the chip says مميّز', await waitFor(p, () => {
+  check('in Arabic: "الستايل", "ستنسل" and "بوستر بثلاث ألوان", and the chip says برو', await waitFor(p, () => {
     const s = document.getElementById('import-pstyle');
     return !!s && document.querySelector('label[for="import-pstyle"]')?.textContent === 'الستايل' &&
       s.options[1].textContent === 'ستنسل' && s.options[2].textContent === 'بوستر بثلاث ألوان' && s.options[3].textContent === 'دوتون النادي' &&
-      /مميّز/.test(s.closest('.pstyle-field')?.querySelector('.pro-chip')?.textContent || '');
+      /برو/.test(s.closest('.pstyle-field')?.querySelector('.pro-chip')?.textContent || '');
   }));
   const label = await p.evaluate(() => window.__tifoProStyles.items());
   check('…and the export sheet\'s name for it is Arabic too', JSON.stringify(label) === JSON.stringify(['ستايل البورتريه']), JSON.stringify(label));

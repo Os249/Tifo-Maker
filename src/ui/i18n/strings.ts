@@ -25,9 +25,9 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'nav.community': { en: 'Community', ar: 'المجتمع' },
   'nav.events': { en: 'Events', ar: 'المسابقات' },
   // Every public header's link to /pro while it is a coming-soon page (8 Nov 2026).
-  'nav.proSoon': { en: 'Pro · soon', ar: 'المميّزة · قريباً' },
+  'nav.proSoon': { en: 'Pro · soon', ar: 'برو · قريباً' },
   // Once Pro is on sale to the visitor (server/src/routes.ts pagesOf, src/ui/pro.ts proNavOnSale).
-  'nav.pro': { en: 'Pro', ar: 'المميّزة' },
+  'nav.pro': { en: 'Pro', ar: 'برو' },
   'nav.terms': { en: 'Terms', ar: 'الشروط' },
   'nav.privacy': { en: 'Privacy', ar: 'الخصوصية' },
   'nav.legal': { en: 'Legal', ar: 'الشروط والخصوصية' },
@@ -2420,13 +2420,13 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // ---- Pro: fonts (src/ui/proFonts.ts) ----
   // The group in the three font pickers (the crown is a character: an option cannot hold the SVG).
-  'pfont.group': { en: '♛ Pro fonts', ar: '♛ خطوط مميّزة' },
+  'pfont.group': { en: '♛ Pro fonts', ar: '♛ خطوط برو' },
   // The item's name on the export sheet.
-  'pfont.label': { en: 'Pro fonts', ar: 'الخطوط المميّزة' },
+  'pfont.label': { en: 'Pro fonts', ar: 'خطوط برو' },
   // The status line, the first time a Pro font is picked.
   'pfont.try': {
     en: 'Pro fonts are free to try. An export with one asks first.',
-    ar: 'الخطوط المميّزة جرّبها مجانًا، وإذا صدّرت فيها نسألك أول.',
+    ar: 'خطوط برو جرّبها مجانًا، وإذا صدّرت فيها نسألك أول.',
   },
 
   // ---- the start flow (ui/createProject.ts) ----
@@ -2490,8 +2490,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'kit.lead': { en: 'Save your club’s colours, logos and font once, then drop them into any project in one tap.', ar: 'احفظ ألوان ناديك وشعاراته وخطّه مرة وحدة، وحطها بأي مشروع بضغطة.' },
   'kit.loading': { en: 'Opening your kits…', ar: 'نفتح هوياتك…' },
   'kit.empty': { en: 'No kit yet. Start from this design: its colours, its pictures and your text font.', ar: 'ما عندك هوية للحين. ابدأ من هالتصميم: ألوانه وصوره وخط النص حقك.' },
-  'kit.freeOnce': { en: 'Free to try in one project. With Pro, use your kits in every project.', ar: 'جرّبها مجانًا بمشروع واحد. ومع المميّزة استخدم هوياتك بكل مشاريعك.' },
-  'kit.freeUsed': { en: 'You’ve had your free go. Saving kits stays free; using one again is Pro.', ar: 'خلصت تجربتك المجانية. حفظ الهويات يبقى مجاني، واستخدامها مرة ثانية من المميّزة.' },
+  'kit.freeOnce': { en: 'Free to try in one project. With Pro, use your kits in every project.', ar: 'جرّبها مجانًا بمشروع واحد. ومع برو استخدم هوياتك بكل مشاريعك.' },
+  'kit.freeUsed': { en: 'You’ve had your free go. Saving kits stays free; using one again is Pro.', ar: 'خلصت تجربتك المجانية. حفظ الهويات يبقى مجاني، واستخدامها مرة ثانية من برو.' },
   'kit.save': { en: 'Save this design as a kit', ar: 'احفظ هالتصميم كهوية' },
   'kit.full': { en: 'You have {n} kits, the most there is. Delete one to save another.', ar: 'عندك {n} هويات، وهذا الحد. احذف وحدة عشان تحفظ غيرها.' },
   'kit.notKept': { en: 'This browser isn’t keeping kits, so they last until you close this tab.', ar: 'هالمتصفح ما يحفظ الهويات، فتبقى لين تسكّر هالصفحة.' },
@@ -2527,7 +2527,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'kit.logoFailed': { en: 'That file didn’t open as a picture. Try a PNG or a JPG.', ar: 'هالملف ما انفتح كصورة. جرّب PNG أو JPG.' },
   'kit.font': { en: 'Font', ar: 'الخط' },
   // The Pro voices' group in the kit's font list (an option cannot hold the crown's SVG).
-  'kit.fontPro': { en: '♛ Pro fonts', ar: '♛ خطوط مميّزة' },
+  'kit.fontPro': { en: '♛ Pro fonts', ar: '♛ خطوط برو' },
   'kit.saveGo': { en: 'Save kit', ar: 'احفظ الهوية' },
   'kit.back': { en: 'Back', ar: 'رجوع' },
   'kit.saving': { en: 'Saving…', ar: 'نحفظ…' },
@@ -2547,7 +2547,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'kit.picFull': { en: 'This design has {n} pictures, the most there is, so the kit’s logos wait.', ar: 'بالتصميم {n} صورة، وهذا الحد، فشعارات الهوية تنتظر.' },
   'kit.armFailed': { en: 'This browser couldn’t hand the kit’s logos to Import image. Add them there instead.', ar: 'هالمتصفح ما قدر يحط شعارات الهوية في استيراد صورة. أضفها من هناك.' },
   // The lead of "What Pro adds", opened from Use once the free go is spent.
-  'kit.sheetLead': { en: 'You’ve had your free go with Club kit. Pro drops your kits into every project, and adds:', ar: 'جرّبت هوية النادي مجانًا. المميّزة تحط هوياتك بكل مشروع، وتضيف:' },
+  'kit.sheetLead': { en: 'You’ve had your free go with Club kit. Pro drops your kits into every project, and adds:', ar: 'جرّبت هوية النادي مجانًا. برو يحط هوياتك بكل مشروع، ويضيف:' },
 
   // ---- projects, inside the editor ----
   'ed.proj.back': { en: 'Projects', ar: 'المشاريع' },
@@ -2594,10 +2594,10 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // ---- Pro: export sizes, the 4K poster and no mark (src/ui/proExport.ts) ----
   // The stadium video's size, beside Format.
   'pexp.size': { en: 'Size', ar: 'المقاس' },
-  'pexp.sizeT': { en: 'How big the video is. Full HD and vertical are Pro.', ar: 'مقاس الفيديو. الـ Full HD والطولي مزايا مميّزة.' },
+  'pexp.sizeT': { en: 'How big the video is. Full HD and vertical are Pro.', ar: 'مقاس الفيديو. الـ Full HD والطولي مزايا برو.' },
   'pexp.screen': { en: 'Your screen', ar: 'مقاس شاشتك' },
   // The group in the size picker (the crown is a character: an option cannot hold the SVG).
-  'pexp.group': { en: '♛ Pro sizes', ar: '♛ مقاسات مميّزة' },
+  'pexp.group': { en: '♛ Pro sizes', ar: '♛ مقاسات برو' },
   'pexp.hd': { en: 'Full HD', ar: 'جودة Full HD' },
   'pexp.vertical': { en: 'Vertical 9:16', ar: 'طولي 9:16' },
   // Under the picker, with the size in pixels.
@@ -2606,7 +2606,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // The status line, the first time a Pro size is picked.
   'pexp.try': {
     en: 'Pro sizes are free to try in Preview. An export with one asks first.',
-    ar: 'المقاسات المميّزة جرّبها مجانًا في المعاينة، وإذا صدّرت فيها نسألك أول.',
+    ar: 'مقاسات برو جرّبها مجانًا في المعاينة، وإذا صدّرت فيها نسألك أول.',
   },
   'pexp.tooBig': {
     en: 'This device can draw up to {max}\u00a0px, so the video comes out the size of your screen.',
@@ -2816,10 +2816,10 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'meta.feed.label': { en: 'Published tifos', ar: 'تيفوهات منشورة' },
 
   // ---- Pro (src/ui/pro.ts and every surface that shows it) ----------------
-  // The tier is "Pro" in English and "المميّزة" in Arabic; its chip says
-  // "مميّز". Super AI is "الذكاء الخارق", the Quick Designer "المصمّم السريع".
+  // The tier is "Pro" in English and "برو" in Arabic; its chip says
+  // "برو". Super AI is "الذكاء الخارق", the Quick Designer "المصمّم السريع".
   // Digits stay Western in both languages.
-  'pro.chip': { en: 'Pro', ar: 'مميّز' },
+  'pro.chip': { en: 'Pro', ar: 'برو' },
   'pro.when.now': { en: 'in a moment', ar: 'بعد لحظات' },
   'pro.when.minutes': { en: 'in {n} min', ar: 'بعد {n} دقيقة' },
   'pro.when.hour1': { en: 'in an hour', ar: 'بعد ساعة' },
@@ -2964,14 +2964,14 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pro.limit1.month': { en: "You've used this month's {what}", ar: 'استخدمت {what} حق هالشهر' },
   'pro.limit.backOne': { en: 'It comes back {when}.', ar: 'يرجع {when}.' },
   'pro.limit.back': { en: 'They come back {when}.', ar: 'ترجع {when}.' },
-  'pro.limit.withPro': { en: 'Pro gives you more every day.', ar: 'المميّزة تعطيك أكثر كل يوم.' },
-  'pro.limit.gift': { en: 'You have a {n}-day Pro gift waiting.', ar: 'عندك هدية مميّزة لمدة {n} أيام تنتظرك.' },
+  'pro.limit.withPro': { en: 'Pro gives you more every day.', ar: 'برو يعطيك أكثر كل يوم.' },
+  'pro.limit.gift': { en: 'You have a {n}-day Pro gift waiting.', ar: 'عندك هدية برو لمدة {n} أيام تنتظرك.' },
   'pro.limit.quick': { en: 'The Quick Designer is free and unlimited.', ar: 'المصمّم السريع مجاني وبلا حدود.' },
   'pro.limit.ceiling': {
     en: 'That is the most Pro allows, so the AI stays fast for everyone.',
-    ar: 'هذا أقصى حد في المميّزة، عشان يبقى الذكاء سريع للكل.',
+    ar: 'هذا أقصى حد في برو، عشان يبقى الذكاء سريع للكل.',
   },
-  'pro.limit.seePro': { en: 'See what Pro adds', ar: 'شوف وش تضيف المميّزة' },
+  'pro.limit.seePro': { en: 'See what Pro adds', ar: 'شوف وش يضيف برو' },
 
   // The sheets.
   'pro.perk.cutout': { en: 'Smart cut-out: lift a person or a badge out of any photo', ar: 'القص الذكي: افصل الشخص أو الشعار من أي صورة' },
@@ -2981,35 +2981,35 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pro.perk.video': { en: 'Full HD and vertical 9:16 videos, and a 4K poster', ar: 'فيديو Full HD وطولي 9:16، وبوستر 4K' },
   'pro.perk.styles': {
     en: 'Portrait styles, Pro fonts and your words on the LED boards',
-    ar: 'ستايلات للصور، وخطوط مميّزة، وكلامك على شاشات الملعب',
+    ar: 'ستايلات للصور، وخطوط برو، وكلامك على شاشات الملعب',
   },
   'pro.perk.kit': { en: "Club kit: your club's colours, logos and font in one tap", ar: 'هوية النادي: ألوان ناديك وشعاراته وخطه بضغطة' },
   'pro.perk.noLimits': { en: 'Higher limits on every AI tool', ar: 'حدود أعلى في كل أدوات الذكاء' },
-  'pro.perk.badge': { en: 'The Supporter crown beside your name, with Pro monthly', ar: 'تاج الداعم جنب اسمك، مع المميّزة الشهرية' },
+  'pro.perk.badge': { en: 'The Supporter crown beside your name, with Pro monthly', ar: 'تاج الداعم جنب اسمك، مع برو الشهري' },
   'pro.act.notNow': { en: 'Not now', ar: 'مو الحين' },
-  'pro.act.useGift': { en: 'Use my Pro gift', ar: 'استخدم هديتي المميّزة' },
+  'pro.act.useGift': { en: 'Use my Pro gift', ar: 'استخدم هديتي من برو' },
   'pro.act.getPro': { en: 'Get Pro for SAR {price}', ar: 'اشترك بـ{price} ريال' },
-  'pro.act.notify': { en: 'Tell me when Pro opens', ar: 'علّمني إذا فتحت المميّزة' },
+  'pro.act.notify': { en: 'Tell me when Pro opens', ar: 'علّمني إذا فتح برو' },
   'pro.act.notified': { en: "We'll tell you", ar: 'بنعلّمك' },
   'pro.act.seePage': { en: 'See all of Pro', ar: 'شوف كل التفاصيل' },
   'pro.act.useStd': { en: 'Use a standard design', ar: 'استخدم تصميم عادي' },
-  'pro.notify.done': { en: "Done. We'll email your account's verified address when Pro goes on sale.", ar: 'تم. بنرسل على إيميل حسابك الموثّق لما تنزل المميّزة للبيع.' },
+  'pro.notify.done': { en: "Done. We'll email your account's verified address when Pro goes on sale.", ar: 'تم. بنرسل على إيميل حسابك الموثّق لما ينزل برو للبيع.' },
   'pro.notify.failed': { en: 'That did not save. Try again.', ar: 'ما انحفظ. جرّب مرة ثانية.' },
-  'pro.priceLine': { en: "Pro is SAR {price} for {days} days, and it doesn't renew by itself.", ar: 'المميّزة بـ{price} ريال لمدة {days} يوم، وما تتجدد لحالها.' },
+  'pro.priceLine': { en: "Pro is SAR {price} for {days} days, and it doesn't renew by itself.", ar: 'برو بـ{price} ريال لمدة {days} يوم، وما يتجدد لحاله.' },
   'pro.priceLineRenew': {
     en: 'Pro is SAR {price} for {days} days. It renews only if you choose that when you pay.',
-    ar: 'المميّزة بـ{price} ريال لمدة {days} يوم، وما تتجدد إلا إذا أنت اخترت وقت الدفع.',
+    ar: 'برو بـ{price} ريال لمدة {days} يوم، وما يتجدد إلا إذا أنت اخترت وقت الدفع.',
   },
-  'pro.sheet.whatTitle': { en: 'What Pro adds', ar: 'وش تضيف المميّزة' },
-  'pro.sheet.whatLead': { en: 'Everything free stays free. Pro adds:', ar: 'كل شي مجاني يبقى مجاني. والمميّزة تضيف:' },
-  'pro.export.title1': { en: 'This export uses a Pro item', ar: 'هالتصدير فيه ميزة مميّزة' },
-  'pro.export.titleN': { en: 'This export uses {n} Pro items', ar: 'هالتصدير فيه {n} مزايا مميّزة' },
+  'pro.sheet.whatTitle': { en: 'What Pro adds', ar: 'وش يضيف برو' },
+  'pro.sheet.whatLead': { en: 'Everything free stays free. Pro adds:', ar: 'كل شي مجاني يبقى مجاني. وبرو يضيف:' },
+  'pro.export.title1': { en: 'This export uses a Pro item', ar: 'هالتصدير فيه ميزة برو' },
+  'pro.export.titleN': { en: 'This export uses {n} Pro items', ar: 'هالتصدير فيه {n} مزايا برو' },
   'pro.export.lead': {
     en: 'Pro items are free to try. Exporting them needs Pro or your gift.',
-    ar: 'المزايا المميّزة تقدر تجربها مجانًا، وتصديرها يحتاج المميّزة أو هديتك.',
+    ar: 'مزايا برو تقدر تجربها مجانًا، وتصديرها يحتاج برو أو هديتك.',
   },
-  'pro.export.free': { en: 'Export without Pro items', ar: 'صدّر بدون المزايا المميّزة' },
-  'pro.re.title': { en: 'Pro is on. Your tifos, without the mark', ar: 'المميّزة اشتغلت. تيفواتك بدون العلامة' },
+  'pro.export.free': { en: 'Export without Pro items', ar: 'صدّر بدون مزايا برو' },
+  'pro.re.title': { en: 'Pro is on. Your tifos, without the mark', ar: 'برو اشتغل. تيفواتك بدون العلامة' },
   'pro.re.body': {
     en: 'Every tifo you already made can go out again as a clean video, a 4K poster or a Reel. Tap "Export clean" on any of them.',
     ar: 'كل تيفو سويته قبل تقدر تطلعه من جديد كفيديو نظيف أو بوستر 4K أو ريل. اضغط "صدّر نظيف" على أي واحد منها.',
@@ -3027,29 +3027,29 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'read.quota': { en: "That is today’s 20 camera checks. They come back tomorrow.", ar: "خلصت فحوصات الكاميرا العشرين حقت اليوم. ترجع بكرة." },
   'read.signin': { en: "Sign in again to use the camera check.", ar: "سجّل دخولك من جديد عشان تستخدم فحص الكاميرا." },
   'read.note': { en: "One small picture of your tifo is sent to our AI provider to be read. It is not kept.", ar: "تنرسل صورة صغيرة وحدة لتيفوك لمزوّد الذكاء عشان يقراها، وما تنحفظ." },
-  'read.proTitle': { en: "The camera check is part of Pro", ar: "فحص الكاميرا من المميّزة" },
-  'read.proLead': { en: "Before you post, a camera reads your tifo back to you. Pro adds:", ar: "قبل ما تنشر، كاميرا تقرأ لك تيفوك. والمميّزة تضيف:" },
+  'read.proTitle': { en: "The camera check is part of Pro", ar: "فحص الكاميرا من برو" },
+  'read.proLead': { en: "Before you post, a camera reads your tifo back to you. Pro adds:", ar: "قبل ما تنشر، كاميرا تقرأ لك تيفوك. وبرو يضيف:" },
   'pro.both.label': { en: 'Your tifo, both ways', ar: 'تيفوك بالشكلين' },
   'pro.both.free': { en: 'Free', ar: 'المجاني' },
-  'pro.both.pro': { en: 'With Pro', ar: 'مع المميّزة' },
+  'pro.both.pro': { en: 'With Pro', ar: 'مع برو' },
   'pro.export.never': { en: 'Saving and publishing are always free.', ar: 'الحفظ والنشر مجانيين دايم.' },
   'pro.mark.option': { en: 'Without the tifomaker.org mark', ar: 'بدون علامة tifomaker.org' },
 
   // The countdown chip in the header.
-  'pro.chip.lastHour': { en: 'Pro · last hour', ar: 'مميّز · آخر ساعة' },
-  'pro.chip.hours': { en: 'Pro · {n} h left', ar: 'مميّز · باقي {n} س' },
-  'pro.chip.day1': { en: 'Pro · last day', ar: 'مميّز · آخر يوم' },
-  'pro.chip.days2': { en: 'Pro · 2 days left', ar: 'مميّز · باقي يومين' },
-  'pro.chip.days': { en: 'Pro · {n} days left', ar: 'مميّز · باقي {n} أيام' },
-  'pro.chip.daysMany': { en: 'Pro · {n} days left', ar: 'مميّز · باقي {n} يوم' },
-  'pro.chip.until': { en: 'Pro · until {date}', ar: 'مميّز · لين {date}' },
+  'pro.chip.lastHour': { en: 'Pro · last hour', ar: 'برو · آخر ساعة' },
+  'pro.chip.hours': { en: 'Pro · {n} h left', ar: 'برو · باقي {n} س' },
+  'pro.chip.day1': { en: 'Pro · last day', ar: 'برو · آخر يوم' },
+  'pro.chip.days2': { en: 'Pro · 2 days left', ar: 'برو · باقي يومين' },
+  'pro.chip.days': { en: 'Pro · {n} days left', ar: 'برو · باقي {n} أيام' },
+  'pro.chip.daysMany': { en: 'Pro · {n} days left', ar: 'برو · باقي {n} يوم' },
+  'pro.chip.until': { en: 'Pro · until {date}', ar: 'برو · لين {date}' },
   'pro.ends': { en: 'Ends {date}', ar: 'تنتهي {date}' },
 
   // The 7-day gift.
-  'gift.sheetTitle': { en: 'Your {n}-day Pro gift', ar: 'هديتك: {n} أيام مميّزة' },
+  'gift.sheetTitle': { en: 'Your {n}-day Pro gift', ar: 'هديتك: {n} أيام برو' },
   'gift.sheetLead': {
     en: 'Everything in Pro, free. No card and nothing to cancel: it ends by itself.',
-    ar: 'كل مزايا المميّزة مجانًا. بدون بطاقة وما تحتاج تلغي شي: تنتهي لحالها.',
+    ar: 'كل مزايا برو مجانًا. بدون بطاقة وما تحتاج تلغي شي: تنتهي لحالها.',
   },
   'gift.endsIfNow': { en: 'Start it now and it runs until', ar: 'لو بدأتها الحين تستمر لين' },
   'gift.start': { en: 'Start my {n} days now', ar: 'ابدأ أيامي الـ{n} الحين' },
@@ -3057,20 +3057,20 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'gift.used': { en: 'This gift has already been used.', ar: 'هالهدية مستخدمة من قبل.' },
   'gift.verify': { en: 'Verify your email first, on your account page.', ar: 'وثّق بريدك أول، من صفحة حسابك.' },
   'gift.failed': { en: 'That did not work. Try again in a moment.', ar: 'ما زبطت. جرّب بعد شوي.' },
-  'gift.startedTitle': { en: 'Your Pro gift is on', ar: 'هديتك المميّزة اشتغلت' },
-  'gift.startedBody': { en: 'Every Pro feature is yours until', ar: 'كل المزايا المميّزة لك لين' },
+  'gift.startedTitle': { en: 'Your Pro gift is on', ar: 'هديتك من برو اشتغلت' },
+  'gift.startedBody': { en: 'Every Pro feature is yours until', ar: 'كل مزايا برو لك لين' },
   'gift.startedGo': { en: 'Back to designing', ar: 'ارجع للتصميم' },
-  'gift.cardTitle': { en: 'A gift for you: {n} days of Pro', ar: 'هدية لك: {n} أيام مميّزة' },
+  'gift.cardTitle': { en: 'A gift for you: {n} days of Pro', ar: 'هدية لك: {n} أيام برو' },
   'gift.cardBody': {
     en: 'Match Day films in Full HD and 9:16, a 4K poster, exports without our mark, portrait styles, smart cut-out and more. It starts only when you press Start and waits for you, so keep it for a big match week.',
     ar: 'أفلام يوم المباراة بدقة Full HD و9:16، وبوستر 4K، وتصدير بدون علامتنا، وستايلات للصور، وقص ذكي، وأكثر. ما تبدأ إلا إذا ضغطت ابدأ وتنتظرك، فخلّها لأسبوع مباراة كبيرة.',
   },
   'gift.accept': { en: 'Start my gift…', ar: 'ابدأ هديتي…' },
   'gift.later': { en: 'Later', ar: 'بعدين' },
-  'gift.remind2': { en: '2 days of your Pro gift left', ar: 'باقي يومين من هديتك المميّزة' },
-  'gift.remindLast': { en: 'Last day of your Pro gift', ar: 'آخر يوم في هديتك المميّزة' },
+  'gift.remind2': { en: '2 days of your Pro gift left', ar: 'باقي يومين من هديتك من برو' },
+  'gift.remindLast': { en: 'Last day of your Pro gift', ar: 'آخر يوم في هديتك من برو' },
   'gift.remindBody': { en: 'It ends {when}. Everything you make stays yours.', ar: 'تنتهي {when}. وكل شي تسويه يبقى لك.' },
-  'gift.endTitle': { en: 'Your Pro gift has ended', ar: 'انتهت هديتك المميّزة' },
+  'gift.endTitle': { en: 'Your Pro gift has ended', ar: 'انتهت هديتك من برو' },
   'gift.endBody': {
     en: 'Everything you made stays in your projects, and the free plan carries on as before.',
     ar: 'كل شي سويته باقي في مشاريعك، والباقة المجانية مستمرة مثل قبل.',
@@ -3104,34 +3104,34 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // "Your plan" on the account page.
   'ac.pro.title': { en: 'Your plan', ar: 'باقتك' },
   'ac.pro.plan.free': { en: 'Free', ar: 'المجانية' },
-  'ac.pro.plan.monthly': { en: 'Pro monthly', ar: 'المميّزة الشهرية' },
-  'ac.pro.plan.gift': { en: 'Pro gift', ar: 'الهدية المميّزة' },
+  'ac.pro.plan.monthly': { en: 'Pro monthly', ar: 'برو الشهري' },
+  'ac.pro.plan.gift': { en: 'Pro gift', ar: 'هدية برو' },
   'ac.pro.ends': { en: 'Ends {date}', ar: 'تنتهي {date}' },
   'ac.pro.left': { en: "What's left", ar: 'المتبقي لك' },
   'ac.pro.back': { en: 'back {when}', ar: 'ترجع {when}' },
   'ac.pro.giftWaiting': {
     en: 'A {n}-day Pro gift is waiting for you. It starts only when you press Start.',
-    ar: 'عندك هدية مميّزة لمدة {n} أيام تنتظرك، وما تبدأ إلا إذا ضغطت ابدأ.',
+    ar: 'عندك هدية برو لمدة {n} أيام تنتظرك، وما تبدأ إلا إذا ضغطت ابدأ.',
   },
-  'ac.pro.giftEnded': { en: 'Your Pro gift ended on {date}.', ar: 'انتهت هديتك المميّزة يوم {date}.' },
+  'ac.pro.giftEnded': { en: 'Your Pro gift ended on {date}.', ar: 'انتهت هديتك من برو يوم {date}.' },
   // "Pro and purchases" (src/ui/proAccount.ts, 19 Nov 2026): the section's name
   // once Pro can be bought or something was; the purchases, receipts and refunds.
-  'ac.pro.titleBuy': { en: 'Pro and purchases', ar: 'المميّزة ومشترياتك' },
+  'ac.pro.titleBuy': { en: 'Pro and purchases', ar: 'برو ومشترياتك' },
   'ac.pro.daysLeft': { en: '{n} days left', ar: 'باقي {n} يوم' },
   'ac.pro.dayLeft': { en: '1 day left', ar: 'باقي يوم واحد' },
   'ac.pro.lastDay': { en: 'Ends today', ar: 'تنتهي اليوم' },
   'pu.title': { en: 'Purchases', ar: 'مشترياتك' },
-  'pu.item': { en: 'Pro, {days} days', ar: 'المميّزة، {days} يوم' },
-  'pu.itemBonus': { en: 'Pro, {days} days + {bonus} founder days free', ar: 'المميّزة، {days} يوم + {bonus} يوم هدية المؤسسين' },
+  'pu.item': { en: 'Pro, {days} days', ar: 'برو، {days} يوم' },
+  'pu.itemBonus': { en: 'Pro, {days} days + {bonus} founder days free', ar: 'برو، {days} يوم + {bonus} يوم هدية المؤسسين' },
   'ac.pro.founderOpen': {
     en: 'Founder offer: buy Pro before {date} (Riyadh time) and your first month is {total} days, not {days}.',
-    ar: 'عرض المؤسسين: اشترِ المميّزة قبل {date} (بتوقيت الرياض) وأول شهر لك يصير {total} يوم بدل {days}.',
+    ar: 'عرض المؤسسين: اشترِ برو قبل {date} (بتوقيت الرياض) وأول شهر لك يصير {total} يوم بدل {days}.',
   },
   'ac.pro.founderUsed': {
     en: 'Founder: your first purchase got {bonus} extra days free, {total} days in all.',
     ar: 'مؤسس: أول شراء لك أخذ {bonus} يوم زيادة مجانًا، والمجموع {total} يوم.',
   },
-  'pu.itemRenewal': { en: 'Pro, {days} days (auto-renewal)', ar: 'المميّزة، {days} يوم (تجديد تلقائي)' },
+  'pu.itemRenewal': { en: 'Pro, {days} days (auto-renewal)', ar: 'برو، {days} يوم (تجديد تلقائي)' },
   'pu.price': { en: 'SAR {price}', ar: '{price} ريال' },
   'pu.test': { en: 'Test payment', ar: 'دفعة تجريبية' },
   'pu.st.paid': { en: 'Paid', ar: 'مدفوع' },
@@ -3156,7 +3156,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pu.r.amount': { en: 'Amount', ar: 'المبلغ' },
   'pu.r.paid': { en: 'Paid', ar: 'تاريخ الدفع' },
   'pu.r.how': { en: 'Paid with', ar: 'طريقة الدفع' },
-  'pu.r.until': { en: 'Pro until', ar: 'المميّزة لين' },
+  'pu.r.until': { en: 'Pro until', ar: 'برو لين' },
   'pu.r.refunded': { en: 'Refunded', ar: 'تاريخ الاسترداد' },
   'pu.r.ref': { en: 'Reference', ar: 'رقم المرجع' },
   'pu.send': { en: 'Email me this receipt', ar: 'أرسل الإيصال على إيميلي' },
@@ -3168,12 +3168,12 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pu.rf.open': { en: 'You can ask for a refund until {date}.', ar: 'تقدر تطلب استرداد لين {date}.' },
   'pu.rf.openUsed': {
     en: "Pro has been used on this month, so a refund isn't promised. You can still ask until {date} and we'll look at it.",
-    ar: 'المميّزة استُخدمت بهالشهر، فالاسترداد مو مضمون. بس تقدر تطلب لين {date} ونراجع طلبك.',
+    ar: 'برو استُخدم بهالشهر، فالاسترداد مو مضمون. بس تقدر تطلب لين {date} ونراجع طلبك.',
   },
   'pu.rf.late': { en: 'The {days} days for a refund ended on {date}.', ar: 'مهلة الاسترداد ({days} أيام) انتهت يوم {date}.' },
   'pu.rf.requested': {
     en: "Refund requested on {date}. We'll answer by email within 3 working days, and Pro stays on until then.",
-    ar: 'طلبت الاسترداد يوم {date}. بنرد عليك بالإيميل خلال 3 أيام عمل، والمميّزة تبقى معك لين وقتها.',
+    ar: 'طلبت الاسترداد يوم {date}. بنرد عليك بالإيميل خلال 3 أيام عمل، وبرو يبقى معك لين وقتها.',
   },
   'pu.rf.declined': { en: "Your refund request wasn't approved: {reason}", ar: 'ما تمت الموافقة على طلب الاسترداد: {reason}' },
   'pu.rf.refunded': {
@@ -3183,7 +3183,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pu.rf.ask': { en: 'Request a refund', ar: 'اطلب استرداد' },
   'pu.rf.confirm': {
     en: "Ask for SAR {price} back? If it's approved, this month of Pro ends.",
-    ar: 'تبي تسترد {price} ريال؟ إذا تمت الموافقة، ينتهي شهر المميّزة هذا.',
+    ar: 'تبي تسترد {price} ريال؟ إذا تمت الموافقة، ينتهي شهر برو هذا.',
   },
   'pu.rf.note': { en: 'Anything we should know? (optional)', ar: 'فيه شي تبينا نعرفه؟ (اختياري)' },
   'pu.rf.send': { en: 'Send request', ar: 'أرسل الطلب' },
@@ -3194,7 +3194,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   },
   'pu.rf.doneRefunded': {
     en: 'Refunded. The money goes back the way you paid, and this month of Pro has ended.',
-    ar: 'تم الاسترداد. المبلغ يرجع على نفس طريقة الدفع، وشهر المميّزة هذا انتهى.',
+    ar: 'تم الاسترداد. المبلغ يرجع على نفس طريقة الدفع، وشهر برو هذا انتهى.',
   },
   'pu.rf.gone': { en: "This order can't be refunded from here any more.", ar: 'هالطلب ما عاد ينفع استرداده من هنا.' },
   'pu.rf.failed': {
@@ -3202,26 +3202,26 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'ما تمت العملية. حاول مرة ثانية، أو رد على إيميل الإيصال.',
   },
   // The one-time notice after a refund (the account page and My projects).
-  'rn.title': { en: 'Your Pro payment was refunded', ar: 'رجّعنا لك مبلغ المميّزة' },
+  'rn.title': { en: 'Your Pro payment was refunded', ar: 'رجّعنا لك مبلغ برو' },
   'rn.body': {
     en: 'We refunded SAR {price} on {date}, so that month of Pro has ended. The money goes back the way you paid, usually within a few working days depending on your bank.',
-    ar: 'رجّعنا لك {price} ريال يوم {date}، فشهر المميّزة حقها انتهى. المبلغ يرجع على نفس طريقة الدفع، وغالبًا خلال كم يوم عمل حسب بنكك.',
+    ar: 'رجّعنا لك {price} ريال يوم {date}، فشهر برو حقها انتهى. المبلغ يرجع على نفس طريقة الدفع، وغالبًا خلال كم يوم عمل حسب بنكك.',
   },
   'rn.test': { en: 'It was a test payment: no real money moved.', ar: 'كانت دفعة تجريبية: ما تحرّك أي مبلغ حقيقي.' },
   'rn.link': { en: 'See your purchases', ar: 'شوف مشترياتك' },
 
   // The Pro page (/pro).
-  'meta.pro.title': { en: 'Pro · TifoMaker', ar: 'المميّزة · تيفو ميكر' },
+  'meta.pro.title': { en: 'Pro · TifoMaker', ar: 'برو · تيفو ميكر' },
   'pp.closed': {
     en: "Pro is not on sale yet. Tap the button and we'll email you the day it is.",
-    ar: 'المميّزة ما نزلت للبيع للحين. اضغط الزر وبنرسل لك إيميل يوم تنزل.',
+    ar: 'برو ما نزل للبيع للحين. اضغط الزر وبنرسل لك إيميل يوم ينزل.',
   },
   'pp.signInToNotify': { en: 'Sign in to be told', ar: 'سجّل دخولك عشان نعلّمك' },
   'pp.youHave': { en: 'You have the {plan} until {date}.', ar: 'عندك {plan} لين {date}.' },
   'pp.free.name': { en: 'Free', ar: 'المجانية' },
   'pp.free.sub': { en: 'For every account with a verified email', ar: 'لكل حساب بريده موثّق' },
-  'pp.pro.name': { en: 'Pro', ar: 'المميّزة' },
-  'pp.pro.sub': { en: '{days} days of Pro at a time. It ends by itself.', ar: 'المميّزة لمدة {days} يوم، وتنتهي لحالها.' },
+  'pp.pro.name': { en: 'Pro', ar: 'برو' },
+  'pp.pro.sub': { en: '{days} days of Pro at a time. It ends by itself.', ar: 'برو لمدة {days} يوم، وينتهي لحاله.' },
   'pp.row.std': { en: 'AI designs (whole stadium)', ar: 'تصاميم الذكاء (الملعب كامل)' },
   'pp.row.polish': { en: 'Polish with AI critique', ar: 'التحسين بمراجعة الذكاء' },
   // AI Critique took Polish's place on the plans (18 Nov 2026).
@@ -3232,7 +3232,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.row.video': { en: 'Full HD and vertical 9:16 video', ar: 'فيديو Full HD وطولي 9:16' },
   'pp.row.poster': { en: '4K poster picture', ar: 'صورة بوستر 4K' },
   'pp.row.styles': { en: 'Portrait styles', ar: 'ستايلات الصور' },
-  'pp.row.fonts': { en: 'Pro fonts', ar: 'الخطوط المميّزة' },
+  'pp.row.fonts': { en: 'Pro fonts', ar: 'خطوط برو' },
   'pp.row.led': { en: 'Your words on the LED boards', ar: 'كلامك على شاشات الملعب' },
   'pp.row.kit': { en: 'Club kit', ar: 'هوية النادي' },
   'pp.row.badge': { en: 'Supporter crown', ar: 'تاج الداعم' },
@@ -3245,14 +3245,14 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.per.day': { en: '{n} a day', ar: '{n} باليوم' },
   'pp.per.week': { en: '{n} a week', ar: '{n} بالأسبوع' },
   'pp.per.month': { en: '{n} a month', ar: '{n} بالشهر' },
-  'pp.show.title': { en: "What Pro makes", ar: "وش تطلّع المميّزة" },
+  'pp.show.title': { en: "What Pro makes", ar: "وش يطلّع برو" },
   'pp.show.lead': { en: "One fan-made tifo. Every picture here came out of the tools as you see it.", ar: "تيفو واحد من تصميم مشجع. كل صورة هنا طلعت من الأدوات مثل ما تشوفها." },
   'pp.show.free.t': { en: "Free: the stadium video", ar: "المجاني: فيديو الملعب" },
   'pp.show.free.d': { en: "The size of your screen, with the tifomaker.org mark. Free, and it stays free.", ar: "بمقاس شاشتك ومعه علامة tifomaker.org. مجاني ويبقى مجاني." },
   'pp.show.free.alt': { en: "A frame of the free stadium video: the tifo on a plain model of the ground.", ar: "لقطة من فيديو الملعب المجاني: التيفو على مجسم بسيط للملعب." },
-  'pp.show.film.t': { en: "Pro: the match-day film", ar: "المميّزة: فيلم يوم المباراة" },
+  'pp.show.film.t': { en: "Pro: the match-day film", ar: "برو: فيلم يوم المباراة" },
   'pp.show.film.d': { en: "Full HD or vertical, floodlit, a full house and the crowd’s sound, without the mark.", ar: "Full HD أو طولي، تحت الكشافات، مدرجات مليانة وصوت الجمهور، وبدون العلامة." },
-  'pp.show.film.alt': { en: "A frame of the Pro film: the same tifo in the floodlit ground, full of fans.", ar: "لقطة من فيلم المميّزة: نفس التيفو في الملعب تحت الكشافات والمدرجات مليانة." },
+  'pp.show.film.alt': { en: "A frame of the Pro film: the same tifo in the floodlit ground, full of fans.", ar: "لقطة من فيلم برو: نفس التيفو في الملعب تحت الكشافات والمدرجات مليانة." },
   'pp.show.poster.t': { en: "Match-day poster, 4K", ar: "بوستر يوم المباراة 4K" },
   'pp.show.poster.d': { en: "Your tifo with the match, the date and your club’s colours. 3840 × 2160, or tall.", ar: "تيفوك مع المباراة والتاريخ وألوان ناديك. ⁦3840 × 2160⁩ أو طولي." },
   'pp.show.poster.alt': { en: "A match-day poster with the tifo and the fixture set beside it.", ar: "بوستر يوم المباراة فيه التيفو وجنبه تفاصيل المباراة." },
@@ -3275,17 +3275,17 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.faq.q1': { en: 'Does anything free become paid?', ar: 'هل فيه شي مجاني بيصير بفلوس؟' },
   'pp.faq.a1': {
     en: 'No. The editor, 3D, Match Day, the PDF, CSV and QR, saving and publishing stay free. Pro adds more on top.',
-    ar: 'لا. المحرر والـ3D ويوم المباراة وPDF وCSV والـQR والحفظ والنشر تبقى مجانية. المميّزة تضيف فوقها.',
+    ar: 'لا. المحرر والـ3D ويوم المباراة وPDF وCSV والـQR والحفظ والنشر تبقى مجانية. برو يضيف فوقها.',
   },
-  'pp.faq.q2': { en: 'Does Pro renew by itself?', ar: 'هل المميّزة تتجدد لحالها؟' },
+  'pp.faq.q2': { en: 'Does Pro renew by itself?', ar: 'هل برو يتجدد لحاله؟' },
   'pp.faq.a2': {
     en: 'No. A month of Pro ends on its own and nothing is charged again.',
-    ar: 'لا. شهر المميّزة ينتهي لحاله وما ينخصم منك شي مرة ثانية.',
+    ar: 'لا. شهر برو ينتهي لحاله وما ينخصم منك شي مرة ثانية.',
   },
-  'pp.faq.q3': { en: 'What happens to my designs when Pro ends?', ar: 'وش يصير لتصاميمي إذا انتهت المميّزة؟' },
+  'pp.faq.q3': { en: 'What happens to my designs when Pro ends?', ar: 'وش يصير لتصاميمي إذا انتهى برو؟' },
   'pp.faq.a3': {
     en: 'They stay yours, as they are. Only new exports with Pro items need Pro again.',
-    ar: 'تبقى لك مثل ما هي. بس التصدير الجديد اللي فيه مزايا مميّزة يحتاج المميّزة مرة ثانية.',
+    ar: 'تبقى لك مثل ما هي. بس التصدير الجديد اللي فيه مزايا برو يحتاج برو مرة ثانية.',
   },
   'pp.faq.q4': { en: 'Where does my picture go for a smart cut-out?', ar: 'وين تروح صورتي في القص الذكي؟' },
   'pp.faq.a4': {
@@ -3293,7 +3293,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'لذكاء Cloudflare الاصطناعي، يقصّها ويرجّعها. وإحنا ما نحتفظ فيها.',
   },
   'pp.faq.q5': { en: 'How will I pay?', ar: 'كيف بدفع؟' },
-  'pp.faq.a5': { en: 'With mada, Visa or Mastercard, when Pro goes on sale.', ar: 'بمدى أو فيزا أو ماستركارد، لما تنزل المميّزة للبيع.' },
+  'pp.faq.a5': { en: 'With mada, Visa or Mastercard, when Pro goes on sale.', ar: 'بمدى أو فيزا أو ماستركارد، لما ينزل برو للبيع.' },
   'pp.faq.q6': { en: 'Does the 7-day gift run out if I wait?', ar: 'هل هدية الـ7 أيام تروح لو تأخرت؟' },
   'pp.faq.a6': {
     en: 'No. It waits until you press Start, and the 7 days begin then. One gift per account.',
@@ -3302,33 +3302,33 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // /pro as a coming-soon page (8 Nov 2026): the two plans with no price on
   // Pro, which asks every visitor what a month is worth (server/src/proPrice).
-  'ps.eyebrow': { en: 'TifoMaker Pro · Coming soon', ar: 'تيفو ميكر المميّزة · قريباً' },
-  'ps.title': { en: 'Help us price Pro', ar: 'ساعدنا نحدد سعر المميّزة' },
+  'ps.eyebrow': { en: 'TifoMaker Pro · Coming soon', ar: 'تيفو ميكر برو · قريباً' },
+  'ps.title': { en: 'Help us price Pro', ar: 'ساعدنا نحدد سعر برو' },
   'ps.lead': {
     en: "Pro is a paid plan we're building on top of everything that's free. It isn't on sale yet, and we'd rather ask you than guess its price.",
-    ar: 'المميّزة باقة مدفوعة نبنيها فوق كل شي مجاني. للحين ما نزلت للبيع، ونبي نسألك بدل ما نخمّن سعرها.',
+    ar: 'برو باقة مدفوعة نبنيها فوق كل شي مجاني. للحين ما نزل للبيع، ونبي نسألك بدل ما نخمّن سعره.',
   },
   'ps.steps': { en: 'How it works', ar: 'كيف تشتغل' },
-  'ps.step1.t': { en: "Pro isn't on sale yet", ar: 'المميّزة ما نزلت للبيع للحين' },
-  'ps.step1.b': { en: 'Everything free stays free. Pro adds the extras in its column below.', ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف الإضافات اللي في عمودها تحت.' },
+  'ps.step1.t': { en: "Pro isn't on sale yet", ar: 'برو ما نزل للبيع للحين' },
+  'ps.step1.b': { en: 'Everything free stays free. Pro adds the extras in its column below.', ar: 'كل شي مجاني يبقى مجاني. برو يضيف الإضافات اللي في عموده تحت.' },
   'ps.step2.t': { en: 'Tell us what a month is worth to you', ar: 'قول لنا كم يسوى الشهر عندك' },
   'ps.step2.b': { en: "Tap an amount, type your own, or say it's not for you. Nothing is charged and no card is needed.", ar: 'اختر مبلغ، أو اكتب مبلغك، أو قول إنها مو لك. ما ينخصم شي وما تحتاج بطاقة.' },
   'ps.step3.t': { en: 'We set the price from your answers', ar: 'نحدد السعر من أجوبتكم' },
-  'ps.step3.b': { en: "Signed in, you'll hear first when Pro opens.", ar: 'إذا كنت مسجّل دخول، بتكون أول من يدري إذا فتحت المميّزة.' },
+  'ps.step3.b': { en: "Signed in, you'll hear first when Pro opens.", ar: 'إذا كنت مسجّل دخول، بتكون أول من يدري إذا فتح برو.' },
   'ps.count': { en: '{n} fans have answered so far', ar: 'جاوب {n} من الجمهور للحين' },
   'ps.free.price': { en: 'Always free', ar: 'مجانية دايماً' },
-  'ps.ask': { en: 'What would you pay for a month of Pro?', ar: 'كم تدفع على شهر المميّزة؟' },
+  'ps.ask': { en: 'What would you pay for a month of Pro?', ar: 'كم تدفع على شهر برو؟' },
   'ps.ask.sub': { en: 'Tap an amount or type your own. This is not a payment.', ar: 'اختر مبلغ أو اكتب مبلغك. هذا مو دفع.' },
   'ps.amount.own': { en: 'Or type your own amount', ar: 'أو اكتب المبلغ اللي تشوفه' },
   'ps.wont': { en: "Not for me, I wouldn't pay", ar: 'مو لي، ما راح أدفع' },
-  'ps.thanks.wont': { en: "Thanks for being honest! You said Pro isn't for you.", ar: 'شكراً على صراحتك! قلت إن المميّزة مو لك.' },
-  'ps.told': { en: "You'll hear first when Pro opens.", ar: 'بتكون أول من يدري إذا فتحت المميّزة.' },
+  'ps.thanks.wont': { en: "Thanks for being honest! You said Pro isn't for you.", ar: 'شكراً على صراحتك! قلت إن برو مو لك.' },
+  'ps.told': { en: "You'll hear first when Pro opens.", ar: 'بتكون أول من يدري إذا فتح برو.' },
   'ps.nocharge': { en: 'Nothing is charged and no card is needed. Only we see the answers.', ar: 'ما ينخصم شي وما تحتاج بطاقة. الأجوبة نشوفها إحنا بس.' },
   'ps.currency': { en: 'Currency', ar: 'العملة' },
   'ps.cur.SAR': { en: 'SAR', ar: 'ريال' },
   'ps.cur.USD': { en: 'USD', ar: 'دولار' },
   'ps.comment': { en: 'Anything to add? (optional)', ar: 'عندك شي تضيفه؟ (اختياري)' },
-  'ps.comment.ph': { en: 'What would make Pro worth it for you?', ar: 'وش اللي يخلي المميّزة تستاهل عندك؟' },
+  'ps.comment.ph': { en: 'What would make Pro worth it for you?', ar: 'وش اللي يخلي برو يستاهل عندك؟' },
   'ps.send': { en: 'Send my price', ar: 'أرسل سعري' },
   'ps.sending': { en: 'Sending…', ar: 'جاري الإرسال…' },
   'ps.price.SAR': { en: 'SAR {n}', ar: '{n} ريال' },
@@ -3338,24 +3338,24 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // /pro on sale (payments v1, 12 Nov 2026; server/src/payments.ts): shown
   // only to a visitor who can buy, so nothing reads this while payments are off.
-  'pb.eyebrow': { en: 'TifoMaker Pro', ar: 'تيفو ميكر المميّزة' },
-  'pb.title': { en: 'Go Pro for a month', ar: 'خذ المميّزة لمدة شهر' },
+  'pb.eyebrow': { en: 'TifoMaker Pro', ar: 'تيفو ميكر برو' },
+  'pb.title': { en: 'Go Pro for a month', ar: 'خذ برو لمدة شهر' },
   'pb.lead': {
     en: 'Everything free stays free. Pro adds the extras in its column below, for one payment, with nothing to cancel.',
-    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف الإضافات اللي في عمودها تحت، بدفعة وحدة، وبدون شي تلغيه.',
+    ar: 'كل شي مجاني يبقى مجاني. برو يضيف الإضافات اللي في عموده تحت، بدفعة وحدة، وبدون شي تلغيه.',
   },
   'pb.step1.t': { en: "Pay once on Moyasar's secure page", ar: 'ادفع مرة وحدة في صفحة ميسّر الآمنة' },
   'pb.step1.b': { en: 'mada, Visa or Mastercard, and Apple Pay where Moyasar offers it. Your card never reaches us.', ar: 'تدفع بمدى أو فيزا أو ماستركارد، وبـApple Pay إذا كان متاح عند ميسّر. وبطاقتك ما توصل لنا أبد.' },
-  'pb.step2.t': { en: 'Pro turns on straight away', ar: 'المميّزة تشتغل على طول' },
-  'pb.step2.b': { en: 'Back on TifoMaker, everything in the Pro column is yours, and the receipt comes by email.', ar: 'ترجع لتيفو ميكر وكل شي في عمود المميّزة صار لك، والإيصال يوصلك على الإيميل.' },
-  'pb.step3.t': { en: 'It ends by itself', ar: 'تنتهي لحالها' },
+  'pb.step2.t': { en: 'Pro turns on straight away', ar: 'برو يشتغل على طول' },
+  'pb.step2.b': { en: 'Back on TifoMaker, everything in the Pro column is yours, and the receipt comes by email.', ar: 'ترجع لتيفو ميكر وكل شي في عمود برو صار لك، والإيصال يوصلك على الإيميل.' },
+  'pb.step3.t': { en: 'It ends by itself', ar: 'ينتهي لحاله' },
   'pb.step3.b': {
     en: "Nothing renews and nothing is charged again. Haven't used it? Get all your money back within 7 days.",
-    ar: 'ما تتجدد وما ينخصم منك شي مرة ثانية. وإذا ما استخدمتها، ترجع لك فلوسك كاملة خلال 7 أيام.',
+    ar: 'ما يتجدد وما ينخصم منك شي مرة ثانية. وإذا ما استخدمته، ترجع لك فلوسك كاملة خلال 7 أيام.',
   },
   'pb.price': { en: 'SAR {price}', ar: '{price} ريال' },
   'pb.per': { en: 'for {days} days', ar: 'لمدة {days} يوم' },
-  'pb.once': { en: 'One payment. It never renews by itself.', ar: 'دفعة وحدة، وما تتجدد لحالها أبد.' },
+  'pb.once': { en: 'One payment. It never renews by itself.', ar: 'دفعة وحدة، وما يتجدد لحاله أبد.' },
   // The launch price (server/src/proLaunch.ts). Plain wording by default: a price and the day it changes,
   // with no crossed-out price and no word "discount".
   'pb.launch': { en: 'Launch price. From {date} the price will be SAR {regular}.', ar: 'سعر الإطلاق. ومن يوم {date} يصير السعر {regular} ريال.' },
@@ -3377,13 +3377,13 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   },
   'pb.paid.founder': {
     en: 'Payment received! Pro is on until {date}: {total} days, with your free founder month. Your receipt is on its way to your email.',
-    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}: {total} يوم، ومعها شهر المؤسسين المجاني. والإيصال في طريقه لإيميلك.',
+    ar: 'وصلت دفعتك! برو شغّال لين {date}: {total} يوم، ومعه شهر المؤسسين المجاني. والإيصال في طريقه لإيميلك.',
   },
   // "Stop these emails", from the founders email's link (/pro?nomail=...).
   'pb.nomail.working': { en: 'Stopping these emails…', ar: 'جاري إيقاف هالرسائل…' },
   'pb.nomail.done': {
     en: "Done. You won't get emails about Pro's news and offers. Receipts and renewal reminders for what you buy still come.",
-    ar: 'تم. ما راح توصلك رسائل عن أخبار المميّزة وعروضها. والإيصالات وتذكيرات التجديد لمشترياتك تبقى توصلك.',
+    ar: 'تم. ما راح توصلك رسائل عن أخبار برو وعروضه. والإيصالات وتذكيرات التجديد لمشترياتك تبقى توصلك.',
   },
   'pb.nomail.failed': {
     en: "This link didn't work: it may be old. Use the Feedback button below and we'll stop them for you.",
@@ -3396,18 +3396,18 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pb.methods': { en: "You pay on Moyasar's secure page, by mada or a card.", ar: 'تدفع في صفحة ميسّر الآمنة بمدى أو البطاقة.' },
   'pb.signin': { en: 'Sign in to get Pro', ar: 'سجّل دخولك عشان تشترك' },
   'pb.err.verify': { en: 'Verify your email first: the receipt goes there.', ar: 'وثّق بريدك أول، لأن الإيصال يوصلك عليه.' },
-  'pb.err.held': { en: 'You have Pro until {date}. You can add a month in its last week.', ar: 'عندك المميّزة لين {date}. تقدر تضيف شهر في آخر أسبوع منها.' },
+  'pb.err.held': { en: 'You have Pro until {date}. You can add a month in its last week.', ar: 'عندك برو لين {date}. تقدر تضيف شهر في آخر أسبوع منه.' },
   'pb.err.busy': { en: 'Too many tries today. Try again tomorrow.', ar: 'محاولات كثيرة اليوم. جرّب بكرة.' },
   'pb.err.unavailable': {
     en: "Payments can't be reached right now, and nothing was charged. Try again in a few minutes.",
     ar: 'الدفع مو متاح الحين، وما انخصم منك شي. جرّب بعد كم دقيقة.',
   },
-  'pb.err.off': { en: "Pro can't be bought right now.", ar: 'المميّزة ما تنشرى الحين.' },
+  'pb.err.off': { en: "Pro can't be bought right now.", ar: 'برو ما ينشرى الحين.' },
   'pb.err.offline': { en: "You're offline, and nothing was charged.", ar: 'أنت غير متصل، وما انخصم منك شي.' },
   'pb.checking': { en: 'Checking your payment with Moyasar…', ar: 'جاري التأكد من دفعتك مع ميسّر…' },
   'pb.paid': {
     en: 'Payment received! Pro is on until {date}. Your receipt is on its way to your email.',
-    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}. والإيصال في طريقه لإيميلك.',
+    ar: 'وصلت دفعتك! برو شغّال لين {date}. والإيصال في طريقه لإيميلك.',
   },
   'pb.left': {
     en: "You left the payment page before paying, so nothing was charged. Press Get Pro whenever you're ready.",
@@ -3416,7 +3416,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pb.failed': { en: "The payment didn't go through, and nothing was charged. You can try again.", ar: 'الدفع ما تم، وما انخصم منك شي. تقدر تحاول مرة ثانية.' },
   'pb.slow': {
     en: "Moyasar hasn't confirmed it yet. If you paid, Pro turns on by itself within a few minutes and your receipt comes by email.",
-    ar: 'ميسّر ما أكد الدفع للحين. إذا دفعت، المميّزة بتشتغل لحالها خلال دقايق والإيصال بيوصلك على الإيميل.',
+    ar: 'ميسّر ما أكد الدفع للحين. إذا دفعت، برو بيشتغل لحاله خلال دقايق والإيصال بيوصلك على الإيميل.',
   },
   'pb.faq.a5': {
     en: "On Moyasar's secure payment page, with mada, Visa or Mastercard, and Apple Pay where Moyasar offers it. Your card details go to Moyasar, never to us.",
@@ -3425,7 +3425,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pb.faq.q7': { en: 'Can I get my money back?', ar: 'أقدر أسترجع فلوسي؟' },
   'pb.faq.a7': {
     en: 'Yes. Within 7 days of paying, if you haven\'t used Pro, you get all of it back, to the way you paid. Ask on your account page, under "Pro and purchases", or reply to your receipt email.',
-    ar: 'إيه. خلال 7 أيام من الدفع، إذا ما استخدمت المميّزة، ترجع لك فلوسك كاملة على نفس طريقة الدفع. اطلبها من صفحة حسابك، تحت «المميّزة ومشترياتك»، أو رد على إيميل الإيصال.'
+    ar: 'إيه. خلال 7 أيام من الدفع، إذا ما استخدمت برو، ترجع لك فلوسك كاملة على نفس طريقة الدفع. اطلبها من صفحة حسابك، تحت «برو ومشترياتك»، أو رد على إيميل الإيصال.'
   },
 
   // Moyasar's payment form on /pro (payments v2, 16 Nov 2026; server/src/payments.ts
@@ -3482,29 +3482,29 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // only where it is offered, or to an account that has it.
   'pr.lead': {
     en: 'Everything free stays free. Pro adds the extras in its column below, for one payment. It renews only if you ask it to.',
-    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف الإضافات اللي في عمودها تحت، بدفعة وحدة، وما تتجدد إلا إذا أنت طلبت.',
+    ar: 'كل شي مجاني يبقى مجاني. برو يضيف الإضافات اللي في عموده تحت، بدفعة وحدة، وما يتجدد إلا إذا أنت طلبت.',
   },
-  'pr.step3.t': { en: 'It ends by itself, unless you choose otherwise', ar: 'تنتهي لحالها، إلا إذا اخترت غير كذا' },
+  'pr.step3.t': { en: 'It ends by itself, unless you choose otherwise', ar: 'ينتهي لحاله، إلا إذا اخترت غير كذا' },
   'pr.step3.b': {
     en: "Nothing renews unless you tick \"Keep Pro on\" when you pay. Haven't used it? Get all your money back within 7 days.",
-    ar: 'ما تتجدد إلا إذا علّمت على «خلّ المميّزة شغّالة» وقت الدفع. وإذا ما استخدمتها، ترجع لك فلوسك كاملة خلال 7 أيام.',
+    ar: 'ما يتجدد إلا إذا علّمت على «خلّ برو شغّال» وقت الدفع. وإذا ما استخدمته، ترجع لك فلوسك كاملة خلال 7 أيام.',
   },
   'pr.once': {
     en: 'One payment. It renews only if you tick "Keep Pro on" when you pay.',
-    ar: 'دفعة وحدة، وما تتجدد إلا إذا علّمت على «خلّ المميّزة شغّالة» وقت الدفع.',
+    ar: 'دفعة وحدة، وما يتجدد إلا إذا علّمت على «خلّ برو شغّال» وقت الدفع.',
   },
   'pr.faq.a2': {
     en: 'Only if you ask it to. Tick "Keep Pro on" when you pay and it renews every 30 days at the renewal price shown beside the box, until you cancel: we email you 3 days before each renewal, and you can turn it off with one click, from that email or your account. Leave it unticked and the month ends on its own.',
-    ar: 'بس إذا أنت طلبت. علّم على «خلّ المميّزة شغّالة» وقت الدفع وبتتجدد كل 30 يوم بسعر التجديد المكتوب جنب المربع، لين تلغي: نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر توقفها بضغطة وحدة من الإيميل نفسه أو من حسابك. وإذا ما علّمت عليها، الشهر ينتهي لحاله.',
+    ar: 'بس إذا أنت طلبت. علّم على «خلّ برو شغّال» وقت الدفع وبيتجدد كل 30 يوم بسعر التجديد المكتوب جنب المربع، لين تلغي: نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر توقفه بضغطة وحدة من الإيميل نفسه أو من حسابك. وإذا ما علّمت عليها، الشهر ينتهي لحاله.',
   },
-  'pr.keep': { en: 'Keep Pro on: renew every {days} days', ar: 'خلّ المميّزة شغّالة: تجديد كل {days} يوم' },
+  'pr.keep': { en: 'Keep Pro on: renew every {days} days', ar: 'خلّ برو شغّال: تجديد كل {days} يوم' },
   'pr.keep.terms': {
     en: 'SAR {now} now, then SAR {price} every {days} days until you cancel. The first renewal is on {date}. We email you 3 days before each renewal, and you can cancel with one click; Pro then stays on until the days you paid for end.',
-    ar: '{now} ريال الحين، وبعدها {price} ريال كل {days} يوم لين تلغي. أول تجديد يوم {date}. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+    ar: '{now} ريال الحين، وبعدها {price} ريال كل {days} يوم لين تلغي. أول تجديد يوم {date}. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، وبرو يبقى معك لين تخلص الأيام المدفوعة.',
   },
   'pr.keep.termsFounder': {
     en: 'SAR {now} now for your first {total} days as a founder, then SAR {price} every {days} days until you cancel. The first renewal is on {date}. We email you 3 days before each renewal, and you can cancel with one click; Pro then stays on until the days you paid for end.',
-    ar: '{now} ريال الحين لأول {total} يوم لك كمؤسس، وبعدها {price} ريال كل {days} يوم لين تلغي. أول تجديد يوم {date}. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+    ar: '{now} ريال الحين لأول {total} يوم لك كمؤسس، وبعدها {price} ريال كل {days} يوم لين تلغي. أول تجديد يوم {date}. نرسل لك إيميل قبل كل تجديد بـ3 أيام، وتقدر تلغي بضغطة وحدة، وبرو يبقى معك لين تخلص الأيام المدفوعة.',
   },
   'pr.keep.methods': { en: 'Renews with: {methods}.', ar: 'التجديد يشتغل مع: {methods}.' },
   'pr.keep.noMada': {
@@ -3522,16 +3522,16 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pr.keep.failed': { en: "That didn't save. Check your connection and tick it again.", ar: 'ما انحفظ اختيارك. تأكد من اتصالك وعلّم عليها مرة ثانية.' },
   'pr.paid.renews': {
     en: 'Payment received! Pro is on until {date} and renews that day. You can turn auto-renew off any time in your account.',
-    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date} وتتجدد بنفس اليوم. وتقدر توقف التجديد التلقائي بأي وقت من حسابك.',
+    ar: 'وصلت دفعتك! برو شغّال لين {date} ويتجدد بنفس اليوم. وتقدر توقف التجديد التلقائي بأي وقت من حسابك.',
   },
   'pr.paid.once': {
     en: "Payment received! Pro is on until {date}. Auto-renew couldn't be set up with this payment method, so this is a one-time month and nothing will be charged again.",
-    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}. التجديد التلقائي ما يشتغل مع طريقة الدفع هذي، فهذا شهر واحد وما راح ينخصم منك شي مرة ثانية.',
+    ar: 'وصلت دفعتك! برو شغّال لين {date}. التجديد التلقائي ما يشتغل مع طريقة الدفع هذي، فهذا شهر واحد وما راح ينخصم منك شي مرة ثانية.',
   },
   'pr.stop.working': { en: 'Turning auto-renew off…', ar: 'جاري إيقاف التجديد التلقائي…' },
   'pr.stop.done': {
     en: 'Auto-renew is off. Nothing more will be charged, and Pro stays on until {date}.',
-    ar: 'أوقفنا التجديد التلقائي. ما راح ينخصم منك شي بعد اليوم، والمميّزة تبقى معك لين {date}.',
+    ar: 'أوقفنا التجديد التلقائي. ما راح ينخصم منك شي بعد اليوم، وبرو يبقى معك لين {date}.',
   },
   'pr.stop.doneNoDate': { en: 'Auto-renew is off. Nothing more will be charged.', ar: 'أوقفنا التجديد التلقائي، وما راح ينخصم منك شي بعد اليوم.' },
   'pr.stop.failed': {
@@ -3539,7 +3539,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'الرابط ما اشتغل، يمكن إنه قديم. سجّل دخولك وافتح حسابك عشان تتأكد من التجديد التلقائي.',
   },
   // The account page's "Keep Pro on" block (src/ui/proAccount.ts).
-  'pr.ac.title': { en: 'Keep Pro on', ar: 'خلّ المميّزة شغّالة' },
+  'pr.ac.title': { en: 'Keep Pro on', ar: 'خلّ برو شغّال' },
   'pr.ac.active': { en: 'Renews on {date} for SAR {price}, from {card}.', ar: 'تتجدد يوم {date} بـ{price} ريال، من {card}.' },
   'pr.ac.failing': {
     en: "We couldn't renew from {card}, and nothing was charged. We'll try again on {date}.",
@@ -3551,7 +3551,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pr.ac.cancelling': { en: 'Turning it off…', ar: 'جاري الإيقاف…' },
   'pr.ac.cancelled': {
     en: 'Auto-renew is off. Pro stays on until the days you paid for end.',
-    ar: 'أوقفنا التجديد التلقائي. والمميّزة تبقى معك لين تخلص الأيام المدفوعة.',
+    ar: 'أوقفنا التجديد التلقائي. وبرو يبقى معك لين تخلص الأيام المدفوعة.',
   },
   'pr.ac.cancelFailed': { en: "That didn't go through. Try again.", ar: 'ما تمت العملية. حاول مرة ثانية.' },
   'pr.ac.card': { en: 'your card', ar: 'بطاقتك' },
@@ -3563,12 +3563,12 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pa.title': { en: "You're one of TifoMaker's founding fans", ar: 'أنت من أوائل جمهور تيفو ميكر' },
   'pa.body': {
     en: "Pro is coming: more AI designs, Match Day films, a 4K poster and more. It isn't on sale yet, and you help set its price. What would a month be worth to you?",
-    ar: 'المميّزة جاية: تصاميم ذكاء أكثر، وأفلام يوم المباراة، وبوستر 4K، وأكثر. للحين ما نزلت للبيع، وأنت تساعدنا نحدد سعرها. كم يسوى الشهر عندك؟',
+    ar: 'برو جاي: تصاميم ذكاء أكثر، وأفلام يوم المباراة، وبوستر 4K، وأكثر. للحين ما نزل للبيع، وأنت تساعدنا نحدد سعره. كم يسوى الشهر عندك؟',
   },
   'pa.other': { en: 'Other amount', ar: 'مبلغ ثاني' },
   'pa.send': { en: 'Send', ar: 'أرسل' },
-  'pa.nocharge': { en: "Nothing is charged. You'll hear first when Pro opens.", ar: 'ما ينخصم شي. وبتكون أول من يدري إذا فتحت المميّزة.' },
-  'pa.more': { en: "What's in Pro?", ar: 'وش في المميّزة؟' },
+  'pa.nocharge': { en: "Nothing is charged. You'll hear first when Pro opens.", ar: 'ما ينخصم شي. وبتكون أول من يدري إذا فتح برو.' },
+  'pa.more': { en: "What's in Pro?", ar: 'وش في برو؟' },
   'pa.later': { en: 'Not now', ar: 'مو الحين' },
   'pa.close': { en: 'Close', ar: 'إغلاق' },
   'ps.err.amount': { en: 'Pick an amount, or type one up to 999.', ar: 'اختر مبلغ، أو اكتب مبلغ لين 999.' },
@@ -3615,13 +3615,13 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'qk.creditSaved': { en: 'Saved on your account.', ar: 'انحفظ في حسابك.' },
   'qk.creditLater': { en: 'Saved on this device. It goes up to your account when you’re back online.', ar: 'انحفظ بهالجهاز، ويوصل حسابك أول ما يرجع النت.' },
   'qk.creditCleared': { en: 'No credit line now.', ar: 'شلنا توقيعك.' },
-  'qk.badge': { en: 'Pro supporter', ar: 'داعم مميّز' },
-  'qk.badgeT': { en: 'Supports TifoMaker with Pro', ar: 'يدعم تيفو ميكر بالباقة المميّزة' },
+  'qk.badge': { en: 'Pro supporter', ar: 'داعم برو' },
+  'qk.badgeT': { en: 'Supports TifoMaker with Pro', ar: 'يدعم تيفو ميكر بباقة برو' },
   'qk.badgeYou': { en: 'Your name shows this badge in the community:', ar: 'اسمك يطلع معه هالشارة في المجتمع:' },
 
   // ---- Pro fonts on seats (ui/seatPreview.ts, ui/proFonts.ts) and the LED boards (render/simulator/ledPanel.ts) ----
   // The banners-only group in the Text tool's and a sign's font pickers.
-  'qf.group.banners': { en: '♛ Pro fonts · banners only', ar: '♛ خطوط مميّزة · للبنرات بس' },
+  'qf.group.banners': { en: '♛ Pro fonts · banners only', ar: '♛ خطوط برو · للبنرات بس' },
   // Said when the seats get a seat font in place of a banners-only one.
   'qf.swapped': {
     en: '{font} is for banners only: on seats your words are in {other}.',
@@ -3640,7 +3640,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'qf.v.banner': { en: '{font} is for banners: on seats its thin strokes break up.', ar: 'خط {font} للبنرات: على المقاعد خطوطه الرفيعة تتقطّع.' },
   'qf.fix.taller': { en: 'Make it {n} rows', ar: 'خلّها {n} صف' },
   'qf.fix.use': { en: 'Use {font}', ar: 'استخدم {font}' },
-  'qf.all': { en: 'Every Pro font, here', ar: 'كل الخطوط المميّزة، هنا' },
+  'qf.all': { en: 'Every Pro font, here', ar: 'كل خطوط برو، هنا' },
   'qf.tile.no': { en: '{font}: will not read here', ar: '{font}: ما ينقرا هنا' },
   'qf.tile.ok': { en: '{font}: reads here', ar: '{font}: ينقرا هنا' },
   'qf.led.style': { en: 'Style', ar: 'الستايل' },
@@ -3848,7 +3848,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ev.step.vote': { en: 'Voting starts', ar: 'يبدأ التصويت' },
   'ev.step.close': { en: 'Voting ends', ar: 'ينتهي التصويت' },
   'ev.steps': { en: 'The dates', ar: 'المواعيد' },
-  'ev.prize': { en: 'The winner gets {days} days of Pro and the title.', ar: 'الفايز ياخذ {days} يوم من المميّزة واللقب.' },
+  'ev.prize': { en: 'The winner gets {days} days of Pro and the title.', ar: 'الفايز ياخذ {days} يوم من برو واللقب.' },
   'ev.prizeTitle': { en: 'The winner takes the title.', ar: 'الفايز ياخذ اللقب.' },
   'ev.rules.title': { en: 'How it works', ar: 'كيف تمشي' },
   'ev.rule1': { en: 'One tifo each. It has to be published, and made after the event was announced.', ar: 'تيفو واحد لكل شخص. لازم يكون منشور ومسوّى بعد إعلان المسابقة.' },

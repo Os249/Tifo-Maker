@@ -629,7 +629,7 @@ const badgeLook = (p, sel) => p.evaluate((sel) => {
 }, sel);
 const gold = (c) => { const m = /rgb\((\d+), (\d+), (\d+)/.exec(c || ''); return !!m && +m[1] > +m[3] + 60 && +m[1] >= 120; };
 for (const [lang, theme, w] of [['en', 'dark', 1440], ['en', 'light', 1440], ['ar', 'light', 1440], ['ar', 'dark', 390], ['en', 'light', 390]]) {
-  const word = lang === 'ar' ? 'داعم مميّز' : 'Pro supporter';
+  const word = lang === 'ar' ? 'داعم برو' : 'Pro supporter';
   const tag = `${lang}-${theme}-${w}`;
   const { ctx, p } = await device(viewer.token, { lang, theme, w, h: w < 500 ? 844 : 900, phone: w < 500 });
   // The tifo card.

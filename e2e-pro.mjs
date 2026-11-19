@@ -291,11 +291,11 @@ console.log('\n— an account on the preview list —');
 {
   const { ctx, p } = await page(fan.token, { lang: 'ar' });
   await p.goto(`${B}/ar/account`, { waitUntil: 'networkidle' });
-  check('in Arabic: "باقتك" and the gift\'s name', await waitFor(p, () => { const s = document.getElementById('pro'); return !!s && !s.hidden && /باقتك/.test(s.textContent) && /الهدية المميّزة/.test(s.textContent); }));
+  check('in Arabic: "باقتك" and the gift\'s name', await waitFor(p, () => { const s = document.getElementById('pro'); return !!s && !s.hidden && /باقتك/.test(s.textContent) && /هدية برو/.test(s.textContent); }));
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
-  check('/ar/pro: المميّزة قريب، بدون سعر، وتسأل كم تدفع', await waitFor(p, () => /كم تدفع على شهر المميّزة/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && !/19 ريال/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
+  check('/ar/pro: برو قريب، بدون سعر، وتسأل كم تدفع', await waitFor(p, () => /كم تدفع على شهر برو/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && !/19 ريال/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
   await p.goto(`${B}/ar/projects`, { waitUntil: 'networkidle' });
-  check('…and the chip says مميّز', await waitFor(p, () => /^مميّز · باقي 7 أيام$/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
+  check('…and the chip says برو', await waitFor(p, () => /^برو · باقي 7 أيام$/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   check('…with nothing scrolling sideways', over <= 0, String(over));
   await ctx.close();
@@ -359,7 +359,7 @@ console.log('\n— the price question —');
   const { ctx, p } = await page(null, { lang: 'ar', w: 390, h: 844 });
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
   await waitFor(p, () => !!document.getElementById('ps-amount'));
-  check('/ar/pro: ساعدنا نحدد سعر المميّزة, riyals for an Arabic page', await p.evaluate(() => document.getElementById('pp-h')?.textContent === 'ساعدنا نحدد سعر المميّزة' && document.querySelector('input[name="ps-cur"]:checked')?.value === 'SAR'));
+  check('/ar/pro: ساعدنا نحدد سعر برو, riyals for an Arabic page', await p.evaluate(() => document.getElementById('pp-h')?.textContent === 'ساعدنا نحدد سعر برو' && document.querySelector('input[name="ps-cur"]:checked')?.value === 'SAR'));
   check('…the Pro card, with the question, comes first on a phone', await p.evaluate(() => document.querySelector('.pp-plan.pro').getBoundingClientRect().top < document.querySelector('.pp-plan:not(.pro)').getBoundingClientRect().top));
   check('…the free plan says مجانية دايماً', await p.evaluate(() => /مجانية دايماً/.test(document.querySelector('.pp-plan:not(.pro)')?.textContent || '')));
   await p.fill('#ps-amount', '١٥٫٥');
@@ -367,7 +367,7 @@ console.log('\n— the price question —');
   check('Arabic digits and the Arabic decimal mark are read: شكراً! قلت 15.50 ريال بالشهر', await waitFor(p, () => /^شكراً! قلت 15\.50 ريال بالشهر\.$/.test(document.querySelector('.ps-thanks')?.textContent || '')));
   check('…nothing scrolling sideways', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await p.goto(`${B}/ar/`, { waitUntil: 'domcontentloaded' });
-  check('the Arabic header says المميّزة · قريباً', await waitFor(p, () => [...document.querySelectorAll('a')].some((a) => /\/pro$/.test(a.getAttribute('href') || '') && a.textContent.trim() === 'المميّزة · قريباً')));
+  check('the Arabic header says برو · قريباً', await waitFor(p, () => [...document.querySelectorAll('a')].some((a) => /\/pro$/.test(a.getAttribute('href') || '') && a.textContent.trim() === 'برو · قريباً')));
   await ctx.close();
 }
 

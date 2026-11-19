@@ -46,7 +46,7 @@ each perk (`/home/claude/evidence/kit/`).
 
 ## Supporter crown → supporter badge
 
-`ui/supporterBadge.ts`: the gold crown and "Pro supporter" / "داعم مميّز"
+`ui/supporterBadge.ts`: the gold crown and "Pro supporter" / "داعم برو"
 (the crown alone, its words spoken, in a comment). On the tifo cards and the
 preview's author line (`community.ts`), the public tifo page's creator line
 and its comments (`share.ts`), the community profile header and the editor's
@@ -107,7 +107,7 @@ merge connects them to `currentCredit()`.
   `sync/kit-ai-chip.png`, `sync/kit-banner-sign-dressed.png`,
   `sync/kit-banner-stand-dressed.png`, `sync/kit-post-it.png`.
 - **Supporter badge: 8/10** (was 5). A real badge, the crown and "Pro
-  supporter" / "داعم مميّز" in gold on the tifo card, the public tifo page,
+  supporter" / "داعم برو" in gold on the tifo card, the public tifo page,
   the profile header and the account page, right in both languages, both
   themes and at 390 px, and never leaking a plan or a date. Not 9: a comment
   shows the crown alone (no room for the words), and nothing yet tells a

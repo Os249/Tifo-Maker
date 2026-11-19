@@ -7,7 +7,7 @@
  * defines is used. The gold itself is --pro-* in both (tokens.css).
  *
  * The rules (docs/DESIGN.md, Pro):
- *  - one mark: a gold crown, with "Pro" / "مميّز" beside it where there is room;
+ *  - one mark: a gold crown, with "Pro" / "برو" beside it where there is room;
  *  - gold is never the blue: the one next step on a screen stays blue;
  *  - a crown is shown where the thing is picked, never first at export.
  */

@@ -16,7 +16,7 @@ import { CROWN_SVG } from './crown';
 /** The crown: the one mark for everything Pro (its own module, so a page can show it without the rest of Pro). */
 export { CROWN_SVG };
 
-/** "♛ Pro" / "♛ مميّز"; the crown alone (with a spoken name) on a small thumbnail. */
+/** "♛ Pro" / "♛ برو"; the crown alone (with a spoken name) on a small thumbnail. */
 export function proChipHtml(opts: { icon?: boolean; quiet?: boolean } = {}): string {
   const cls = `pro-chip${opts.icon ? ' icon' : ''}${opts.quiet ? ' quiet' : ''}`;
   return opts.icon
