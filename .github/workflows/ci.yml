@@ -101,12 +101,12 @@ jobs:
 
       # Refunds told to the fan (the email once, the notice once), refund
       # requests with approve, decline and the auto-refund switch, purchases.
-      - name: Payment tests v3: refunds and purchases (Postgres)
+      - name: "Payment tests v3: refunds and purchases (Postgres)"
         run: npm run test:payments3
 
       # The launch: the price by date, the launch moment and the founders
       # list, the one founders email, and the founders bonus under races.
-      - name: Launch tests: price, founders, bonus (Postgres)
+      - name: "Launch tests: price, founders, bonus (Postgres)"
         run: npm run test:launch
 
       - name: Club kit tests (Postgres)
