@@ -166,6 +166,7 @@ console.log('\n— not on sale: nothing of the launch shows —');
 {
   const html = await (await fetch(`${SOON}/pro`)).text();
   check('the header still says "Pro · soon"', /data-i18n="nav\.proSoon">Pro · soon</.test(html) && !/data-i18n="nav\.pro"/.test(html));
+  check('/pro is sent as the coming-soon page: its own words, not for search engines, no link card', /data-i18n="ps\.title">Help us price Pro</.test(html) && /<meta name="robots" content="noindex"/.test(html) && !/og:title|class="on-sale"/.test(html) && /<details id="pp-faq-refund" hidden>/.test(html));
   const st = (await api('/api/pro', null, {}, SOON)).json;
   check('/api/pro has no price, no launch and no founder', !st?.offer && !('founder' in (st ?? {})), JSON.stringify(st).slice(0, 200));
   const legal = await (await fetch(`${SOON}/legal`)).text();
@@ -181,6 +182,45 @@ console.log('\n— on sale: the header link and the launch price, in plain words
     const html = await (await fetch(B + path)).text();
     const ar = path.startsWith('/ar');
     check(`${path}: the header says just "${ar ? 'برو' : 'Pro'}"`, !/nav\.proSoon/.test(html) && (ar ? /data-i18n="nav\.pro">برو</ : /data-i18n="nav\.pro">Pro</).test(html));
+  }
+  // The page as the server sends it, before any script: what a link's preview card and a slow phone's first second show.
+  for (const [path, title, h1, lead] of [
+    ['/pro', 'TifoMaker Pro: the match-day film, the 4K poster and more', 'Go Pro for a month', /free and stays free: nothing essential will ever need Pro/],
+    ['/ar/pro', 'تيفو ميكر برو: فيلم يوم المباراة وبوستر 4K وأكثر', 'خذ برو لمدة شهر', /مجاني ويبقى مجاني/],
+  ]) {
+    const html = await (await fetch(B + path)).text();
+    const one = (re) => (html.match(re) || []).length === 1;
+    check(`${path} is sent on sale: the title, a description and one link card`, html.includes(`<title>${title}</title>`) && one(/<title>/g) && one(/<meta name="description"/g) && one(/property="og:title"/g) && one(/property="og:image"/g) && /name="twitter:card" content="summary_large_image"/.test(html) && html.includes(`<link rel="canonical" href="${B}${path}"`));
+    check(`${path}: for search engines now, and nothing of "coming soon" in it`, !/noindex/.test(html) && !/data-i18n="ps\.(eyebrow|title|lead|step\d\.[tb])"/.test(html) && !/Help us price Pro|ساعدنا نحدد سعر/.test(html));
+    check(`${path}: the hero already says Pro is to buy, and that TifoMaker stays free`, html.includes(`data-i18n="pb.title">${h1}<`) && lead.test(/data-i18n="pr\.lead">([^<]*)</.exec(html)?.[1] ?? '') && /<div id="pp-open" class="on-sale">/.test(html) && /<details id="pp-faq-refund">/.test(html) && /<details id="pp-faq-who">/.test(html));
+    check(`${path}: no price in the HTML: the price is /api/pro's to say`, !/13\.99|19\.99/.test(html));
+  }
+  {
+    // A slow connection: /api/pro has not answered yet, and the page already reads as on sale.
+    const { ctx, p } = await page(null, { lang: 'ar', w: 390, h: 844 });
+    let release;
+    const held = new Promise((r) => { release = r; });
+    await p.route('**/api/pro', async (r) => { await held; await r.continue(); });
+    await p.goto(`${B}/ar/pro`, { waitUntil: 'domcontentloaded' });
+    await p.waitForTimeout(1500);
+    const first = await p.evaluate(() => ({ h1: document.getElementById('pp-h')?.textContent, eyebrow: document.querySelector('.pp-eyebrow')?.textContent, busy: document.getElementById('pp-plans')?.getAttribute('aria-busy') }));
+    check('before /api/pro answers, a phone already shows the on-sale hero in Arabic, never "coming soon"', first.h1 === 'خذ برو لمدة شهر' && !/قريباً/.test(first.eyebrow || '') && first.busy === 'true', JSON.stringify(first));
+    await shot(p, 'pro-launch-first-paint-phone-ar');
+    release();
+    check('…and then the price', await waitFor(p, () => /13\.99/.test(document.querySelector('.pb-price')?.textContent || '')));
+    await ctx.close();
+  }
+  {
+    // /api/pro does not answer at all: no price question, no "tell me when it opens"; a way to try again.
+    const { ctx, p } = await page(null);
+    let down = true;
+    await p.route('**/api/pro', (r) => (down ? r.abort() : r.continue()));
+    await p.goto(`${B}/pro`, { waitUntil: 'domcontentloaded' });
+    check('the price cannot be fetched: the page says so, with "Try again", and asks nothing', await waitFor(p, () => /The price didn't load/.test(document.getElementById('pp-load-failed')?.textContent || '') && !document.querySelector('form#ps-ask') && document.getElementById('pp-act')?.hidden === true && /Go Pro for a month/.test(document.getElementById('pp-h')?.textContent || '')));
+    down = false;
+    await p.click('#pp-load-failed [data-act="reload"]');
+    check('…"Try again" brings the price', await waitFor(p, () => /SAR 13\.99/.test(document.querySelector('.pb-price')?.textContent || '')));
+    await ctx.close();
   }
   const { ctx, p } = await page(null);
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
@@ -199,7 +239,27 @@ console.log('\n— on sale: the header link and the launch price, in plain words
   check('…the whole price: no VAT is added', /no VAT is added/.test(ui.once), ui.once);
   check('…renewal is a choice, said beside the price', /renews only if you tick "Keep Pro on"/.test(ui.once));
   check('…no founders offer shown to a visitor', ui.founder === false);
-  check('…one blue button: "Sign in to get Pro"', ui.blue.length === 1 && ui.blue[0] === 'Sign in to get Pro', JSON.stringify(ui.blue));
+  check('…one blue button, with the price on it: "Get Pro for SAR 13.99"', ui.blue.length === 1 && ui.blue[0] === 'Get Pro for SAR 13.99', JSON.stringify(ui.blue));
+  const quiet = await p.evaluate(() => ({ cta: getComputedStyle(document.getElementById('auth-btn')).backgroundColor, note: document.getElementById('pb-signin-note')?.textContent }));
+  check('…the header\'s "Sign up" is quiet beside it, and the line under the button says what comes first', /rgba\(0, 0, 0, 0\)|transparent/.test(quiet.cta) && /sign up or sign in first, then pay/.test(quiet.note || ''), JSON.stringify(quiet));
+  await p.click('[data-act="buy-signin"]');
+  check('…pressing it signed out opens the dialog on "Sign up"', await waitFor(p, () => !!document.querySelector('.auth-modal .auth-tab.active[data-mode="signup"]'), null, 15000));
+  // Someone who already has an account signs in there, and the page carries on to the payment by itself:
+  // the press they made had the price on it.
+  const walkin = await account('launch_walkin');
+  let checkouts = 0;
+  p.on('request', (r) => { if (r.method() === 'POST' && /\/api\/pro\/pay\/checkout$/.test(r.url())) checkouts++; });
+  await p.click('.auth-modal .auth-tab[data-mode="signin"]');
+  await p.fill('.auth-modal input[name="identity"]', walkin.username);
+  await p.fill('.auth-modal input[name="password"]', 'harbor-kite-moss-31');
+  await p.click('.auth-modal .auth-form .auth-submit');
+  check('…signed in from that button, the checkout starts without a second press', await waitFor(p, () => !document.querySelector('.auth-modal') && !document.querySelector('[data-act="buy-signin"]'), null, 20000) && (await (async () => { for (let i = 0; i < 40 && !checkouts; i++) await sleep(250); return checkouts === 1; })()), String(checkouts));
+  const card = await (await fetch(`${B}/pro`)).text();
+  const img = /property="og:image" content="([^"]+)"/.exec(card)?.[1] ?? '';
+  const got = img ? await fetch(img) : null;
+  check('the link card is Pro\'s own picture, and it is there', /\/pro\/og-pro\.png$/.test(img) && got?.status === 200 && /image\/png/.test(got.headers.get('content-type') || ''), img);
+  const map = await (await fetch(`${B}/sitemap.xml`)).text();
+  check('/pro is in the sitemap, in both languages; and not where Pro is not on sale', map.includes(`<loc>${B}/pro</loc>`) && map.includes(`<loc>${B}/ar/pro</loc>`) && !(await (await fetch(`${SOON}/sitemap.xml`)).text()).includes('/pro</loc>'));
   check('…and the header link says "Pro"', ui.nav === 'Pro', ui.nav);
   await shot(p, 'pro-launch-signedout-desktop-en');
   await ctx.close();

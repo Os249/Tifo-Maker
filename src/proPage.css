@@ -55,6 +55,8 @@
 .pp-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); align-items: start; }
 /* Until /api/pro answers: room for the cards, so the questions below do not jump. */
 .pp-plans[aria-busy="true"] { min-height: 640px; }
+/* The price could not be fetched: one card across both columns. */
+#pp-load-failed { grid-column: 1 / -1; margin: 0; }
 .pp-plan {
   position: relative; display: flex; flex-direction: column;
   padding: var(--sp-6) var(--sp-5) var(--sp-5); border-radius: var(--r-lg);
@@ -95,8 +97,17 @@
 /* ---- how it works: three steps under the lead (10 Nov 2026) ---- */
 .ps-steps {
   list-style: none; counter-reset: ps; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3);
-  max-width: 920px; margin: var(--sp-6) auto 0; padding: 0; text-align: start;
+  max-width: 760px; margin: 0 0 var(--sp-6); padding: 0; text-align: start;
 }
+/* On sale the price comes first: the plans straight under the hero, how it works after them. */
+/* One blue button on the screen: the header's "Sign up" is quiet while the buy button is the next step. */
+body.pp-selling .nav-cta:not(.is-user) { background: transparent; color: var(--ink) !important; border-color: var(--line-strong); box-shadow: none; }
+body.pp-selling .nav-cta:not(.is-user):hover { background: transparent; border-color: var(--blue); color: var(--blue) !important; box-shadow: none; }
+#pp-open.on-sale { display: flex; flex-direction: column; }
+#pp-open.on-sale > * { order: 3; }
+#pp-open.on-sale > .pp-hero { order: 0; }
+#pp-open.on-sale > .pp-plans { order: 1; }
+#pp-open.on-sale > .ps-steps { order: 2; margin: var(--sp-6) 0 0; }
 .ps-steps li {
   counter-increment: ps; display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-3); row-gap: var(--sp-1);
   padding: var(--sp-4); border-radius: var(--r-md); background: var(--raise-2); border: 1px solid var(--line);
@@ -224,6 +235,21 @@
 .pb-note { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
 .pb-msg { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); font-weight: 700; }
 .pb-msg:empty { display: none; }
+/* Under the button: the refund promise, and the terms and a contact a tap away. */
+.pb-trust { display: grid; gap: var(--sp-1); margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
+.pb-trust b { font-weight: 700; }
+.pb-links { display: flex; flex-wrap: wrap; gap: 0 var(--sp-4); margin: 0; padding: 0; list-style: none; }
+.pb-links a {
+  display: inline-flex; align-items: center; min-height: 44px; color: var(--blue); font-weight: 700;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.pb-links a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: var(--r-sm); }
+/* The footer's links are this page's other way to the terms: a finger's height on touch, as the links above. */
+.site-foot a, .site-foot button { display: inline-flex; align-items: center; min-height: 44px; }
+@media (hover: hover) and (pointer: fine) {
+  .pb-links a, .site-foot a, .site-foot button { min-height: 24px; }
+}
+.pb-buy a.pp-btn { text-decoration: none; }
 /* ---- Moyasar's payment form, opened in place of "Get Pro" (payments v2) ---- */
 .pb-form { display: grid; gap: var(--sp-3); min-width: 0; }
 .pb-form[hidden] { display: none; }

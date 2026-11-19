@@ -21,7 +21,7 @@ import { MemorySocialRepository } from '../src/memorySocial';
 import { buildApp, type TemplateInfo } from '../src/routes';
 import { MemoryProRepository, PgProRepository, type ProRepository } from '../src/proRepo';
 import { ProService, isThrowawayEmail } from '../src/pro';
-import { AI_ON_PRO, CYCLE_DAYS, FREE_WINDOWS, OFFER, PHOTO_ON_PRO, PLAN_WINDOWS, cycleOf, liveFor, normalizePlan, periodEnd, periodKey, periodStart, proMode } from '../src/proPlan';
+import { AI_ON_PRO, CYCLE_DAYS, FREE_WINDOWS, OFFER, PHOTO_ON_PRO, PLAN_WINDOWS, UNLISTED, cycleOf, liveFor, normalizePlan, periodEnd, periodKey, periodStart, proMode } from '../src/proPlan';
 import { cutoutConfigured, cutoutForDesign, cutoutPicture, fetchResult, hostAllowed, isPrivateAddress, localCutoutUrl, useLookupForTests } from '../src/cutout';
 import { configWarnings } from '../src/preflight';
 import { kitContext } from '../src/aiRoutes';
@@ -391,6 +391,9 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.deepEqual(soonOut.soon.limits.free.std, FREE_WINDOWS.std, 'the free plan the server applies');
   assert.deepEqual(soonOut.soon.limits.pro.cutout, [{ period: 'day', limit: 5 }, { period: 'month', limit: 15 }]);
   assert.deepEqual(soonOut.soon.gift, { days: 7 });
+  // The smart cut-out is given but not advertised (proPlan UNLISTED): the page is told which kinds to leave out.
+  assert.deepEqual(soonOut.soon.unlisted, UNLISTED, 'the kinds /pro does not list');
+  assert.deepEqual(UNLISTED, ['cutout']);
   assert.ok(!/price|SAR|paymentsOpen/.test(JSON.stringify(soonOut)), 'no price anywhere');
   assert.deepEqual((await get(fan.token)).json(), { live: false, signedIn: true, soon: soonOut.soon, notified: false }, 'off: the same plans, and whether they asked to be told');
   assert.equal((await app.inject({ method: 'POST', url: '/api/pro/gift/accept', headers: bearer(fan.token) })).statusCode, 404, 'off: the gift route is not there');

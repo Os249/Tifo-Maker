@@ -45,6 +45,8 @@ const ADMIN_PW = 'e2e pro admin password';
 const server = boot(PORT, { PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pro_fan', AI_ADMIN_PASSWORD: ADMIN_PW });
 /** Whether Pro sells more AI designs and Polishes (server/src/proPlan.ts), as the build the suite runs has it. */
 const AI_ON_PRO = /export const AI_ON_PRO = true;/.test(readFileSync('server/src/proPlan.ts', 'utf8'));
+/** Whether /pro and the sheets list the smart cut-out (server/src/proPlan.ts UNLISTED), as the build the suite runs has it. */
+const CUTOUT_LISTED = !/export const UNLISTED: AllowanceKind\[\] = \[[^\]]*'cutout'/.test(readFileSync('server/src/proPlan.ts', 'utf8'));
 const serverOff = boot(PORT_OFF, { PRO_MODE: 'off' });
 const stop = () => { for (const s of [server, serverOff]) { try { s.kill(); } catch { /* gone */ } } };
 process.on('exit', stop);
@@ -242,9 +244,9 @@ console.log('\n— an account on the preview list —');
   await waitFor(p, () => !!document.querySelector('.pro-sheet [data-act="start"]'));
   check('the gift sheet says when it would end', !!(await p.$('.pro-sheet .pro-when')));
   const perks = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-perks li')].map((l) => l.textContent));
-  const listed = perks.some((x) => /cut-out/.test(x)) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /Super/.test(x));
-  if (AI_ON_PRO) check('…listing all of Pro: more AI designs and reviews, the cut-out, clean exports, the video sizes, styles and fonts, the club kit', listed && perks.length === 8 && /More AI designs/.test(perks[0]) && perks.some((x) => /AI reviews/.test(x)), JSON.stringify(perks));
-  else check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or reviews', listed && perks.length === 5 && !perks.some((x) => /AI designs|AI reviews|limit cards/.test(x)), JSON.stringify(perks));
+  const listed = perks.some((x) => /cut-out/.test(x)) === CUTOUT_LISTED && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /Super/.test(x));
+  if (AI_ON_PRO) check('…listing all of Pro: more AI designs and reviews, the cut-out, clean exports, the video sizes, styles and fonts, the club kit', listed && perks.length === (CUTOUT_LISTED ? 8 : 7) && /More AI designs/.test(perks[0]) && perks.some((x) => /AI reviews/.test(x)), JSON.stringify(perks));
+  else check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or reviews', listed && perks.length === (CUTOUT_LISTED ? 5 : 4) && !perks.some((x) => /AI designs|AI reviews|limit cards/.test(x)), JSON.stringify(perks));
   await p.click('.pro-sheet [data-act="start"]');
   check('Start runs the gift', await waitFor(p, () => /Your Pro gift is on/.test(document.querySelector('.pro-sheet h2')?.textContent || '')));
   const st = (await api('/api/pro', fan.token)).json;
@@ -275,9 +277,11 @@ console.log('\n— an account on the preview list —');
     over: document.documentElement.scrollWidth - innerWidth,
   }));
   check('…Pro with no price but the question, and every new perk in its column', !/SAR 19|USD 5 a month/.test(pp.pro) && /What would you pay for a month of Pro\?/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
-  check('…Free: always free, a cut-out a week, none of Pro\'s perks', /1 a week/.test(pp.free) && /Always free/.test(pp.free), pp.free.slice(0, 300));
-  if (AI_ON_PRO) check('…AI designs and AI reviews rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /AI reviews/.test(pp.pro) && !/Polish/.test(pp.pro) && /Smart cut-out/.test(pp.pro));
-  else check('…no AI designs or AI reviews rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|AI reviews|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
+  check('…Free: always free, none of Pro\'s perks, and a cut-out a week only while the cut-out is listed', /1 a week/.test(pp.free) === CUTOUT_LISTED && /Always free/.test(pp.free), pp.free.slice(0, 300));
+  // The smart cut-out is given but not advertised while it is on proPlan's UNLISTED: no row, and its question goes too.
+  check(`…the smart cut-out is ${CUTOUT_LISTED ? 'listed' : 'not listed, and neither is its question'} (proPlan UNLISTED)`, /Smart cut-out/.test(pp.pro + pp.free) === CUTOUT_LISTED && (await p.evaluate(() => !document.getElementById('pp-faq-cutout')?.hidden)) === CUTOUT_LISTED);
+  if (AI_ON_PRO) check('…AI designs and AI reviews rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /AI reviews/.test(pp.pro) && !/Polish/.test(pp.pro));
+  else check('…no AI designs or AI reviews rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|AI reviews|Polish/.test(pp.pro + pp.free));
   check('…no Match Pass, Season Pass or group band', !/Match Pass|Season Pass/.test(pp.pro + pp.free) && !pp.group);
   await p.setViewportSize({ width: 390, height: 844 });
   await p.waitForTimeout(300);

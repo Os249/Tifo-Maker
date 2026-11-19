@@ -49,6 +49,7 @@ export const PAGE_TEXT_KEYS = [
   'meta.describe.seats', 'meta.describe.by', 'meta.describe.remixed', 'meta.describe.open',
   'meta.someone', 'meta.daily.alt', 'meta.feed.label', 'ed.docTitlePlaceholder', 'cm.by',
   'daily.badge', 'daily.view', 'daily.sub',
+  'meta.pro.sale.title', 'meta.pro.desc', 'meta.pro.card.alt',
 ] as const;
 
 export function checkPageText(): void {

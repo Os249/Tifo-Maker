@@ -3212,6 +3212,14 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // The Pro page (/pro).
   'meta.pro.title': { en: 'Pro · TifoMaker', ar: 'برو · تيفو ميكر' },
+  // Once Pro is on sale to everyone the server sends /pro with these and a link card (routes.ts). No price in
+  // them: the price is the server's, and it changes when the launch price ends.
+  'meta.pro.sale.title': { en: 'TifoMaker Pro: the match-day film, the 4K poster and more', ar: 'تيفو ميكر برو: فيلم يوم المباراة وبوستر 4K وأكثر' },
+  'meta.pro.card.alt': { en: 'A frame of the Pro match-day film: a fan-made tifo across a floodlit stand, full of fans.', ar: 'لقطة من فيلم يوم المباراة في برو: تيفو من تصميم مشجع على مدرج مليان تحت الكشافات.' },
+  'meta.pro.desc': {
+    en: 'Designing a tifo in your real stadium is free and stays free. Pro adds the match-day film, a 4K poster, exports without the mark and more, for one payment.',
+    ar: 'تصميم التيفو في ملعبك الحقيقي مجاني ويبقى مجاني. برو يضيف فيلم يوم المباراة وبوستر 4K وتصدير بدون العلامة وأكثر، بدفعة وحدة.',
+  },
   'pp.closed': {
     en: "Pro is not on sale yet. Tap the button and we'll email you the day it is.",
     ar: 'برو ما نزل للبيع للحين. اضغط الزر وبنرسل لك إيميل يوم ينزل.',
@@ -3341,8 +3349,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pb.eyebrow': { en: 'TifoMaker Pro', ar: 'تيفو ميكر برو' },
   'pb.title': { en: 'Go Pro for a month', ar: 'خذ برو لمدة شهر' },
   'pb.lead': {
-    en: 'Everything free stays free. Pro adds the extras in its column below, for one payment, with nothing to cancel.',
-    ar: 'كل شي مجاني يبقى مجاني. برو يضيف الإضافات اللي في عموده تحت، بدفعة وحدة، وبدون شي تلغيه.',
+    en: 'TifoMaker lets you design a tifo and see it in a 3D model of your real stadium. That is free and stays free: nothing essential will ever need Pro. Pro adds the extras below for one payment, with nothing to cancel.',
+    ar: 'تيفو ميكر يخليك تصمم تيفو وتشوفه في مجسم 3D لملعبك الحقيقي. وهذا مجاني ويبقى مجاني: ما راح نحط شي أساسي ورا برو أبد. برو يضيف المزايا اللي تحت بدفعة وحدة، وبدون شي تلغيه.',
   },
   'pb.step1.t': { en: "Pay once on Moyasar's secure page", ar: 'ادفع مرة وحدة في صفحة ميسّر الآمنة' },
   'pb.step1.b': { en: 'mada, Visa or Mastercard, and Apple Pay where Moyasar offers it. Your card never reaches us.', ar: 'تدفع بمدى أو فيزا أو ماستركارد، وبـApple Pay إذا كان متاح عند ميسّر. وبطاقتك ما توصل لنا أبد.' },
@@ -3393,8 +3401,32 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pb.renew': { en: 'Add a month for SAR {price}', ar: 'أضف شهر بـ{price} ريال' },
   'pb.renewNote': { en: 'The new month starts when this one ends, so no day is lost.', ar: 'الشهر الجديد يبدأ لما يخلص الحالي، فما يضيع عليك ولا يوم.' },
   'pb.going': { en: 'Taking you to the payment page…', ar: 'جاري تحويلك لصفحة الدفع…' },
-  'pb.methods': { en: "You pay on Moyasar's secure page, by mada or a card.", ar: 'تدفع في صفحة ميسّر الآمنة بمدى أو البطاقة.' },
+  'pb.methods': {
+    en: "You pay on Moyasar's secure page: mada, Visa or Mastercard, and Apple Pay where Moyasar offers it. No card is typed on this site.",
+    ar: 'تدفع في صفحة ميسّر الآمنة: مدى أو فيزا أو ماستركارد، وبـApple Pay إذا كان متاح عند ميسّر. وما تكتب بطاقتك في موقعنا أبد.',
+  },
+  // Under the button (19 Nov 2026): the refund promise in a line, and the terms and a contact a tap away.
+  'pb.trust.refund': { en: "Haven't used it? All your money back within 7 days.", ar: 'ما استخدمته؟ ترجع لك فلوسك كاملة خلال 7 أيام.' },
+  'pb.trust.terms': { en: 'Payment and refund terms', ar: 'شروط الدفع والاسترجاع' },
+  'pb.trust.contact': { en: 'Contact', ar: 'تواصل معنا' },
+  'pb.trust.links': { en: 'Terms and contact', ar: 'الشروط والتواصل' },
+  // Signed in with an email not verified yet: said before the press, with the way to do it.
+  'pb.verify.btn': { en: 'Verify my email', ar: 'وثّق بريدي' },
+  'pb.verify.note': {
+    en: 'One step first: verify your email on your account page, because the receipt goes there. Then come back here to get Pro.',
+    ar: 'باقي خطوة وحدة: وثّق بريدك من صفحة حسابك، لأن الإيصال يوصلك عليه. وبعدها ارجع هنا واشترك.',
+  },
+  // The server said Pro is on sale, and then the price could not be fetched.
+  'pb.err.load': { en: "The price didn't load. Check your connection and try again.", ar: 'السعر ما تحمّل. تأكد من اتصالك وحاول مرة ثانية.' },
+  'pb.faq.q8': { en: 'Who is behind TifoMaker?', ar: 'مين ورا تيفو ميكر؟' },
+  'pb.faq.a8': {
+    en: "One person: Osamh Alsharekh, an independent developer and a freelancer registered on Saudi Arabia's freelance platform (document FL-216888773). Payments are taken by Moyasar, a payment company under the supervision of the Saudi Central Bank. You can write to me any time from the Contact link under the price.",
+    ar: 'شخص واحد: أسامة الشارخ، مطوّر مستقل ومسجّل في منصة العمل الحر السعودية (وثيقة رقم FL-216888773). والدفع عن طريق ميسّر، شركة مدفوعات تحت إشراف البنك المركزي السعودي. وتقدر تراسلني بأي وقت من رابط «تواصل معنا» تحت السعر.',
+  },
   'pb.signin': { en: 'Sign in to get Pro', ar: 'سجّل دخولك عشان تشترك' },
+  // Signed out, the button is the same "Get Pro for SAR ..." (most visitors have no account yet, and the
+  // price belongs on the button); this line under it says what the press does first.
+  'pb.signin.note': { en: "You'll sign up or sign in first, then pay.", ar: 'أول شي تسوي حساب أو تدخل حسابك، وبعدها تدفع.' },
   'pb.err.verify': { en: 'Verify your email first: the receipt goes there.', ar: 'وثّق بريدك أول، لأن الإيصال يوصلك عليه.' },
   'pb.err.held': { en: 'You have Pro until {date}. You can add a month in its last week.', ar: 'عندك برو لين {date}. تقدر تضيف شهر في آخر أسبوع منه.' },
   'pb.err.busy': { en: 'Too many tries today. Try again tomorrow.', ar: 'محاولات كثيرة اليوم. جرّب بكرة.' },
@@ -3481,8 +3513,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // "Keep Pro on": optional auto-renew (payments v2; PRO_AUTORENEW=on). Shown
   // only where it is offered, or to an account that has it.
   'pr.lead': {
-    en: 'Everything free stays free. Pro adds the extras in its column below, for one payment. It renews only if you ask it to.',
-    ar: 'كل شي مجاني يبقى مجاني. برو يضيف الإضافات اللي في عموده تحت، بدفعة وحدة، وما يتجدد إلا إذا أنت طلبت.',
+    en: 'TifoMaker lets you design a tifo and see it in a 3D model of your real stadium. That is free and stays free: nothing essential will ever need Pro. Pro adds the extras below for one payment. It renews only if you ask it to.',
+    ar: 'تيفو ميكر يخليك تصمم تيفو وتشوفه في مجسم 3D لملعبك الحقيقي. وهذا مجاني ويبقى مجاني: ما راح نحط شي أساسي ورا برو أبد. برو يضيف المزايا اللي تحت بدفعة وحدة، وما يتجدد إلا إذا أنت طلبت.',
   },
   'pr.step3.t': { en: 'It ends by itself, unless you choose otherwise', ar: 'ينتهي لحاله، إلا إذا اخترت غير كذا' },
   'pr.step3.b': {

@@ -79,7 +79,7 @@ const boot = (port, env) => {
   return s;
 };
 const server = boot(PORT, {
-  PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pay_fan,pay_held', AI_ADMIN_PASSWORD: ADMIN_PW,
+  PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pay_fan,pay_held,pay_new', AI_ADMIN_PASSWORD: ADMIN_PW,
   PRO_PAYMENTS: 'on', MOYASAR_SECRET_KEY: 'sk_test_FAKEfake1234', MOYASAR_API_BASE: `http://127.0.0.1:${FAKE}/v1`,
 });
 // The same build with the switch left as it ships: off.
@@ -103,8 +103,11 @@ const api = async (path, token, init = {}, base = B) => {
 };
 const codeFor = async (email) => {
   for (let i = 0; i < 40; i++) {
-    const m = [...out.join('').matchAll(/\[email:dev\] to=(\S+) \|[\s\S]*?Your TifoMaker code: (\d{6})/g)].filter((x) => x[1] === email).pop();
-    if (m) return m[2];
+    // One logged email at a time: a message with no code in it (a receipt) must not swallow the next account's
+    // code. It did: the account made after the first purchase was never verified, which nothing noticed until
+    // /pro began to say so before the press (19 Nov 2026).
+    const m = out.join('').split('[email:dev] to=').filter((x) => x.startsWith(`${email} |`)).map((x) => /Your TifoMaker code: (\d{6})/.exec(x)).filter(Boolean).pop();
+    if (m) return m[1];
     await new Promise((r) => setTimeout(r, 250));
   }
   return null;
@@ -114,7 +117,8 @@ const account = async (username, base = B) => {
   const r = await api('/api/auth/register', null, { method: 'POST', body: JSON.stringify({ username, password: 'harbor-kite-moss-31', email, acceptedVersion: 'test' }) }, base);
   const token = r.json?.token;
   const code = await codeFor(email);
-  await api('/api/auth/verify/code', token, { method: 'POST', body: JSON.stringify({ code }) }, base);
+  const v = await api('/api/auth/verify/code', token, { method: 'POST', body: JSON.stringify({ code }) }, base);
+  if (v.status >= 300) throw new Error(`could not verify ${username}: ${v.status} ${JSON.stringify(v.json)}`);
   return { token };
 };
 const fan = await account('pay_fan');
@@ -168,7 +172,22 @@ let orderId = null;
     act: !document.getElementById('pp-act')?.hidden,
     blue: [...document.querySelectorAll('main .pp-btn:not(.quiet)')].map((b) => b.textContent),
     refundFaq: !document.getElementById('pp-faq-refund')?.hidden,
+    whoFaq: !document.getElementById('pp-faq-who')?.hidden && /Osamh Alsharekh/.test(document.getElementById('pp-faq-who')?.textContent || ''),
+    lead: document.querySelector('.pp-lead')?.textContent || '',
+    methods: document.querySelector('.pb-buy .ps-private')?.textContent || '',
+    trust: document.querySelector('.pb-trust b')?.textContent || '',
+    links: [...document.querySelectorAll('.pb-links a')].map((a) => a.getAttribute('href')),
+    stepsAfter: (() => { const s = document.querySelector('.ps-steps'), pl = document.getElementById('pp-plans'); return !!s && !!pl && s.getBoundingClientRect().top > pl.getBoundingClientRect().bottom - 1; })(),
+    priceTop: Math.round(document.querySelector('.pb-price')?.getBoundingClientRect().top ?? 9999),
+    cutout: /Smart cut-out/.test(document.getElementById('pp-plans')?.textContent || ''),
+    soon: /coming soon|isn't on sale|Tell me when Pro opens|have answered/i.test(document.getElementById('main')?.textContent || ''),
   }));
+  check('…the lead says what TifoMaker is and that it stays free', /design a tifo and see it in a 3D model of your real stadium/.test(ui.lead) && /free and stays free: nothing essential will ever need Pro/.test(ui.lead), ui.lead);
+  check('…the price comes before "how it works", above the fold', ui.stepsAfter && ui.priceTop < 900, JSON.stringify({ after: ui.stepsAfter, top: ui.priceTop }));
+  check('…under the button: the methods by name, no card typed here, the refund promise', /mada, Visa or Mastercard/.test(ui.methods) && /No card is typed on this site/.test(ui.methods) && /money back within 7 days/.test(ui.trust), ui.methods + ' | ' + ui.trust);
+  check('…and the terms and a contact a tap away', ui.links.length === 2 && ui.links[0] === '/legal#terms' && ui.links[1] === '/legal#about', JSON.stringify(ui.links));
+  check('…who is behind the site is in the FAQ', ui.whoFaq);
+  check('…nothing left of coming soon, and no perk that is off the list', !ui.soon && !ui.cutout);
   check('…the price and "Get Pro", in the Pro column', /^SAR \d+(\.\d\d)? for 30 days$/.test(ui.price || '') && /^Get Pro for SAR \d+(\.\d\d)?$/.test(ui.btn || ''), JSON.stringify(ui));
   check('…the price question and "tell me" step aside', !ui.ask && !ui.act);
   check('…one blue button on the page', ui.blue.length === 1, ui.blue.join('|'));
@@ -220,6 +239,13 @@ console.log('\n— in Arabic, on a phone —');
   const { ctx, p } = await page(held.token, { lang: 'ar', w: 390, h: 844 });
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
   check('Arabic: the sale hero and the button', await waitFor(p, () => /خذ برو لمدة شهر/.test(document.getElementById('pp-h')?.textContent || '') && /^اشترك بـ\d+(\.\d\d)? ريال$/.test(document.querySelector('[data-act="buy"]')?.textContent || '')));
+  const arUi = await p.evaluate(() => ({
+    top: Math.round(document.querySelector('[data-act="buy"]').getBoundingClientRect().bottom),
+    links: [...document.querySelectorAll('.pb-links a')].map((a) => ({ href: a.getAttribute('href'), h: Math.round(a.getBoundingClientRect().height) })),
+    foot: [...document.querySelectorAll('.site-foot a, .site-foot button')].map((a) => Math.round(a.getBoundingClientRect().height)),
+  }));
+  check('…the button is on the first screen of a phone, before any scrolling', arUi.top <= 844, String(arUi.top));
+  check('…the terms and contact links go to the Arabic sections, a finger high, and so are the footer\'s', arUi.links.length === 2 && arUi.links[0].href === '/ar/legal#terms-ar' && arUi.links[1].href === '/ar/legal#about-ar' && [...arUi.links.map((l) => l.h), ...arUi.foot].every((h) => h >= 44), JSON.stringify(arUi));
   const fit = await p.evaluate(() => {
     const btn = document.querySelector('[data-act="buy"]');
     const b = btn.getBoundingClientRect();
@@ -231,6 +257,22 @@ console.log('\n— in Arabic, on a phone —');
   check('…nothing off the side, the button full width and easy to tap, Pro first', fit.over <= 0 && Math.abs(fit.w - fit.inner) <= 1 && fit.h >= 44 && fit.first, JSON.stringify(fit));
   await p.locator('.pb-buy').scrollIntoViewIfNeeded();
   await shot(p, 'pay-phone-ar');
+  await ctx.close();
+}
+
+// =====================================================================
+console.log('\n— signed in, the email not verified yet —');
+{
+  // In the preview by name, registered but never verified: the page says so before any press, with the way to do it.
+  const r = await api('/api/auth/register', null, { method: 'POST', body: JSON.stringify({ username: 'pay_new', password: 'harbor-kite-moss-31', email: 'pay_new@tifomaker-e2e.org', acceptedVersion: 'test' }) });
+  const { ctx, p } = await page(r.json?.token);
+  await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
+  check('"Verify my email" is the one blue button, and it goes to the account page', await waitFor(p, () => {
+    const blue = [...document.querySelectorAll('main .pp-btn:not(.quiet)')].filter((b) => b.offsetParent !== null);
+    return blue.length === 1 && blue[0].textContent === 'Verify my email' && blue[0].getAttribute('href') === '/account' && !document.querySelector('[data-act="buy"]');
+  }));
+  check('…with why: the receipt goes to the email', /verify your email on your account page, because the receipt goes there/.test(await p.locator('#pb-verify').textContent().catch(() => '')));
+  check('…and the server would have refused the press all the same', (await api('/api/pro/pay/checkout', r.json?.token, { method: 'POST', body: '{}' })).json?.reason === 'verify');
   await ctx.close();
 }
 

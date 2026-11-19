@@ -130,6 +130,19 @@ export const PHOTO_ON_PRO = false;
  */
 export const AI_ON_PRO = true;
 
+/**
+ * Kinds Pro gives more of that /pro and the Pro sheets do not list (19 Nov
+ * 2026, the day before Pro went on sale).
+ *
+ * The smart cut-out was failing on the live site, and a page that takes money
+ * must not promise it. Unlisted is narrower than PHOTO_ON_PRO above: nothing
+ * about the allowance changes (a Pro member still gets Pro's cut-outs once it
+ * works again), it is only not advertised. /api/pro names these kinds
+ * (`unlisted`), and the page and the sheets leave them out. An empty list
+ * puts the cut-out back on /pro.
+ */
+export const UNLISTED: AllowanceKind[] = ['cutout'];
+
 const PRO_WINDOWS: Record<AllowanceKind, Window[]> = {
   std: AI_ON_PRO ? [{ period: 'day', limit: 15 }, { period: 'cycle', limit: 70 }] : FREE_WINDOWS.std,
   polish: AI_ON_PRO ? [{ period: 'day', limit: 10 }, { period: 'cycle', limit: 20 }] : FREE_WINDOWS.polish,

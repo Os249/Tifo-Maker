@@ -9,7 +9,7 @@
  * and which plan.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, proMode, previewUsers, type AllowanceKind, type Window } from './proPlan';
+import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, UNLISTED, proMode, previewUsers, type AllowanceKind, type Window } from './proPlan';
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
 import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarizeAll } from './proPrice';
 import type { PriceAnswer } from './proRepo';
@@ -75,6 +75,8 @@ function limitsOf(w: Record<AllowanceKind, Window[]>): Record<AllowanceKind, { p
 function soonOffer() {
   return {
     limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
+    // Kinds the page and the sheets do not list (proPlan.ts UNLISTED).
+    unlisted: UNLISTED,
     monthly: { days: OFFER.monthly.days },
     gift: { days: OFFER.gift.days },
   };
@@ -100,6 +102,7 @@ function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | '
     // regular price crossed out) only with a discount licence, whose number then shows (proLaunch.ts priceDisplay).
     ...(p.launch && p.until ? { launch: { regular: p.regular / 100, until: p.until, display: p.display, ...(p.licence ? { licence: p.licence } : {}) } } : {}),
     limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
+    unlisted: UNLISTED,
     currency: OFFER.currency,
     // What Moyasar charges for an order made now.
     monthly: { price: p.halalas / 100, days: OFFER.monthly.days },

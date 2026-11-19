@@ -67,6 +67,7 @@ import {
 import { CROWN_SVG, endsText, money, mountProChip, proNavOnSale, whenDay, whenRiyadh } from './ui/pro';
 import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
+import { SALE_KEYS, keysOf, saleKey } from './ui/proSaleCopy';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const authBtn = $<HTMLButtonElement>('auth-btn');
@@ -103,27 +104,24 @@ let buyMsg: { key: string; vars?: Record<string, string> } | null = null;
 let paidMsg: { key: string; vars?: Record<string, string>; tone: 'wait' | 'ok' | 'bad' } | null = null;
 
 /**
- * The words that change when Pro is on sale: each element with its
- * coming-soon key and its on-sale key. Found once, by the coming-soon key in
- * pro.html, before anything swaps them.
+ * The words that change when Pro is on sale (ui/proSaleCopy.ts): each element
+ * with its coming-soon key and its on-sale key. Found once, before anything
+ * swaps them, by whichever of its keys the page arrived with: the server
+ * sends the on-sale words itself once Pro is on sale to everyone.
  */
-const SALE_COPY: [HTMLElement, string, string][] = (
-  [
-    ['ps.eyebrow', 'pb.eyebrow'], ['ps.title', 'pb.title'], ['ps.lead', 'pb.lead'],
-    ['ps.step1.t', 'pb.step1.t'], ['ps.step1.b', 'pb.step1.b'],
-    ['ps.step2.t', 'pb.step2.t'], ['ps.step2.b', 'pb.step2.b'],
-    ['ps.step3.t', 'pb.step3.t'], ['ps.step3.b', 'pb.step3.b'],
-    ['pp.faq.a5', 'pb.faq.a5'], ['pp.faq.a2', 'pp.faq.a2'],
-  ] as const
-).flatMap(([soon, sale]) => {
-  const el = document.querySelector<HTMLElement>(`[data-i18n="${soon}"]`);
+const SALE_COPY: [HTMLElement, string, string][] = SALE_KEYS.flatMap(([soon, sale]) => {
+  const el = document.querySelector<HTMLElement>(keysOf(soon, sale).map((k) => `[data-i18n="${k}"]`).join(','));
   return el ? [[el, soon, sale] as [HTMLElement, string, string]] : [];
 });
-/** The words that differ when the form is the checkout, and when "Keep Pro on" is offered (payments v2). */
-const FORM_COPY: Record<string, string> = { 'pb.step1.t': 'pf.step1.t', 'pb.step1.b': 'pf.step1.b', 'pb.faq.a5': 'pf.faq.a5' };
-const RENEW_COPY: Record<string, string> = { 'pb.step3.t': 'pr.step3.t', 'pb.step3.b': 'pr.step3.b', 'pp.faq.a2': 'pr.faq.a2', 'pb.lead': 'pr.lead' };
-/** Which wording is on the page now: '' (coming soon), or the sale wording with its variants. */
-let saleCopy = '';
+/** The server sent this page as on sale (routes.ts: Pro is on sale to everyone). */
+const serverSale = document.getElementById('pp-open')?.classList.contains('on-sale') ?? false;
+/**
+ * /api/pro did not answer: fetchPro then gives a bare state with neither the
+ * coming-soon plans nor an offer, and the server always sends the plans.
+ */
+const loadFailed = (): boolean => !state?.offer && !state?.soon;
+/** Which wording is on the page now: '' (coming soon), or the sale wording with its variants; null until the first paint settles it. */
+let saleCopy: string | null = null;
 
 /** Moyasar's form is the checkout here, rather than its hosted page. */
 const formCheckout = (): boolean => state?.offer?.checkout === 'form';
@@ -135,11 +133,16 @@ function setSaleCopy(on: boolean): void {
   if (want === saleCopy) return;
   saleCopy = want;
   for (const [el, soon, sale] of SALE_COPY) {
-    const key = !on ? soon : (renewOffered() && RENEW_COPY[sale]) || (formCheckout() && FORM_COPY[sale]) || sale;
-    el.setAttribute('data-i18n', key);
+    el.setAttribute('data-i18n', on ? saleKey(sale, { form: formCheckout(), renew: renewOffered() }) : soon);
   }
-  const refund = document.getElementById('pp-faq-refund');
-  if (refund) refund.hidden = !on;
+  // The price first, how it works after it (proPage.css), and the questions only a buyer asks.
+  document.getElementById('pp-open')?.classList.toggle('on-sale', on);
+  // One blue button: while Pro is to buy here, the header's "Sign up" goes quiet (proPage.css).
+  document.body.classList.toggle('pp-selling', on);
+  for (const id of ['pp-faq-refund', 'pp-faq-who']) {
+    const q = document.getElementById(id);
+    if (q) q.hidden = !on;
+  }
   applyDom(document);
 }
 
@@ -163,7 +166,17 @@ function buyHtml(): string {
   const renew = !!held && Date.parse(held.endsAt) - Date.now() <= RENEW_MS;
   const founder = state?.signedIn ? founderOpen() : null;
   let act = '';
-  if (!state?.signedIn) act = `<button type="button" class="pp-btn" data-act="buy-signin">${escapeHtml(t('pb.signin'))}</button>`;
+  // Signed out: the same button with the price on it. It opens sign-up (most visitors from a link have no
+  // account), and once signed in the page carries on to the payment by itself (wireBuy).
+  if (!state?.signedIn) {
+    act = `<button type="button" class="pp-btn" data-act="buy-signin">${escapeHtml(tv('pb.buy', { price }))}</button>` +
+      `<p class="pb-note" id="pb-signin-note">${escapeHtml(t('pb.signin.note'))}</p>`;
+  }
+  // An email not verified yet: the server would refuse the press, so the page says it first, with the way to do it.
+  else if (state.emailVerified === false) {
+    act = `<p class="pb-note" id="pb-verify">${escapeHtml(t('pb.verify.note'))}</p>` +
+      `<a class="pp-btn" data-act="verify" href="${escapeHtml(localPath('/account'))}">${escapeHtml(t('pb.verify.btn'))}</a>`;
+  }
   // Holding Pro for longer than a week: come back in its last week. A founder's offer has a deadline, so they may buy now.
   else if (held && !renew && !founder) act = `<p class="pb-note">${escapeHtml(tv('pb.err.held', { date: whenDay(held.endsAt) }))}</p>`;
   else {
@@ -197,6 +210,12 @@ function buyHtml(): string {
     `<div class="pb-form" id="pb-form" hidden></div>` +
     `<p class="pb-msg" id="pb-msg" role="status" aria-live="polite">${msg}</p>` +
     `<p class="ps-private">${escapeHtml(t(formCheckout() ? 'pf.methods' : 'pb.methods'))}</p>` +
+    // The refund promise, and the terms and a contact a tap away: both are sections of /legal, which holds both languages.
+    `<div class="pb-trust"><b>${escapeHtml(t('pb.trust.refund'))}</b>` +
+    `<ul class="pb-links" aria-label="${escapeHtml(t('pb.trust.links'))}">` +
+    `<li><a href="${escapeHtml(localPath('/legal'))}#${getLang() === 'ar' ? 'terms-ar' : 'terms'}">${escapeHtml(t('pb.trust.terms'))}</a></li>` +
+    `<li><a href="${escapeHtml(localPath('/legal'))}#${getLang() === 'ar' ? 'about-ar' : 'about'}">${escapeHtml(t('pb.trust.contact'))}</a></li>` +
+    `</ul></div>` +
     `</div>`
   );
 }
@@ -215,7 +234,15 @@ function sayBuy(m: { key: string; vars?: Record<string, string> } | null): void 
 function wireBuy(): void {
   const box = document.getElementById('pb-buy');
   if (!box) return;
-  box.querySelector('[data-act="buy-signin"]')?.addEventListener('click', () => void signIn());
+  box.querySelector('[data-act="buy-signin"]')?.addEventListener('click', async () => {
+    if (!(await signIn('signup'))) return;
+    // Signed in. They pressed "Get Pro for SAR ..." with the price on it, so the page carries on to the
+    // payment without a second press, when this account can buy now. Otherwise the next step has the
+    // focus: the email to verify, or the note saying they already hold Pro.
+    const next = document.querySelector<HTMLElement>('#pb-buy [data-act="buy"], #pb-buy [data-act="verify"]');
+    next?.focus();
+    if (next?.dataset.act === 'buy' && !monthHeld()) next.click();
+  });
   const btn = box.querySelector<HTMLButtonElement>('[data-act="buy"]');
   btn?.addEventListener('click', async () => {
     btn.disabled = true;
@@ -482,8 +509,9 @@ const PERK_ROWS = ['pp.row.mark', 'pp.row.video', 'pp.row.poster', 'pp.row.style
  * server/src/proPlan PHOTO_ON_PRO) is not something Pro adds, so neither card
  * lists it.
  */
-function rowsFor(lim: { free: PlanLimits; pro: PlanLimits } | undefined): AllowanceKind[] {
-  return ROWS.filter((k) => JSON.stringify(lim?.pro[k] ?? null) !== JSON.stringify(lim?.free[k] ?? null));
+function rowsFor(lim: { free: PlanLimits; pro: PlanLimits } | undefined, unlisted: AllowanceKind[] = []): AllowanceKind[] {
+  // And not a kind the server says not to list (server/src/proPlan UNLISTED: the smart cut-out, 19 Nov 2026).
+  return ROWS.filter((k) => !unlisted.includes(k) && JSON.stringify(lim?.pro[k] ?? null) !== JSON.stringify(lim?.free[k] ?? null));
 }
 
 function planCard(o: { id: string; name: string; head: string; limits: PlanLimits | undefined; pro: boolean; rows: AllowanceKind[] }): string {
@@ -638,7 +666,20 @@ function paintPlans(kept: { amount: string; comment: string } | null): void {
   const st = state;
   const lim = st?.soon?.limits ?? st?.offer?.limits;
   const days = st?.soon?.monthly.days ?? st?.offer?.monthly.days ?? 30;
-  const rows = rowsFor(lim);
+  const rows = rowsFor(lim, st?.soon?.unlisted ?? st?.offer?.unlisted);
+  // The cut-out's own question goes with its row.
+  const cutFaq = document.getElementById('pp-faq-cutout');
+  if (cutFaq) cutFaq.hidden = !rows.includes('cutout');
+  // The server sent the page as on sale and /api/pro then did not answer: the price is not known, and
+  // the page does not fall back to asking what Pro is worth. It says so, with a way to try again.
+  if (loadFailed() && serverSale) {
+    setSaleCopy(true);
+    $('pp-plans').innerHTML =
+      `<div class="pp-act" id="pp-load-failed"><p class="pp-act-note" role="alert">${escapeHtml(t('pb.err.load'))}</p>` +
+      `<div class="pp-act-row"><button type="button" class="pp-btn" data-act="reload">${escapeHtml(t('common.retry'))}</button></div></div>`;
+    $('pp-plans').querySelector('[data-act="reload"]')?.addEventListener('click', () => void load(true));
+    return;
+  }
   const sale = onSale();
   setSaleCopy(sale);
   $('pp-plans').innerHTML =
@@ -666,7 +707,9 @@ function paint(): void {
   paintPaid();
   const count = $('ps-count');
   // The count is about the price question, which steps aside once Pro is on sale.
-  count.hidden = answered < SHOW_COUNT_FROM || onSale();
+  // (Nor is it shown when the server sent the page as on sale and the price then failed to load.)
+  const selling = onSale() || (loadFailed() && serverSale);
+  count.hidden = answered < SHOW_COUNT_FROM || selling;
   count.textContent = count.hidden ? '' : tv('ps.count', { n: answered });
 
   // Someone in the preview: a pass running, a gift waiting, or neither.
@@ -690,7 +733,7 @@ function paint(): void {
   const msg = $('pp-msg');
   msg.textContent = '';
   // On sale, buying is in the Pro column: this row only keeps a gift waiting to be started.
-  if (onSale()) {
+  if (selling) {
     act.hidden = !(st?.live && st.gift?.state === 'offered');
     if (act.hidden) return;
   }
@@ -756,11 +799,13 @@ async function refreshAuth(): Promise<void> {
   }
 }
 
-async function signIn(): Promise<void> {
+/** The sign-in dialog. True once signed in, with the page painted again for the account. */
+async function signIn(startOn: 'signin' | 'signup' = 'signin'): Promise<boolean> {
   const { openAuthModal } = await import('./ui/authModal');
-  if (!(await openAuthModal(true, 'signin'))) return;
+  if (!(await openAuthModal(true, startOn))) return false;
   await refreshAuth();
   await load(true);
+  return true;
 }
 
 // ------------------------------------------------------------------ boot ---

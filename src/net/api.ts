@@ -2021,6 +2021,8 @@ export type PlanLimits = Record<AllowanceKind, { period: 'day' | 'week' | 'month
 export interface ProOffer {
   /** What Free and Pro allow, from the server's settings (for the Pro page's table). */
   limits?: { free: PlanLimits; pro: PlanLimits };
+  /** Kinds Pro gives more of that the page and the sheets do not list (server/src/proPlan.ts UNLISTED). */
+  unlisted?: AllowanceKind[];
   currency: string;
   /** The one plan: a month of Pro. */
   monthly: { price: number; days: number };
@@ -2060,6 +2062,8 @@ export interface FounderState {
  */
 export interface ProSoon {
   limits: { free: PlanLimits; pro: PlanLimits };
+  /** Kinds the page does not list (server/src/proPlan.ts UNLISTED). */
+  unlisted?: AllowanceKind[];
   monthly: { days: number };
   gift: { days: number };
 }

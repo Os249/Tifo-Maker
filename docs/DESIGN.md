@@ -294,6 +294,16 @@ One title, one sentence, one blue action, at most one quiet alternative.
 - **The credit line** (`ui/creditLine.ts`) is the fan's own handle, small,
   in a bottom corner of every export, on a dark pill with a hairline; the
   site's mark keeps the bottom right, an Arabic credit reads right to left.
+- **/pro on sale** (19 Nov 2026): once Pro is on sale to everyone the server
+  sends the page already saying so (`ui/proSaleCopy.ts` is the one list of
+  swapped words; `routes.ts` adds the title, description and link card and
+  drops `noindex`), so nobody sees "coming soon" first. The lead says what
+  TifoMaker is and that it stays free; the price card comes straight under
+  it and "how it works" after the plans (`#pp-open.on-sale`). Under the one
+  blue button: the methods by name, the 7-day refund line, and links to the
+  terms and a contact. The price is never in the HTML: it is `/api/pro`'s.
+  A perk that is not working comes off the page through `UNLISTED` in
+  `server/src/proPlan.ts`, never by editing the page.
 - **One plan** (31 Oct 2026): Free against Pro, SAR 19.99 for 30 days (SAR 13.99 while the launch price runs: docs/pro-launch.md), and a
   7-day gift that waits until it is started. Every new Pro item gets the
   crown where it is picked, is free to try, meets the export sheet at

@@ -83,6 +83,7 @@ import {
 import { deriveUsername } from '../../src/core/handle';
 import { escapeHtml } from '../../src/core/escape';
 import { pathIn } from '../../src/core/langPath';
+import { SALE_KEYS, saleKey } from '../../src/ui/proSaleCopy';
 import { alternateLinks, checkPageText, formatCount, groundName, ogLocale, pageFile, pageText, routeIn, type PageLang } from './pageLang';
 import {
   describeProviderError,
@@ -5074,12 +5075,12 @@ export async function buildApp(
      * search engines (hreflang en, ar and x-default, and og:locale:alternate),
      * and its canonical is itself, so each language is indexed as its own page.
      */
-    type Card = { title: string; description: string; path: string; image?: string; alt?: string; lang?: PageLang; enPath?: string };
+    type Card = { title: string; description: string; path: string; image?: string; /** A picture of the site's own, by its path. */ imagePath?: string; alt?: string; lang?: PageLang; enPath?: string };
     const cardTags = (req: FastifyRequest, o: Card): string => {
       const base = origin(req);
       const lang = o.lang ?? 'en';
       const url = `${base}${o.path}`;
-      const img = o.image ?? `${base}${CARD_PATH}`;
+      const img = o.image ?? `${base}${o.imagePath ?? CARD_PATH}`;
       const alt = o.alt ?? pageText('meta.card.alt', lang);
       const twins = o.enPath !== undefined;
       return [
@@ -5677,13 +5678,39 @@ export async function buildApp(
     // worth instead (proPrice.ts). noindex in its own <head> and not in the
     // sitemap until Pro opens. The page reads /api/pro, which in preview says
     // nothing about who is on the list.
+    //
+    // Once Pro is on sale to everyone (a live key, PRO_MODE=on) the page is sent already saying so (19 Nov
+    // 2026): the on-sale words in place of the coming-soon ones, so a visitor from a link never sees "coming
+    // soon" before the page's script has asked /api/pro; no noindex; and a title, a description and a link
+    // card, because no crawler runs the script that would have set them. Which words is ui/proSaleCopy.ts,
+    // the same list the page swaps by. The price is never in the HTML: it is /api/pro's to say.
     try {
       const proHtml = readFileSync(join(staticDir, 'pro.html'), 'utf8');
-      for (const [lang, page] of pagesOf('pro.html', proHtml)) {
+      const how = { form: proOnSale && payService?.checkoutKind() === 'form', renew: proOnSale && !!payService?.renewOn() };
+      const saleHtml = (html: string, lang: PageLang): string => {
+        let out = html
+          .replace(/\s*<!--[^>]*-->\s*(?=<meta name="robots")/, '\n  ')
+          .replace(/<meta name="robots" content="noindex"\s*\/?>\s*/, '')
+          .replace(/<div id="pp-open">/, '<div id="pp-open" class="on-sale">')
+          .replace(/<body>/, '<body class="pp-selling">')
+          .replace(/(<details id="pp-faq-(?:refund|who)") hidden>/g, '$1>');
+        for (const [soon, sale] of SALE_KEYS) {
+          const key = saleKey(sale, how);
+          const at = new RegExp(`data-i18n="${soon.replace(/\./g, '\\.')}">[^<]*<`);
+          out = out.replace(at, () => `data-i18n="${key}">${esc(pageText(key, lang))}<`);
+        }
+        return out;
+      };
+      for (const [lang, raw] of pagesOf('pro.html', proHtml, proOnSale ? '/pro' : undefined)) {
+        const page = proOnSale ? saleHtml(raw, lang) : raw;
+        const shell = proOnSale
+          ? htmlShell(routeIn('/pro', lang), page, { title: pageText('meta.pro.sale.title', lang), description: pageText('meta.pro.desc', lang), imagePath: '/pro/og-pro.png', alt: pageText('meta.pro.card.alt', lang), enPath: '/pro', lang })
+          : null;
         app.get(routeIn('/pro', lang), async (req, reply) => {
           // Moyasar's payment form (payments v2), and only on this page, and only while
           // the form is the checkout: see proFormCsp above the security headers.
           if (payService?.on() && payService.checkoutKind() === 'form') void reply.header('content-security-policy', proFormCsp(payService.status().methods));
+          if (shell) return shell(req, reply);
           return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/pro', lang, false));
         });
       }
@@ -5732,6 +5759,8 @@ export async function buildApp(
         ['/clubs', 'monthly', '0.6'],
         ['/tifo-spec', 'yearly', '0.4'],
         ['/legal', 'yearly', '0.3'],
+        // Only once Pro is on sale to everyone: until then /pro is noindex.
+        ...(proOnSale ? [['/pro', 'weekly', '0.7'] as [string, string, string]] : []),
       ];
       let designs: { id: string; updatedAt: string }[] = [];
       try {

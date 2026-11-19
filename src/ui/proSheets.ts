@@ -80,7 +80,10 @@ const GIFT_PERKS = [
 function perksOf(keys: string[], st?: ProState | null): string[] {
   const lim = st?.offer?.limits;
   const more = (k: 'std' | 'critique' | 'photo'): boolean => !lim || JSON.stringify(lim.pro[k]) !== JSON.stringify(lim.free[k]);
+  // A kind the server says not to list (server/src/proPlan.ts UNLISTED: the smart cut-out, 19 Nov 2026).
+  const unlisted = st?.offer?.unlisted ?? st?.soon?.unlisted ?? [];
   return keys.flatMap((k) => {
+    if (k === 'pro.perk.cutout') return unlisted.includes('cutout') ? [] : [k];
     if (k === 'pro.perk.ai' || k === 'pro.perk.noLimits') return more('std') ? [k] : [];
     if (k !== 'pro.perk.polish') return [k];
     // The line is AI Critique's now (it took Polish's place, 18 Nov 2026); its key keeps the old name.
