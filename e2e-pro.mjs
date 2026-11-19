@@ -173,7 +173,7 @@ console.log('\n— an account on the preview list —');
   // The AI tab opens on its two doors (ui/aiDrawer.ts, loaded when the tab is opened): this suite is about the designer.
   await p.waitForFunction(() => ['ai-open-create', 'ai-prompt'].some((id) => document.getElementById(id)?.getClientRects().length), null, { timeout: 15000 }).catch(() => {});
   await p.evaluate(() => { const b = document.getElementById('ai-open-create'); if (b && b.getClientRects().length) b.click(); });
-  check('AI panel: the day\'s designs, counted', await waitFor(p, () => /^10 of 10 designs left today$/.test(document.getElementById('ai-quota')?.textContent || '')));
+  check('AI panel: the day\'s designs, counted', await waitFor(p, () => /^3 of 3 designs left today$/.test(document.getElementById('ai-quota')?.textContent || '')));
   // Whole stadium is the only AI path since 29 Oct 2026 (2e3d8f9): its box,
   // and the week's Super count and crown beside it, are gone, and the panel's
   // designs are metered as AI designs (one allowance since 31 Oct).
@@ -280,7 +280,7 @@ console.log('\n— an account on the preview list —');
   check('…Free: always free, none of Pro\'s perks, and a cut-out a week only while the cut-out is listed', /1 a week/.test(pp.free) === CUTOUT_LISTED && /Always free/.test(pp.free), pp.free.slice(0, 300));
   // The smart cut-out is given but not advertised while it is on proPlan's UNLISTED: no row, and its question goes too.
   check(`…the smart cut-out is ${CUTOUT_LISTED ? 'listed' : 'not listed, and neither is its question'} (proPlan UNLISTED)`, /Smart cut-out/.test(pp.pro + pp.free) === CUTOUT_LISTED && (await p.evaluate(() => !document.getElementById('pp-faq-cutout')?.hidden)) === CUTOUT_LISTED);
-  if (AI_ON_PRO) check('…AI designs and AI reviews rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /AI reviews/.test(pp.pro) && !/Polish/.test(pp.pro));
+  if (AI_ON_PRO) check('…AI designs and AI reviews rows: Free 3 a day and 40 a month with a review a day, Pro 15 and 70', /AI designs \(whole stadium\)3 a day40 a month/.test(pp.free) && /AI reviews of your tifo1 a day(?!\d)/.test(pp.free) && !/a week/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /AI reviews/.test(pp.pro) && !/Polish/.test(pp.pro));
   else check('…no AI designs or AI reviews rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|AI reviews|Polish/.test(pp.pro + pp.free));
   check('…no Match Pass, Season Pass or group band', !/Match Pass|Season Pass/.test(pp.pro + pp.free) && !pp.group);
   await p.setViewportSize({ width: 390, height: 844 });

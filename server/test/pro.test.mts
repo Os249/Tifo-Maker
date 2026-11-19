@@ -104,7 +104,8 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   assert.equal(periodKey('month', new Date('2026-10-31T21:00:00Z')), 'm:2026-11', 'and a month too');
   assert.equal(periodEnd('month', new Date('2026-12-15T00:00:00Z')).toISOString(), '2026-12-31T21:00:00.000Z');
   // The numbers the plan promises, read from the one settings file.
-  assert.deepEqual(FREE_WINDOWS.std, [{ period: 'day', limit: 10 }, { period: 'month', limit: 40 }], 'free: 10 designs a day, 40 a month');
+  assert.deepEqual(FREE_WINDOWS.std, [{ period: 'day', limit: 3 }, { period: 'month', limit: 40 }], 'free: 3 designs a day, 40 a month');
+  assert.deepEqual(FREE_WINDOWS.critique, [{ period: 'day', limit: 1 }], 'free: one review a day, and no ceiling by the week or the month');
   assert.deepEqual(FREE_WINDOWS.polish, [{ period: 'week', limit: 3 }]);
   assert.deepEqual(FREE_WINDOWS.photo, [{ period: 'week', limit: 2 }]);
   assert.equal(FREE_WINDOWS.cutout[0].limit, 1);
@@ -407,7 +408,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(mine.live, true);
   assert.equal(mine.plan, 'free');
   assert.equal(mine.allowances.super, undefined, 'no Super allowance');
-  assert.equal(mine.allowances.std.limit, 10);
+  assert.equal(mine.allowances.std.limit, FREE_WINDOWS.std[0].limit);
   assert.equal(mine.allowances.std.period, 'day');
   assert.equal(mine.gift.state, 'offered', 'a verified account with a saved design is offered the gift');
   assert.equal(mine.gift.claimBy, undefined, 'and it has no date to claim it by');
@@ -600,7 +601,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
     // The quota route speaks the new allowances.
     const q = (await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(fan.token) })).json() as Record<string, any>;
     assert.equal(q.live, true);
-    assert.equal(q.allowances.std.limit, 10);
+    assert.equal(q.allowances.std.limit, FREE_WINDOWS.std[0].limit);
     assert.equal(q.allowances.std.period, 'day');
     assert.equal(q.allowances.super, undefined, 'no Super allowance');
 
@@ -612,7 +613,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
     assert.equal((await proRepo.used(fan.id, 'super' as never, [periodKey('week', new Date())]))[0], 0, 'and mode: "super" spends no allowance of its own');
 
     // Used up: refused before any model is asked, with what the card needs.
-    await proRepo.take(fan.id, 'std', [{ key: periodKey('day', new Date()), limit: 10 }], 10);
+    await proRepo.take(fan.id, 'std', [{ key: periodKey('day', new Date()), limit: FREE_WINDOWS.std[0].limit }], FREE_WINDOWS.std[0].limit);
     const before = providerCalls;
     const out = (await gen('std')).json() as Record<string, any>;
     assert.equal(out.needsChoice, true);

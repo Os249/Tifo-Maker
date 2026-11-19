@@ -97,7 +97,7 @@ console.log('— signed out: the panel is all there, and says the one step —')
   await p.waitForTimeout(700);
   check('the AI tab opens on the two doors', await visible(p, '#ai-home') && await visible(p, '#ai-door-create') && await visible(p, '#ai-door-review') && !(await visible(p, '#ai-prompt')));
   check('each door says what it does to the tifo', /Replaces what is on the stands/.test(await text(p, '#ai-door-create')) && /stays as it is until you press Apply/.test(await text(p, '#ai-door-review')));
-  check('the one step is said: sign in', /Sign in to use the AI tools/.test(await text(p, '#ai-gate')) && /3 reviews/.test(await text(p, '#ai-gate')), await text(p, '#ai-gate'));
+  check('the one step is said: sign in', /Sign in to use the AI tools/.test(await text(p, '#ai-gate')) && /a review of your tifo every day/.test(await text(p, '#ai-gate')), await text(p, '#ai-gate'));
   check('the review is held back, Create still signs a visitor up', await p.evaluate(() => document.querySelector('#ai-open-review').disabled && !document.querySelector('#ai-open-create').disabled));
   const blue = await p.evaluate(() => [...document.querySelectorAll('#ai-home button.primary')].filter((b) => b.getClientRects().length).length);
   check('one blue button in the drawer', blue === 1, String(blue));

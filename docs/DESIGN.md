@@ -273,7 +273,7 @@ One title, one sentence, one blue action, at most one quiet alternative.
 - **/pro shows pictures** (`pro.html` "What Pro makes", files in
   `public/pro`): every one a real export of one design, the free video
   beside the Pro film. When a tool's output changes, make them again.
-- **The limit card**: what ran out ("That's all 10 designs for today"),
+- **The limit card**: what ran out ("That's all 3 designs for today"),
   when it comes back ("on Sunday (in 2 days)"), one blue way on (the gift
   when there is one, else "See what Pro adds") and one quiet alternative
   (the Quick Designer).

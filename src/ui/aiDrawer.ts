@@ -381,7 +381,9 @@ export function mountAiDrawer(deps: AiDrawerDeps): AiDrawerHandle {
     }
     root.classList.toggle('ai-locked', !!gate);
     if (!gate) return;
-    const reviews = limits?.free.critique[0]?.limit ?? 3;
+    // What a free account's reviews are, in the server's own numbers: "a review of your tifo every day".
+    const w = limits?.free.critique[0] ?? { period: 'day', limit: 1 };
+    const reviews = w.period === 'day' && w.limit === 1 ? t('ai.gate.reviews.day1') : tv(w.period === 'day' ? 'ai.gate.reviews.day' : 'ai.gate.reviews.week', { n: w.limit });
     host.append(gate === 'signin'
       ? card('info', t('ai.gate.signin.title'), tv('ai.gate.signin.body', { reviews }), [
           { label: t('ai.gate.signin.go'), primary: true, run: () => { void openAuthModal().then(() => void load()); } },

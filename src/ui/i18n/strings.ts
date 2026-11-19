@@ -2854,7 +2854,11 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ai.count.unlimited': { en: 'Unlimited', ar: 'بلا حدود' },
   'ai.count.messages': { en: 'Messages: {count}', ar: 'الرسائل: {count}' },
   'ai.gate.signin.title': { en: 'Sign in to use the AI tools', ar: 'سجّل دخولك وتنفتح لك أدوات الذكاء' },
-  'ai.gate.signin.body': { en: 'An account is free: AI designs, and {reviews} reviews of your tifo a week.', ar: 'الحساب مجاني: تصاميم بالذكاء، و{reviews} مراجعات لتيفوك بالأسبوع.' },
+  // {reviews} is one of the three lines below, by what the server says a free account gets (proPlan FREE_WINDOWS).
+  'ai.gate.signin.body': { en: 'An account is free: AI designs, and {reviews}.', ar: 'الحساب مجاني: تصاميم بالذكاء، و{reviews}.' },
+  'ai.gate.reviews.day1': { en: 'a review of your tifo every day', ar: 'مراجعة لتيفوك كل يوم' },
+  'ai.gate.reviews.day': { en: '{n} reviews of your tifo a day', ar: '{n} مراجعات لتيفوك باليوم' },
+  'ai.gate.reviews.week': { en: '{n} reviews of your tifo a week', ar: '{n} مراجعات لتيفوك بالأسبوع' },
   'ai.gate.signin.go': { en: 'Sign in', ar: 'سجّل الدخول' },
   'ai.gate.signin.new': { en: 'Create an account', ar: 'سوّ حساب جديد' },
   'ai.gate.verify.title': { en: 'One step left: verify your email', ar: 'باقي خطوة وحدة: وثّق بريدك' },

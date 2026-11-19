@@ -69,16 +69,21 @@ export interface Window {
 
 /**
  * What a free account gets. Only delivered results count (see aiRoutes).
- * The month's ceiling keeps a heavy free account below what Pro gives (at
- * 10 a day, a month could otherwise hold 300 designs, more than Pro's 70).
+ *
+ * AI designs: 3 a day, 40 a month (Osamh's decision, 20 Nov 2026, the day Pro
+ * went on sale; it was 10 a day). At 10 a day against Pro's 15, the day's
+ * difference was not worth paying for; at 3 against 15 it is. The month's 40
+ * stays, so a fan who designs a few times a week loses nothing.
+ *
+ * AI reviews: one a day, with no week's or month's ceiling (the same day; it
+ * was 3 a week). A review every day, where Pro gives 6 a day.
  */
 export const FREE_WINDOWS: Record<AllowanceKind, Window[]> = {
-  std: [{ period: 'day', limit: 10 }, { period: 'month', limit: 40 }],
+  std: [{ period: 'day', limit: 3 }, { period: 'month', limit: 40 }],
   polish: [{ period: 'week', limit: 3 }],
   photo: [{ period: 'week', limit: 2 }],
   cutout: [{ period: 'week', limit: 1 }],
-  // What Polish gave, so nothing is taken away: at most about 13 a month.
-  critique: [{ period: 'week', limit: 3 }],
+  critique: [{ period: 'day', limit: 1 }],
   chat: [{ period: 'week', limit: 20 }],
 };
 

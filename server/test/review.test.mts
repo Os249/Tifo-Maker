@@ -131,7 +131,7 @@ const GOOD_ANSWER = {
   const cm = chatMessage({ design: 'D', lang: 'en', turns: [{ role: 'user', text: 'q' }, { role: 'ai', text: 'a' }], message: 'stronger' });
   ok(cm.includes('  user: q\n  you: a') && cm.endsWith('user: stronger'), 'the chat message carries the last turns and ends on the question');
   ok(REVIEW_SYSTEM.length > 2500 && JSON.stringify(REVIEW_SCHEMA).includes('"text.outline"'), 'the instructions and the schema are there');
-  eq(FREE_WINDOWS.critique, [{ period: 'week', limit: 3 }], 'free: 3 reviews a week');
+  eq(FREE_WINDOWS.critique, [{ period: 'day', limit: 1 }], 'free: one review a day, with no week or month ceiling');
   eq(FREE_WINDOWS.chat, [{ period: 'week', limit: 20 }], 'free: 20 messages a week');
   eq(PLAN_WINDOWS.monthly.critique, [{ period: 'day', limit: 6 }, { period: 'cycle', limit: 40 }], 'Pro: 6 a day, 40 a month');
   eq(PLAN_WINDOWS.monthly.chat, [{ period: 'day', limit: 40 }, { period: 'cycle', limit: 300 }], 'Pro: 40 a day, 300 a month');
@@ -170,6 +170,8 @@ const GOOD_ANSWER = {
     await auth.markEmailVerified(fan.id);
     const fresh = await reg(app, 'fresh_review');
     const week = periodKey('week', new Date());
+    // Reviews are counted by the day (one a day on the free plan); messages by the week.
+    const day = periodKey('day', new Date());
     const used = async (kind: 'critique' | 'chat' | 'std', key = week): Promise<number> => (await proRepo.used(fan.id, kind, [key]))[0];
     const body = { design: 'project: "Final"\npalette: 0 #262a33 | 1 #8cc8f5', lang: 'ar', ctx: CTX };
     const review = (token: string | null, extra: Record<string, unknown> = {}) =>
@@ -186,12 +188,13 @@ const GOOD_ANSWER = {
     eq((await chat(null)).statusCode, 401, 'chat too');
     eq(calls.length, 0, 'and no model is asked for either');
     const qOut = (await quota()).json() as Record<string, any>;
-    eq(qOut.limits.free.critique, [{ period: 'week', limit: 3 }], 'signed out, the panel is still told what an account gets');
+    eq(qOut.limits.free.critique, [{ period: 'day', limit: 1 }], 'signed out, the panel is still told what an account gets');
+    eq(qOut.limits.free.std, [{ period: 'day', limit: 3 }, { period: 'month', limit: 40 }], 'and its designs: 3 a day, 40 a month');
     eq(qOut.limits.pro.critique, [{ period: 'day', limit: 6 }, { period: 'month', limit: 40 }], 'and what Pro adds, with the pass\'s month called a month');
 
     // The counters exist for an account Pro is switched off for.
     const q0 = (await quota(fan.token)).json() as Record<string, any>;
-    eq([q0.review.plan, q0.review.critique.remaining, q0.review.critique.limit, q0.review.critique.period], ['free', 3, 3, 'week'], 'reviews: 3 of 3 this week');
+    eq([q0.review.plan, q0.review.critique.remaining, q0.review.critique.limit, q0.review.critique.period], ['free', 1, 1, 'day'], 'reviews: 1 of 1 today');
     eq([q0.review.chat.remaining, q0.review.chat.limit], [20, 20], 'messages: 20 of 20');
     ok(Date.parse(q0.review.critique.resetAt) > Date.now(), 'with when they come back');
     eq(q0.live, undefined, 'Pro itself is still off for the account');
@@ -202,14 +205,14 @@ const GOOD_ANSWER = {
     eq((await review(fan.token, { image: 'data:image/png;base64,AAAA' })).statusCode, 400, 'a picture that is not one: refused');
     eq((await review(fan.token, { image: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' })).statusCode, 400, 'an SVG: refused');
     eq(calls.length, 0, 'none of those reached the model');
-    eq(await used('critique'), 0, 'or the counter');
+    eq(await used('critique', day), 0, 'or the counter');
 
     // A review.
     const r = await review(fan.token, { image: pngUrl(), intent: 'for the final' });
     eq(r.statusCode, 200, r.body);
     const rj = r.json() as Record<string, any>;
     eq(rj.fixes.map((f: { op: { type: string } }) => f.op.type), ['text.setCase', 'object.fitToStand'], 'the fixes that survive the check');
-    eq([rj.counted, rj.review.critique.remaining, rj.review.chat.remaining], [true, 2, 20], 'counted as one review, and only as a review');
+    eq([rj.counted, rj.review.critique.remaining, rj.review.chat.remaining], [true, 0, 20], 'counted as the day\'s one review, and only as a review');
     eq(r.headers['cache-control'], 'no-store', 'never cached');
     eq(calls.length, 1, 'one call');
     const sent = calls[0];
@@ -230,7 +233,7 @@ const GOOD_ANSWER = {
     const c = await chat(fan.token, { history: [{ role: 'user', text: 'why is it hard to read?' }, { role: 'ai', text: 'Low contrast.' }], fixes: '1 text.setCase t1 applied' });
     eq(c.statusCode, 200, c.body);
     const cj = c.json() as Record<string, any>;
-    eq([cj.reply, cj.review.chat.remaining, cj.review.critique.remaining], ['Try two lines.', 19, 2], 'a reply, counted as a message and not as a review');
+    eq([cj.reply, cj.review.chat.remaining, cj.review.critique.remaining], ['Try two lines.', 19, 0], 'a reply, counted as a message and not as a review');
     ok(cj.fixes.some((f: { op: { type: string } }) => f.op.type === 'text.setText'), 'with the wording change it was asked for');
     ok(/haiku/.test(calls[0].model), `on the small model (${calls[0].model})`);
     ok(typeof calls[0].messages[0].content === 'string' && calls[0].messages[0].content.includes('fixes so far: 1 text.setCase t1 applied') && calls[0].messages[0].content.includes('  you: Low contrast.'), 'with the last turns and no picture');
@@ -240,28 +243,30 @@ const GOOD_ANSWER = {
     eq((await chat(fan.token, { message: '   ' })).statusCode, 400, 'an empty message is refused');
     eq(await used('chat'), 1, 'neither was counted');
 
-    // Not delivered: not counted.
+    // Not delivered: not counted. (The day's one review is put back first, as tomorrow would: the
+    // checks below are about a review that is there to be spent.)
+    await proRepo.give(fan.id, 'critique', [day], 1);
     calls = [];
     next = { status: 529 };
     const busy = await review(fan.token);
-    eq([busy.statusCode, busy.json().reason, busy.json().review.critique.remaining], [503, 'busy', 2], 'a busy model: said so, and the review handed back');
+    eq([busy.statusCode, busy.json().reason, busy.json().review.critique.remaining], [503, 'busy', 1], 'a busy model: said so, and the review handed back');
     ok(!/overloaded|anthropic|sonnet/i.test(busy.body), 'without the provider\'s words');
     next = { status: 200, answer: { nonsense: true } };
     const garbled = await review(fan.token);
-    eq([garbled.statusCode, garbled.json().review.critique.remaining], [503, 2], 'an answer with nothing in it: the same');
+    eq([garbled.statusCode, garbled.json().review.critique.remaining], [503, 1], 'an answer with nothing in it: the same');
     next = { status: 200, answer: { intent: { summary: '', sure: false, question: 'What are you trying to show?' }, reply: null, fixes: [], ideas: [] } };
     const askedBack = await review(fan.token);
-    eq([askedBack.statusCode, askedBack.json().counted, askedBack.json().intent.question, askedBack.json().review.critique.remaining], [200, false, 'What are you trying to show?', 2], 'a review that could only ask a question is answered and not counted');
-    eq(await used('critique'), 1, 'one review on the counter after all of that');
+    eq([askedBack.statusCode, askedBack.json().counted, askedBack.json().intent.question, askedBack.json().review.critique.remaining], [200, false, 'What are you trying to show?', 1], 'a review that could only ask a question is answered and not counted');
+    eq(await used('critique', day), 0, 'nothing on the counter after all of that');
 
     // Used up: refused before the model, with what the card needs. Create is untouched.
     next = { status: 200, answer: GOOD_ANSWER };
-    await review(fan.token);
-    await review(fan.token);
+    eq((await review(fan.token)).statusCode, 200, 'the day\'s one review');
     calls = [];
     const over = await review(fan.token);
     const oj = over.json() as Record<string, any>;
-    eq([over.statusCode, oj.reason, oj.kind, oj.plan, oj.review.critique.remaining], [429, 'quota', 'critique', 'free', 0], 'the fourth review of the week is refused');
+    eq([over.statusCode, oj.reason, oj.kind, oj.plan, oj.review.critique.remaining, oj.review.critique.period], [429, 'quota', 'critique', 'free', 0, 'day'], 'a second review the same day is refused');
+    ok(Date.parse(oj.review.critique.resetAt) - Date.now() <= 24 * 3600_000, 'and it comes back within a day: no week or month to wait out');
     ok(Date.parse(oj.review.critique.resetAt) > Date.now(), 'with when it comes back');
     eq(calls.length, 0, 'and no model call');
     eq((await chat(fan.token)).statusCode, 200, 'chat still has its own messages');
@@ -274,14 +279,14 @@ const GOOD_ANSWER = {
     // The record: what happened, never what was said.
     const stats = await events.stats(1);
     ok(stats.modes.critique >= 4 && stats.modes.chat >= 20, 'reviews and messages are on the record');
-    ok(stats.modeOutcomes.critique.model === 4 && stats.modeOutcomes.critique.quota === 1, `with their outcomes (${JSON.stringify(stats.modeOutcomes.critique)})`);
+    ok(stats.modeOutcomes.critique.model === 3 && stats.modeOutcomes.critique.quota === 1, `with their outcomes (${JSON.stringify(stats.modeOutcomes.critique)})`);
 
     // No Claude key: says so, counts nothing.
     const noKey = setEnv({ ANTHROPIC_API_KEY: undefined });
     const fan2 = await reg(app, 'fan2_review');
     await auth.markEmailVerified(fan2.id);
     const nk = await review(fan2.token);
-    eq([nk.statusCode, nk.json().reason, nk.json().review.critique.remaining], [503, 'busy', 3], 'no key: not available, nothing counted');
+    eq([nk.statusCode, nk.json().reason, nk.json().review.critique.remaining], [503, 'busy', 1], 'no key: not available, nothing counted');
     noKey();
 
     // Pro switched on: a member's reviews are counted on the pass's ceilings.
