@@ -37,6 +37,16 @@ export interface ProGift {
   passId: string | null;
 }
 
+/** A pass as /admin's Members tab lists it: whose it is, who gave it, how much of Pro it has used. */
+export interface ProMemberPass extends ProPass {
+  /** null when the account has been renamed away or deleted. */
+  username: string | null;
+  /** A pass given by hand: the admin account that gave it, when the admin was signed in. */
+  givenBy: string | null;
+  /** What its months have spent of Pro's allowances (passUse). */
+  used: number;
+}
+
 /** One counter to bump: the stored key of a period and its ceiling. */
 export interface AllowanceSlot {
   key: string;
@@ -128,6 +138,8 @@ export interface ProRepository {
   priceCount(): Promise<number>;
 
   stats(now: Date): Promise<ProStats>;
+  /** Every pass ever given, the newest first, for /admin's Members tab. */
+  members(limit: number): Promise<ProMemberPass[]>;
   /** How much of any allowance one pass's months have used (a refund asks: was Pro used?). */
   passUse(userId: string, passId: string): Promise<number>;
   /** Drop allowance counters nobody has touched for this long. */
@@ -141,6 +153,8 @@ const iso = (d: Date | string | null | undefined): string | null => (d == null ?
 export class MemoryProRepository implements ProRepository {
   private counters = new Map<string, { used: number; at: number }>();
   private passes: ProPass[] = [];
+  /** Who gave each pass that was given by hand (pass id to admin account id). */
+  private givers = new Map<string, string>();
   private gifts = new Map<string, ProGift>();
   private notifies = new Set<string>();
   private prices = new Map<string, PriceAnswer & { userId: string | null; seq: number }>();
@@ -201,6 +215,7 @@ export class MemoryProRepository implements ProRepository {
       revokedAt: null,
     };
     this.passes.push(pass);
+    if (p.createdBy) this.givers.set(pass.id, p.createdBy);
     return pass;
   }
 
@@ -316,6 +331,16 @@ export class MemoryProRepository implements ProRepository {
       passes,
       notify: this.notifies.size,
     };
+  }
+
+  async members(limit: number): Promise<ProMemberPass[]> {
+    const rows = [...this.passes].reverse().slice(0, limit);
+    return Promise.all(rows.map(async (p) => ({
+      ...p,
+      username: this.nameOf(p.userId) || null,
+      givenBy: this.givers.has(p.id) ? this.nameOf(this.givers.get(p.id)!) || null : null,
+      used: await this.passUse(p.userId, p.id),
+    })));
   }
 
   async passUse(userId: string, passId: string): Promise<number> {
@@ -617,6 +642,27 @@ export class PgProRepository implements ProRepository {
       passes,
       notify: Number(n.rows[0]?.n ?? 0),
     };
+  }
+
+  async members(limit: number): Promise<ProMemberPass[]> {
+    // The use is summed the way passUse does it: the pass's own months, keyed 'c:<pass id>:<n>'.
+    const r = await this.pool.query(
+      `SELECT p.id, p.user_id, p.plan, p.starts_at, p.ends_at, p.source, p.created_at, p.revoked_at,
+              u.username, g.username AS given_by,
+              (SELECT COALESCE(sum(a.used), 0)::int FROM pro_allowance a
+                WHERE a.user_id = p.user_id AND a.period LIKE 'c:' || p.id::text || ':%') AS used
+       FROM pro_passes p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN users g ON g.id = p.created_by
+       ORDER BY p.created_at DESC, p.id DESC LIMIT $1`,
+      [limit],
+    );
+    return r.rows.map((x) => ({
+      ...rowToPass(x),
+      username: x.username ? String(x.username) : null,
+      givenBy: x.given_by ? String(x.given_by) : null,
+      used: Number(x.used ?? 0),
+    }));
   }
 
   async passUse(userId: string, passId: string): Promise<number> {

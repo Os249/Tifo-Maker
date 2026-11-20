@@ -291,6 +291,8 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
         kind: o.kind,
         keep: o.keep,
         bonusDays: o.bonusDays,
+        // The pass this order bought: /admin's Members tab says "bought for SAR 13.99" from it.
+        passId: o.passId,
         createdAt: o.createdAt,
         paidAt: o.paidAt,
         refundedAt: o.refundedAt,

@@ -90,6 +90,8 @@ const COUNT_FOR_MS = 60_000;
 
 /** The newest answers /admin lists in full (the summary counts them all; the CSV has every one). */
 const ADMIN_PRICE_ROWS = 300;
+/** Passes /admin's Members tab is sent, the newest first. */
+const ADMIN_MEMBER_ROWS = 2000;
 
 /** The parts of the offer the Pro page shows: Free against Pro, one price, and whether this visitor can buy it. */
 function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false) {
@@ -271,6 +273,27 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       cutoutConfigured: deps.cutoutConfigured(),
       paymentsOpen: deps.paymentsPublic?.() ?? false,
       account,
+    };
+  });
+
+  /**
+   * Everyone who holds Pro or has held it: every pass, the newest first, with
+   * whose it is, how it was got (bought, given by hand, the 7-day gift) and
+   * how much of Pro it has used. Usernames only, never an address. The page
+   * matches a bought pass to its order (/api/admin/pro/orders, passId).
+   */
+  app.get('/api/admin/pro/members', async (req, reply) => {
+    if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+    void reply.header('cache-control', 'no-store');
+    const rows = await pro.repo.members(ADMIN_MEMBER_ROWS);
+    return {
+      now: pro.now().toISOString(),
+      max: ADMIN_MEMBER_ROWS,
+      giftDays: OFFER.gift.days,
+      passes: rows.map((p) => ({
+        id: p.id, username: p.username, plan: p.plan, source: p.source, startsAt: p.startsAt, endsAt: p.endsAt,
+        createdAt: p.createdAt, revokedAt: p.revokedAt, givenBy: p.givenBy, used: p.used,
+      })),
     };
   });
 

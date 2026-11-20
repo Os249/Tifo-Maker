@@ -461,8 +461,10 @@ async function loadAll(){
     api('/api/admin/pro/orders'),
     api('/api/admin/pro/subscriptions'),
     api('/api/admin/pro/refund-requests'),
-    api('/api/admin/pro/launch')
+    api('/api/admin/pro/launch'),
+    api('/api/admin/pro/members')
   ]);
+  MEMBERS = results[15].ok && results[15].data ? results[15].data : { error: results[15].status };
   LAUNCH = results[14].ok && results[14].data ? results[14].data : { error: results[14].status };
   REQS = results[13].ok && results[13].data ? results[13].data : { error: results[13].status };
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
@@ -1139,6 +1141,7 @@ var TABS = [
   { id:'funnel',   label:'What they do' },
   { id:'ai',       label:'AI' },
   { id:'pro',      label:'Pro' },
+  { id:'members',  label:'Members' },
   { id:'events',   label:'Events' },
   { id:'library',  label:'Library' },
   { id:'feedback', label:'Feedback' },
@@ -1178,6 +1181,11 @@ function tabBadge(id){
   if (id === 'traffic'){
     var v = DATA.tr && DATA.tr.totals ? DATA.tr.totals.visits : null;
     return v ? '<span class="pill">' + fmt(v) + '</span>' : '';
+  }
+  if (id === 'members'){
+    if (!MEMBERS || MEMBERS.error) return '';
+    var held = memCounts(memAccounts()).now;
+    return held ? '<span class="pill">' + fmt(held) + '</span>' : '';
   }
   if (id === 'security'){
     var firing = socFiring();
@@ -1791,6 +1799,7 @@ function paintSection(){
   else if (currentTab === 'funnel') html = funnelTab();
   else if (currentTab === 'ai') html = aiTab();
   else if (currentTab === 'pro') html = proTab();
+  else if (currentTab === 'members') html = membersTab();
   else if (currentTab === 'events') html = eventsTab();
   else if (currentTab === 'library') html = libraryTab();
   else if (currentTab === 'feedback') html = feedbackTab();
@@ -1802,6 +1811,7 @@ function paintSection(){
   if (currentTab === 'library') wireLibrary();
   if (currentTab === 'traffic') wireLinkBuilder();
   if (currentTab === 'pro') wirePro();
+  if (currentTab === 'members') wireMembers();
   if (currentTab === 'events') wireEvents();
 }
 
@@ -1879,14 +1889,18 @@ async function proReload(){
     api('/api/admin/pro/orders'),
     api('/api/admin/pro/subscriptions'),
     api('/api/admin/pro/refund-requests'),
-    api('/api/admin/pro/launch')
+    api('/api/admin/pro/launch'),
+    api('/api/admin/pro/members')
   ]);
+  /* A grant, a revoke or a refund changes who is a member: the Members tab and its count follow. */
+  MEMBERS = both[6].ok && both[6].data ? both[6].data : { error: both[6].status };
   LAUNCH = both[5].ok && both[5].data ? both[5].data : { error: both[5].status };
   REQS = both[4].ok && both[4].data ? both[4].data : { error: both[4].status };
   SUBS = both[3].ok && both[3].data ? both[3].data : { error: both[3].status };
   PRO = both[0].ok && both[0].data ? both[0].data : { error: both[0].status };
   PRICES = both[1].ok && both[1].data ? both[1].data : { error: both[1].status };
   ORDERS = both[2].ok && both[2].data ? both[2].data : { error: both[2].status };
+  renderTabs();
   paintSection();
 }
 
@@ -2355,6 +2369,231 @@ function wirePro(){
       b.disabled = true;
       var r = await post('/api/admin/pro/revoke', { passId: b.getAttribute('data-pass') });
       if (!r.ok){ b.disabled = false; el('pro-out').innerHTML = '<b class="warn">Refused.</b> ' + esc((r.data && r.data.error) || ('HTTP ' + r.status)); return; }
+      proReload();
+    });
+  }
+}
+
+/* ---- members: everyone who holds Pro or has held it ----
+   One row per account, from /api/admin/pro/members (every pass, the newest
+   first). How it was got is the pass's source: bought (matched to its order
+   by passId, for the price and the way it was paid), given by hand, or the
+   7-day gift. "Revoke" ends every pass the account still holds; it never
+   refunds (that is Pro, Payments). "Give Pro" is the same grant as the Pro
+   tab's. Both are written to the Security tab's audit trail. Usernames only. */
+var MEMBERS = null;
+var MEM_FILTER = 'now';
+var MEM_MSG = '';
+var MEM_GIVE = '';
+var MEM_OPEN = {};
+var MEM_KIND = { paid: 'Bought', hand: 'Given by hand', gift: '7-day gift' };
+function memDay(iso){
+  if (!iso) return '';
+  try { return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Riyadh', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)); }
+  catch(e){ return String(iso).slice(0, 10); }
+}
+function memState(p, now){
+  return p.revokedAt ? 'revoked' : Date.parse(p.endsAt) <= now ? 'ended' : Date.parse(p.startsAt) > now ? 'later' : 'on';
+}
+function memOrder(passId){
+  var rows = (ORDERS && ORDERS.orders) || [];
+  for (var i = 0; i < rows.length; i++) if (rows[i].passId === passId) return rows[i];
+  return null;
+}
+/* How a pass was got, in words (HTML). */
+function memHow(p){
+  if (p.source === 'gift') return 'The free ' + fmt((MEMBERS && MEMBERS.giftDays) || 7) + '-day gift, started by them';
+  if (p.source === 'admin') return 'Given by hand' + (p.givenBy ? ' by @' + esc(p.givenBy) : '');
+  var o = memOrder(p.id);
+  if (!o) return 'Bought';
+  return 'Bought for SAR ' + esc(String(o.amount)) + (o.method ? ', ' + esc(ORDER_METHOD[o.method] || o.method) : '')
+    + (o.kind === 'renewal' ? ', auto-renewal' : '') + (o.bonusDays ? ', founder: +' + fmt(o.bonusDays) + ' days' : '')
+    + (o.test ? ' <b class="dim">TEST</b>' : '') + (o.status === 'refunded' ? ' <span class="dim">(refunded)</span>' : '');
+}
+/* The accounts: who holds Pro now (soonest to end first), then who used to. */
+function memAccounts(){
+  var now = Date.now(), by = {}, list = [];
+  var rows = (MEMBERS && MEMBERS.passes) || [];
+  for (var i = 0; i < rows.length; i++){
+    var p = rows[i], key = p.username || ('?' + p.id);
+    var m = by[key];
+    if (!m){ m = by[key] = { username: p.username, passes: [], cur: null, until: 0, live: [], used: 0 }; list.push(m); }
+    m.passes.push(p);
+    var st = memState(p, now);
+    if (st === 'on' || st === 'later'){
+      m.live.push(p);
+      m.until = Math.max(m.until, Date.parse(p.endsAt));
+    }
+    /* The pass that makes them Pro now: a month before the gift, then the one that ends last. */
+    if (st === 'on' && (!m.cur || (m.cur.plan === 'gift' && p.plan !== 'gift') || (m.cur.plan === p.plan && Date.parse(p.endsAt) > Date.parse(m.cur.endsAt)))) m.cur = p;
+  }
+  for (var k = 0; k < list.length; k++){
+    var a = list[k];
+    a.kind = !a.cur ? 'past' : a.cur.source === 'payment' ? 'paid' : a.cur.source === 'admin' ? 'hand' : 'gift';
+    a.used = a.cur ? a.cur.used : 0;
+    a.last = a.passes[0];
+  }
+  list.sort(function(x, y){
+    if (!!x.cur !== !!y.cur) return x.cur ? -1 : 1;
+    if (x.cur) return x.until - y.until;
+    return Date.parse(y.last.revokedAt || y.last.endsAt) - Date.parse(x.last.revokedAt || x.last.endsAt);
+  });
+  return list;
+}
+function memCounts(list){
+  var c = { now: 0, paid: 0, hand: 0, gift: 0, past: 0, soon: 0 }, week = Date.now() + 7 * 86400000;
+  for (var i = 0; i < list.length; i++){
+    var m = list[i];
+    c[m.kind]++;
+    if (m.cur){ c.now++; if (m.until <= week) c.soon++; }
+  }
+  return c;
+}
+function memPassesHtml(m){
+  var now = Date.now();
+  var html = '<table class="tbl"><thead><tr><th>Pass</th><th>How</th><th>From</th><th>Until</th><th>Pro used</th><th>Now</th></tr></thead><tbody>';
+  for (var i = 0; i < m.passes.length; i++){
+    var p = m.passes[i], st = memState(p, now);
+    html += '<tr><td>' + esc(PRO_PLAN_LABEL[p.plan] || p.plan) + '</td><td>' + memHow(p) + '</td><td>' + esc(memDay(p.startsAt)) + '</td><td>' + esc(memDay(p.endsAt)) + '</td><td>'
+      + (p.used ? fmt(p.used) + ' uses' : '<span class="dim">not yet</span>') + '</td><td>'
+      + (st === 'on' ? '<b>running</b>' : st === 'later' ? 'starts ' + esc(memDay(p.startsAt)) : st === 'revoked' ? '<span class="dim">ended by hand or refund, ' + esc(memDay(p.revokedAt)) + '</span>' : '<span class="dim">ran out</span>') + '</td></tr>';
+  }
+  return html + '</tbody></table>';
+}
+function membersTab(){
+  var html = '<h2 class="sec">Pro members</h2>';
+  if (!MEMBERS || MEMBERS.error){
+    return html + '<div class="callout bad"><b>Could not load the members.</b> HTTP ' + esc(String((MEMBERS && MEMBERS.error) || '?')) + '</div>';
+  }
+  var list = memAccounts(), c = memCounts(list), now = Date.now();
+  html += '<p class="lede">Everyone who holds Pro now, how they got it, and when it ends. Dates are Riyadh dates. Accounts are listed by username only.</p>';
+  html += '<div class="grid">';
+  html += kpi('Members now', c.now, fmt(c.soon) + ' end within 7 days', true);
+  html += kpi('Bought', c.paid, 'paid through Moyasar', true);
+  html += kpi('Given by hand', c.hand, 'by you, from here', true);
+  html += kpi('On the 7-day gift', c.gift, 'free, started by the fan', true);
+  html += '</div>';
+
+  html += '<h2 class="sec">Give Pro to an account</h2>';
+  html += '<p class="note"><label>Username <input id="mem-g-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(MEM_GIVE) + '"></label> '
+        + '<label>Days <input id="mem-g-days" type="number" min="1" max="400" step="1" placeholder="30" style="width:110px"></label> '
+        + '<button id="mem-grant" type="button" class="primary">Give Pro</button></p>';
+  html += '<p class="note">Any account, free of charge: a prize, a supporters group, a thank-you. 30 days unless you type other days (1 to 400). The days count from today, also for someone who already has Pro: 30 days given to a member with 10 left makes it 30, not 40.</p>';
+  html += '<p id="mem-out" class="note" role="status" aria-live="polite">' + MEM_MSG + '</p>';
+
+  html += '<h2 class="sec">The members</h2>';
+  var F = [['now', 'Members now', c.now], ['paid', 'Bought', c.paid], ['hand', 'Given by hand', c.hand], ['gift', '7-day gift', c.gift], ['past', 'Used to be', c.past]];
+  html += '<p class="note" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">';
+  for (var f = 0; f < F.length; f++){
+    html += '<button type="button" class="tab mem-filter" data-mem="' + F[f][0] + '" aria-current="' + (MEM_FILTER === F[f][0]) + '">' + F[f][1] + '<span class="pill">' + fmt(F[f][2]) + '</span></button>';
+  }
+  html += ' <label>Find <input id="mem-q" type="search" autocomplete="off" spellcheck="false" maxlength="32" placeholder="username"></label></p>';
+
+  var shown = [];
+  for (var i = 0; i < list.length; i++){
+    var m = list[i];
+    if (MEM_FILTER === 'now' ? !!m.cur : m.kind === MEM_FILTER) shown.push(m);
+  }
+  if (!shown.length){
+    html += '<p class="empty">' + (MEM_FILTER === 'past' ? 'Nobody has had Pro and lost it.' : 'Nobody here yet.') + '</p>';
+  } else {
+    var past = MEM_FILTER === 'past';
+    html += '<div class="scroll"><table class="tbl" id="mem-table" style="min-width:820px;white-space:nowrap"><thead><tr><th>Who</th><th>How they got it</th>'
+      + (past ? '<th>Had it until</th><th>Why it ended</th>' : '<th>Since</th><th>Until</th><th>Left</th><th>Pro used</th>') + '<th></th></tr></thead><tbody>';
+    for (var j = 0; j < shown.length; j++){
+      var a = shown[j], name = a.username || '';
+      var who = (a.username ? '@' + esc(a.username) : '<span class="dim">account renamed or deleted</span>');
+      var more = '<button type="button" class="mem-more" data-user="' + esc(name) + '">' + (MEM_OPEN[name] ? 'Hide passes' : 'Passes (' + fmt(a.passes.length) + ')') + '</button>';
+      var give = a.username ? ' <button type="button" class="mem-give" data-user="' + esc(name) + '">' + (past ? 'Give Pro' : 'Give days') + '</button>' : '';
+      html += '<tr data-user="' + esc(name.toLowerCase()) + '"><td>' + who + '</td>';
+      if (past){
+        var l = a.last;
+        html += '<td>' + memHow(l) + '</td><td>' + esc(memDay(l.revokedAt || l.endsAt)) + '</td><td>'
+          + (l.revokedAt ? (memOrder(l.id) && memOrder(l.id).status === 'refunded' ? 'Refunded' : 'Ended by hand') : 'Ran out') + '</td><td>' + more + give + '</td></tr>';
+      } else {
+        var days = Math.max(0, Math.ceil((a.until - now) / 86400000));
+        var ids = [];
+        for (var q = 0; q < a.live.length; q++) ids.push(a.live[q].id);
+        html += '<td>' + memHow(a.cur) + (a.live.length > 1 ? '<br><span class="dim">' + fmt(a.live.length) + ' passes running or waiting</span>' : '') + '</td><td>' + esc(memDay(a.cur.startsAt)) + '</td><td>' + esc(memDay(new Date(a.until).toISOString())) + '</td><td>'
+          + (days <= 7 ? '<b class="warn">' + fmt(days) + (days === 1 ? ' day' : ' days') + '</b>' : fmt(days) + ' days') + '</td><td>'
+          + (a.used ? fmt(a.used) + ' uses' : '<span class="dim">not yet</span>') + '</td><td>' + more + give
+          + ' <button type="button" class="mem-revoke" data-user="' + esc(name) + '" data-passes="' + esc(ids.join(',')) + '" data-paid="' + (a.kind === 'paid' ? '1' : '0') + '">Revoke</button></td></tr>';
+      }
+      if (MEM_OPEN[name]) html += '<tr data-user="' + esc(name.toLowerCase()) + '"><td colspan="' + (past ? 5 : 7) + '">' + memPassesHtml(a) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+  html += '<p class="note">"Revoke" ends Pro for that account now: every pass it still holds. It does not give any money back. To refund someone who bought, use Refund under Pro, Payments: that returns the money and ends the pass in one step. "Pro used" counts the AI designs, reviews and messages taken on the pass.</p>';
+  if ((MEMBERS.passes || []).length >= (MEMBERS.max || 0)) html += '<p class="note">Showing the newest ' + fmt(MEMBERS.max) + ' passes.</p>';
+  return html;
+}
+function wireMembers(){
+  var out = el('mem-out');
+  var filters = document.querySelectorAll('.mem-filter');
+  for (var i = 0; i < filters.length; i++){
+    filters[i].addEventListener('click', function(e){ MEM_FILTER = e.currentTarget.getAttribute('data-mem'); MEM_MSG = ''; paintSection(); });
+  }
+  var find = el('mem-q');
+  if (find) find.addEventListener('input', function(){
+    var want = (find.value || '').trim().replace(/^@/, '').toLowerCase();
+    var rows = document.querySelectorAll('#mem-table tbody tr[data-user]');
+    for (var r = 0; r < rows.length; r++) rows[r].hidden = !!want && rows[r].getAttribute('data-user').indexOf(want) < 0;
+  });
+  var mores = document.querySelectorAll('.mem-more');
+  for (var m = 0; m < mores.length; m++){
+    mores[m].addEventListener('click', function(e){ var u = e.currentTarget.getAttribute('data-user'); MEM_OPEN[u] = !MEM_OPEN[u]; paintSection(); });
+  }
+  var gives = document.querySelectorAll('.mem-give');
+  for (var g = 0; g < gives.length; g++){
+    gives[g].addEventListener('click', function(e){
+      var box = el('mem-g-user');
+      box.value = e.currentTarget.getAttribute('data-user');
+      box.scrollIntoView({ block: 'center' });
+      el('mem-g-days').focus();
+    });
+  }
+  var grant = el('mem-grant');
+  if (grant) grant.addEventListener('click', async function(){
+    var user = (el('mem-g-user').value || '').trim().replace(/^@/, '');
+    var days = (el('mem-g-days').value || '').trim();
+    if (!user){ out.textContent = 'Type a username first.'; return; }
+    grant.disabled = true;
+    out.textContent = 'Giving...';
+    var body = { username: user, plan: 'monthly' };
+    if (days) body.days = Number(days);
+    var r = await post('/api/admin/pro/grant', body);
+    grant.disabled = false;
+    if (r.ok && r.data && r.data.ok){
+      MEM_GIVE = '';
+      MEM_MSG = '<b>Given.</b> @' + esc(user) + ' has Pro until ' + esc(memDay(r.data.pass.endsAt)) + '.';
+      proReload();
+      return;
+    }
+    MEM_GIVE = user;
+    out.innerHTML = '<b class="warn">Not given.</b> ' + esc(r.status === 404 ? 'There is no account called @' + user + '.' : ((r.data && r.data.error) || ('HTTP ' + r.status)));
+  });
+  var revokes = document.querySelectorAll('.mem-revoke');
+  for (var v = 0; v < revokes.length; v++){
+    revokes[v].addEventListener('click', async function(e){
+      var b = e.currentTarget, user = b.getAttribute('data-user');
+      /* Two presses: the first asks, the second ends it. */
+      if (b.getAttribute('data-sure') !== '1'){
+        b.setAttribute('data-sure', '1');
+        b.textContent = 'Sure? End Pro for @' + user;
+        return;
+      }
+      b.disabled = true;
+      b.textContent = 'Ending...';
+      var ids = (b.getAttribute('data-passes') || '').split(','), failed = 0;
+      for (var n = 0; n < ids.length; n++){
+        if (!ids[n]) continue;
+        var r = await post('/api/admin/pro/revoke', { passId: ids[n] });
+        /* 404: that pass has ended since the list was loaded, which is what was wanted. */
+        if (!r.ok && r.status !== 404) failed++;
+      }
+      MEM_MSG = failed
+        ? '<b class="warn">Not all of it ended.</b> ' + fmt(failed) + ' pass' + (failed === 1 ? '' : 'es') + ' of @' + esc(user) + ' could not be revoked. Try again.'
+        : '<b>Ended.</b> @' + esc(user) + ' is on the free plan now.' + (b.getAttribute('data-paid') === '1' ? ' Nothing was refunded: if the money should go back too, refund the order under Pro, Payments.' : '');
       proReload();
     });
   }

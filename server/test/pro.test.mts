@@ -513,6 +513,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   // Admin: closed to everyone else, validated, audited.
   for (const headers of [undefined, bearer(fan.token)]) {
     assert.equal((await app.inject({ method: 'GET', url: '/api/admin/pro', ...(headers ? { headers } : {}) })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/pro/members', ...(headers ? { headers } : {}) })).statusCode, 403, 'the members list is the admin\'s');
     assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/grant', ...(headers ? { headers } : {}), payload: { username: 'fan_pro', plan: 'monthly' } })).statusCode, 403, 'nobody grants themselves Pro');
     assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', ...(headers ? { headers } : {}), payload: { passId: '00000000-0000-0000-0000-000000000000' } })).statusCode, 403);
   }
@@ -539,6 +540,15 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(look.account.passes.length, 2);
   assert.equal(look.throwawayList.loaded, true);
 
+  // The Members tab: every pass, whose it is and how it was got. Usernames, never an address.
+  const membersOf = async () => (await app.inject({ method: 'GET', url: '/api/admin/pro/members', headers: asBoss })).json() as Record<string, any>;
+  const mem = await membersOf();
+  const fanPasses = mem.passes.filter((p: { username: string }) => p.username === 'fan_pro');
+  assert.deepEqual(fanPasses.map((p: { source: string; plan: string }) => [p.source, p.plan]), [['admin', 'monthly'], ['gift', 'gift']], 'the newest first: the month given by hand, then the gift they started');
+  assert.ok(fanPasses.every((p: { id: string; revokedAt: unknown; used: unknown; startsAt: string; endsAt: string }) => /^[0-9a-f-]{36}$/.test(p.id) && p.revokedAt === null && typeof p.used === 'number' && Date.parse(p.endsAt) > Date.parse(p.startsAt)));
+  assert.equal(mem.giftDays, 7);
+  assert.ok(!/@[a-z0-9.-]+\.[a-z]{2,}/i.test(JSON.stringify(mem)), 'no email address in the list');
+
   // The Supporter crown: in the community for previewing viewers only.
   const gallery = async (token?: string) => (await app.inject({ method: 'GET', url: '/api/gallery', ...(token ? { headers: bearer(token) } : {}) })).json() as Array<Record<string, unknown>>;
   const fanCard = (items: Array<Record<string, unknown>>) => items.find((i) => i.ownerId === fan.id);
@@ -559,6 +569,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', headers: asBoss, payload: { passId: seasonId } })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', headers: asBoss, payload: { passId: seasonId } })).statusCode, 404);
   assert.equal(((await get(fan.token)).json() as Record<string, unknown>).plan, 'gift');
+  assert.ok((await membersOf()).passes.find((p: { id: string }) => p.id === seasonId).revokedAt, 'a revoked pass stays on the members list, marked revoked');
   restore();
 
   // On: signed out sees the offer, never anyone's data; everyone gets the rules.
