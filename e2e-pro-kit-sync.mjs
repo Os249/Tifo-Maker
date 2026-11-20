@@ -659,7 +659,8 @@ for (const [lang, theme, w] of [['en', 'dark', 1440], ['en', 'light', 1440], ['a
 {
   // Their account page.
   const { ctx, p } = await device(sup.token, { theme: 'light' });
-  await p.goto(`${B}/account`, { waitUntil: 'domcontentloaded' });
+  // Plan and billing is its own area of the page now.
+  await p.goto(`${B}/account#billing`, { waitUntil: 'domcontentloaded' });
   await waitFor(p, () => !!document.querySelector('#pro .pro-ac-name .supporter-badge'), null, 30000);
   const acc = await p.evaluate(() => ({ text: document.querySelector('#pro .pro-ac-name')?.textContent, lead: document.querySelector('#pro .pro-ac-foot')?.textContent }));
   check('the account page shows them their name as the community does', /@sync_sup\s*Pro supporter/.test(acc.text || '') && /Your name shows this badge/.test(acc.lead || ''), JSON.stringify(acc));

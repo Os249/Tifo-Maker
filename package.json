@@ -40,6 +40,8 @@
     "test:pay": "node e2e-pay.mjs",
     "test:pay-form": "node e2e-pay-form.mjs",
     "test:pay-account": "node e2e-pay-account.mjs",
+    "test:account": "node e2e-account.mjs",
+    "test:header": "node e2e-header.mjs",
     "test:events-ui": "node e2e-events.mjs",
     "seats:table": "tsx scripts/seat-table.mts",
     "server": "tsx server/src/server.ts",

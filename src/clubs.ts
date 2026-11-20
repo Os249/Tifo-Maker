@@ -4,7 +4,7 @@ import './clubs.css';
 import { initLang, applyDom, toggleLang, t, tv } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { submitLead } from './net/api';
-import { installMobileNav } from './ui/mobileNav';
+import { initSiteHeader } from './ui/siteHeader';
 import { installConsent } from './ui/consent';
 
 initLang();
@@ -17,7 +17,7 @@ initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
 
 applyDom(document);
-installMobileNav();
+initSiteHeader();
 installConsent();
 
 const langToggle = document.getElementById('lang-toggle');

@@ -109,13 +109,13 @@ try {
   await idle(anon, '/');
   await anon.waitForTimeout(1500);
   check('the home page has no band', (await anon.locator('#ev-band').count()) === 0);
-  check('its nav has Events, after Community', (await anon.evaluate(() => [...document.querySelectorAll('header.nav .nav-links > a')].map((a) => a.getAttribute('href')).slice(0, 2).join())) === '/community,/events');
+  check('its nav has Events, after Community', (await anon.evaluate(() => [...document.querySelectorAll('header.nav .nav-tabs > a:not(.nav-make)')].map((a) => a.getAttribute('href')).slice(0, 3).join())) === '/,/community,/events');
   await idle(anon, '/community');
   await anon.waitForTimeout(1500);
   check('nor the community page', (await anon.locator('#ev-band').count()) === 0);
   await idle(anon, '/events');
   check('/events says there is none', /No event right now/.test(await text(anon, '#ev-index-none')));
-  check('and marks itself in the nav', (await anon.getAttribute('header.nav .nav-links > a[href="/events"]', 'aria-current')) === 'page');
+  check('and marks itself in the nav', (await anon.getAttribute('header.nav .nav-tabs > a[href="/events"]', 'aria-current')) === 'page');
   await idle(anon, '/events/the-derby');
   check('an address with no event says so', /not here/.test(await text(anon, '#ev-index-none')));
 

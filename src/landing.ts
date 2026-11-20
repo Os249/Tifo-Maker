@@ -4,7 +4,7 @@ import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { localizeHero, mountHeroStadium } from './heroStadium';
 import { mountShowcase } from './showcase';
 import { localizeDailyTifo, mountDailyTifo } from './dailyTifo';
-import { installMobileNav } from './ui/mobileNav';
+import { initSiteHeader } from './ui/siteHeader';
 import { installConsent } from './ui/consent';
 import { escapeHtml } from './core/escape';
 
@@ -19,7 +19,7 @@ initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
 
 applyDom(document);
-installMobileNav();
+initSiteHeader();
 installConsent();
 
 // A real club's tifo in its real ground (lazy, after first paint).

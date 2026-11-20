@@ -111,28 +111,32 @@ try {
 
   // Straight after signing up: the message is already on its way.
   await page.evaluate(() => document.getElementById('ac-resend').click());
-  await waitFor(() => /already on its way/i.test(document.getElementById('ac-email-msg')?.textContent || ''), null, 10000);
+  await waitFor(() => /already on its way/i.test(document.getElementById('ac-verify-msg')?.textContent || ''), null, 10000);
   await seen(1);
   check('Resend reaches the server: it is not a 400', resends.length === 1 && resends[0].status !== 400, JSON.stringify(resends));
   check('...and sends no JSON content-type without a body', resends[0]?.contentType === null, String(resends[0]?.contentType));
-  check('straight after signing up it answers with the cooldown', resends[0]?.status === 429 && /already on its way/i.test(await text('#ac-email-msg')), JSON.stringify(await text('#ac-email-msg')));
+  check('straight after signing up it answers with the cooldown', resends[0]?.status === 429 && /already on its way/i.test(await text('#ac-verify-msg')), JSON.stringify(await text('#ac-verify-msg')));
   check('...and sends nothing, so the first code still stands', codesFor(EMAIL).length === 1);
+  check('...and the button counts the wait down, and cannot be pressed meanwhile', await page.evaluate(() => { const b = document.getElementById('ac-resend'); return b.disabled && /^Send a new code in \d+s$/.test(b.textContent); }), await text('#ac-resend'));
 
   await page.waitForTimeout(COOLDOWN_MS + 400);
+  check('once the wait is over the button is itself again', await waitFor(() => { const b = document.getElementById('ac-resend'); return !b.disabled && b.textContent === 'Send a new code'; }, null, 5000), await text('#ac-resend'));
   await page.evaluate(() => document.getElementById('ac-resend').click());
-  const sent = await waitFor(() => /new code is on its way/i.test(document.getElementById('ac-email-msg')?.textContent || ''), null, 10000);
+  const sent = await waitFor(() => /new code is on its way/i.test(document.getElementById('ac-verify-msg')?.textContent || ''), null, 10000);
   await seen(2);
-  check('once the wait is over, Resend sends a new code', sent && resends[1]?.status === 202, `${resends[1]?.status} ${JSON.stringify(await text('#ac-email-msg'))}`);
+  check('once the wait is over, Resend sends a new code', sent && resends[1]?.status === 202, `${resends[1]?.status} ${JSON.stringify(await text('#ac-verify-msg'))}`);
   const codes = codesFor(EMAIL);
   check('...which really went out, with a different code', codes.length === 2 && codes[0] !== codes[1], JSON.stringify(codes));
 
   await setVal('#ac-code', codes[0]);
-  const wrong = await waitFor(() => /not right/i.test(document.getElementById('ac-email-msg')?.textContent || ''), null, 10000);
-  check('the replaced code is refused, with the tries left', wrong && /4/.test(await text('#ac-email-msg')), JSON.stringify(await text('#ac-email-msg')));
+  const wrong = await waitFor(() => /not right/i.test(document.getElementById('ac-verify-msg')?.textContent || ''), null, 10000);
+  check('the replaced code is refused, with the tries left', wrong && /4/.test(await text('#ac-verify-msg')), JSON.stringify(await text('#ac-verify-msg')));
+  check('...said inside the code box, beside the field it is about', await page.evaluate(() => { const m = document.getElementById('ac-verify-msg'); const c = document.getElementById('ac-code'); return !!m.closest('#ac-verify') && m.parentElement === c.closest('.ac-field') && c.getAttribute('aria-invalid') === 'true' && (c.getAttribute('aria-describedby') || '').includes('ac-verify-msg'); }));
 
   await setVal('#ac-code', codes[1]);
-  const done = await waitFor(() => /verified/i.test(document.getElementById('ac-email-msg')?.textContent || ''), null, 10000);
-  check('the new code verifies the address', done, JSON.stringify(await text('#ac-email-msg')));
+  const done = await waitFor(() => /verified/i.test(document.getElementById('ac-verify-msg')?.textContent || ''), null, 10000);
+  check('the new code verifies the address', done, JSON.stringify(await text('#ac-verify-msg')));
+  check('...the code box goes, and the word that it worked stays in its place', await waitFor(() => document.getElementById('ac-verify')?.hidden && !document.getElementById('ac-verified')?.hidden && /Email verified/.test(document.getElementById('ac-verified')?.textContent || ''), null, 10000));
   check('...and the badge says so', await waitFor(() => document.getElementById('ac-email-badge')?.dataset.state === 'ok', null, 10000));
 
   console.log('\n— an open tab still running the old code —');

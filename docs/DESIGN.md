@@ -277,10 +277,11 @@ One title, one sentence, one blue action, at most one quiet alternative.
   when it comes back ("on Sunday (in 2 days)"), one blue way on (the gift
   when there is one, else "See what Pro adds") and one quiet alternative
   (the Quick Designer).
-- **The countdown chip** (`mountProChip`) sits before the header's account
-  control while Pro runs; on a phone, and in the editor's top bar on a
-  laptop (900 to 1599 px, where the header is full), the crown alone with
-  its words in the title.
+- **The countdown chip** (`mountProChip`) sits in the editor's top bar while
+  Pro runs; on a laptop (900 to 1599 px, where that bar is full), the crown
+  alone with its words in the title. On the public pages the same fact is
+  the gold ring and crown on the account's letter, with the countdown's
+  words in its menu (see The site header).
 - **The supporter badge** (`supporterBadgeHtml()`, `ui/supporterBadge.ts`)
   follows a paid month of Pro's name: the crown and "Pro supporter" /
   "داعم برو" on their tifo cards, their public tifo page, their profile
@@ -318,6 +319,74 @@ One title, one sentence, one blue action, at most one quiet alternative.
   "Tell me when Pro opens" sits below it, quiet. Every public header carries
   "♛ Pro · soon" / "♛ برو · قريباً" (`.nav-pro`: the gold crown, the
   link's ink). The answers are on /admin → Pro.
+
+### The site header (`ui/siteHeader.css`, `ui/siteHeader.ts`)
+
+One header on every public page (21 Nov 2026): home, community, events,
+projects, clubs, Pro and the account page. Three groups, always in this
+order: the wordmark, the places, and you.
+
+- **The places are tabs**: Home, Community, Events, My projects (and For
+  clubs where there is room). In the bar on a desktop. On a phone they are a
+  bar at the bottom of the screen, under the thumb, with the blue "new tifo"
+  in its middle. There is no menu button. One element holds them in both
+  places, so a page writes them once.
+- **You are here is a tint** on the tab, never the blue.
+- **"New tifo" is the header's one blue thing**, the same on every page. On
+  a page with a blue step of its own (My projects, Pro, the account page) it
+  is a tint (`.quiet`).
+- **The account**: "Sign up" as an outline until someone is signed in, then
+  their letter, which opens the menu: who and the plan, Account, My
+  projects, Pro, the theme, Sign out. Signed out on a phone, what the bar has
+  no room for (Pro, For clubs, the theme) is behind "More".
+- **Pro is said once.** Signed out: the crown and "Pro" on the bar. Signed
+  in: a row of the menu, and nothing on the bar.
+- **A letter with a gold ring and the crown is an account whose Pro is
+  running** (a paid month or the gift), as `/api/pro` says. Its menu carries
+  the countdown's own words ("Pro · 5 days left") and "Manage Pro".
+- The phone's bottom bar keeps room under the page for itself, and the
+  cookie bar sits above it.
+- Checked by `e2e-header.mjs`. The editor has its own top bar and is not
+  part of this; the legal page keeps its small bar.
+
+### The account page (`account.html`, `src/account.ts`, `ui/accountAreas.ts`)
+
+Five named areas, one on screen at a time (20 Nov 2026): Profile, Sign-in and
+security, Pro and billing, Data and privacy, Danger zone.
+
+- **The address is the area**: /account#profile, #security, #billing, #data,
+  #danger. The addresses the page had before still open the right place:
+  #pro is billing, and the old section ids (#sec-danger and the rest) open
+  the area they moved into.
+- **A phone opens on the overview**: the summary (who I am, my email, my
+  plan, each with its one next step) and the list of areas with a line of
+  status under each name. An area is its own screen with a way back. From
+  900px the list stays beside the open area and the summary above it.
+- **An address that is not verified comes first**, above the summary: the
+  code box, its errors, Send a new code and its wait counted down on the
+  button. When it is verified the box goes and the word that it worked stays
+  in its place.
+- **One blue button**: Verify while a code is owed; otherwise the submit of
+  the one form that is open (opening one puts the other away), or Save once
+  the name was changed. A step from the summary is a tint. Delete is red and
+  never blue.
+- **Forms stay folded behind "Change"** (email, password), so nothing on the
+  page looks like work waiting. The name is the Profile area's one job and
+  stays open.
+- **Every action says all its states**: the button turns and names what it
+  is doing, then a panel says what came of it (`.ac-msg`, read out politely).
+  An error about a field sits beside that field, which is marked
+  (`aria-invalid`, `aria-describedby`): `say(msg, text, tone, field)`.
+- **Password**: show and hide on every password box, the rules and what a
+  change does said before anything is typed, the confirmation after.
+- **Pro and billing reads as a bill** (`ui/proAccount.ts`): the plan with the
+  days left and the day it ends, auto-renew, what happens when it ends, what
+  is left of each allowance, then the purchases with their receipts and
+  refunds, or the word that there are none yet. On Free: one calm line and a
+  gold-tinted way to Pro, never the blue. Every number is `/api/pro`'s.
+- **Delete is apart and asked twice**: its own area, then "Are you sure",
+  the name typed and the password.
+- Checked by `e2e-account.mjs`, on a phone and a desktop, in both languages.
 
 ### Tifo events (`src/events.ts`, `ui/eventBand.ts`)
 

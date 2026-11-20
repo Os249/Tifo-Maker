@@ -280,7 +280,8 @@ for (const [path, name, budget, foreign] of [
   ['/community', 'community', 250, /^(ed\.ai|ac|bn|ai|lg|rs|ly|mb|st|np)\./],
   [`/s/${design}`, 'seat', 80, /^(ed|cm|pj|ac|bn|ai|lg|rs|clubs)\./],
   [`/t/${design}`, 'share', 350, /^(ed\.ai|pj|ac|bn|lg|rs|ly)\./],
-  ['/account', 'account', 300, /^(cm|pj|bn|ai|lg|clubs|st|np|ly|sh|seat)\./],
+  // 360 since the page became five areas with a summary (20 Nov 2026): about 45 more strings of its own, all shown on it.
+  ['/account', 'account', 360,/^(cm|pj|bn|ai|lg|clubs|st|np|ly|sh|seat)\./],
   ['/projects', 'projects', 400, /^(cm|bn|ai|lg|rs|ly|sh|seat)\./],
   // The editor loads most of its panels within its first seconds: still well under the whole table.
   [`/d/${design}`, 'editor', 1100, /^(lg|rs|clubs)\./],

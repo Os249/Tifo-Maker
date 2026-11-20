@@ -415,7 +415,7 @@ console.log('\n— back on /pro and the account page: the bonus shows —');
     check(`${name}: "Founder: your first purchase got 30 extra days free, 60 days in all"`, await waitFor(p, () => /Founder: your first purchase got 30 extra days free, 60 days in all\./.test(document.querySelector('#pro [data-founder="used"]')?.textContent || '')), await text(p, '#pro .pro-founder'));
     const row = await text(p, '#pro .pu-order');
     check(`${name}: the purchase: "Pro, 30 days + 30 founder days free", Paid, SAR 13.99`, /Pro, 30 days \+ 30 founder days free/.test(row) && /Paid/.test(row) && /SAR 13\.99/.test(row), row.slice(0, 200));
-    check(`${name}: the header link says "Pro", and the page fits`, (await p.evaluate(() => document.querySelector('.ac-pro span')?.textContent)) === 'Pro' && (await fits(p)));
+    check(`${name}: the header link says "Pro", and the page fits`, (await p.evaluate(() => document.querySelector('.nav-pro span')?.textContent)) === 'Pro' && (await fits(p)));
     await shot(p, `account-founder-${name}-en`);
     await ctx.close();
   }
