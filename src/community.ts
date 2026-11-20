@@ -14,10 +14,9 @@ import './vendor/tabler-subset.css';
 import './community.css';
 import { initLang, applyDom, getLang, localPath, onLangChange, toggleLang, t, tv, tTag, tTitle } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
-import { installMobileNav } from './ui/mobileNav';
+import { initSiteHeader, setHeaderUser } from './ui/siteHeader';
 import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
-import { mountProChip } from './ui/pro';
 import { supporterBadgeHtml } from './ui/supporterBadge';
 import type { Preview3D } from './render/preview3d';
 import type { SeatMap } from './core/types';
@@ -134,7 +133,8 @@ initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
 
 applyDom(document);
-installMobileNav();
+// The header's account button and its menu (ui/siteHeader.ts); this page signs people in itself.
+initSiteHeader({ onSignIn: () => signInFromHeader(), onSignOut: () => location.reload() });
 installConsent();
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
@@ -170,6 +170,15 @@ langToggle?.addEventListener('click', () => {
   langToggle.textContent = t('common.language');
 });
 
+/** "Sign up" in the header: the dialog, then the page as the account sees it. */
+async function signInFromHeader(): Promise<void> {
+  const tok = await openAuthModal();
+  if (tok) {
+    await refreshAuthUI();
+    void loadGallery();
+  }
+}
+
 async function refreshAuthUI(): Promise<void> {
   const who = await fetchMe().catch(() => null);
   // Publishing, commenting and following all answer 428 until the account has a
@@ -178,30 +187,13 @@ async function refreshAuthUI(): Promise<void> {
   me = named ? { id: named.id, username: named.username, isAdmin: named.isAdmin } : null;
   const notifBtn = $('#notif-btn');
   if (me) {
-    // Drop the i18n binding while it holds a username: applyDom() rewrites every
-    // [data-i18n] node on a language switch, so leaving it attached turned
-    // "@os99" back into "Sign in" the moment someone toggled to Arabic.
-    authBtn.removeAttribute('data-i18n');
-    authBtn.textContent = `@${me.username}`;
-    // The account, not an action: the shared header draws it as an outline.
-    authBtn.classList.add('is-user');
-    authBtn.onclick = () => {
-      window.location.href = localPath('/projects');
-    };
+    // The header draws the account: a letter that opens the menu.
+    setHeaderUser(me);
     notifBtn.hidden = false;
     void refreshNotifications();
     startNotifPolling();
   } else {
-    authBtn.setAttribute('data-i18n', 'ed.signup');
-    authBtn.textContent = t('ed.signup');
-    authBtn.classList.remove('is-user');
-    authBtn.onclick = async () => {
-      const tok = await openAuthModal();
-      if (tok) {
-        await refreshAuthUI();
-        void loadGallery();
-      }
-    };
+    setHeaderUser(null);
     notifBtn.hidden = true;
   }
 }
@@ -1652,7 +1644,6 @@ async function main(): Promise<void> {
   if (why) toast(t(`auth.err.${why}`));
   await Promise.all([refreshAuthUI(), loadGallery(), loadFilters()]);
   // "Pro · 5 days left" beside the account while a pass runs (hidden otherwise).
-  if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   renderApplied();
   void openDeepLink();
 }

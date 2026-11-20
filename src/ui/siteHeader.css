@@ -1,56 +1,187 @@
 /*
- * The one header of the public pages: home, community, projects and clubs.
+ * The one header of the public pages (21 Nov 2026): home, community, events,
+ * projects, clubs, Pro and the account page.
  *
- * Each page used to carry its own copy: the home page had "How it works /
- * Grounds / Community / For clubs" across the full width and a white pill;
- * community and projects had "Community / My projects" inside 6vw and a black
- * pill; clubs a third mix. Now every page shows the same links, in the same
- * order, on the same bar, and its one action in the one action colour.
+ * Three groups, in the same order everywhere: the wordmark, the places, and
+ * you. The places are tabs: in the middle of the bar on a desktop, and on a
+ * phone a bar at the bottom of the screen, under the thumb, with the blue
+ * "new tifo" in its middle. There is no menu button. "You" is the language,
+ * the bell where a page has one, and the account: "Sign up" until someone is
+ * signed in, then their letter, which opens the menu (ui/siteHeader.ts) with
+ * the account, Pro, the theme and Sign out. A letter with a gold ring and
+ * the crown is an account whose Pro is running.
  *
- * The theme toggle, the 44px targets and the current-page underline live in
- * colorScheme.css, which every public page already loads. Phones swap the links
- * for the burger and its drawer (ui/mobileNav.ts).
+ * One element holds the tabs in both places, so a page writes them once. The
+ * bar's blur is on a layer of its own (::before): a backdrop-filter on the
+ * header itself would make it the box that position: fixed is measured from,
+ * and the tabs could not reach the bottom of the screen.
+ *
+ * The theme toggle's own look and the focus ring live in colorScheme.css,
+ * which every public page already loads.
  */
+img, svg, video, canvas { max-width: 100%; }
+
 .nav {
   position: sticky; top: 0; z-index: var(--z-sticky);
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 12px max(20px, calc((100vw - 1240px) / 2));
-  background: var(--bar); backdrop-filter: saturate(140%) blur(12px);
+  display: flex; align-items: center; gap: var(--sp-3);
+  min-height: 64px;
+  padding: calc(var(--sp-2) + env(safe-area-inset-top)) max(var(--sp-5), calc((100vw - 1240px) / 2)) var(--sp-2);
   border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); white-space: nowrap; }
+.nav::before {
+  content: ''; position: absolute; inset: 0; z-index: -1;
+  background: var(--bar); backdrop-filter: saturate(140%) blur(12px);
+}
+.nav [hidden] { display: none !important; }
+.brand { display: inline-flex; align-items: center; min-height: 44px; font-weight: 800; font-size: var(--fs-lg); letter-spacing: .02em; color: var(--ink); white-space: nowrap; text-decoration: none; }
 .brand b { color: var(--maker); font-weight: 800; }
-.nav-links { display: flex; align-items: center; }
-.nav-links > a:not(.nav-cta) {
-  display: inline-flex; align-items: center; min-height: 44px;
-  font-weight: 600; font-size: 15px; color: var(--ink); opacity: .78;
-  transition: opacity var(--t-fast), color var(--t-fast);
-}
-.nav-links > a:not(.nav-cta):hover { opacity: 1; color: var(--blue); }
-.nav-links > a.active, .nav-links > a[aria-current="page"] { color: var(--blue); opacity: 1; }
-/* Pro, coming soon (8 Nov 2026): the gold crown before the words, never the blue. */
-.nav-links > a.nav-pro { gap: var(--sp-1); white-space: nowrap; }
-.nav-pro .pro-crown { width: 1.05em; height: 1.05em; flex: none; fill: currentColor; color: var(--pro-crown); }
-/* In the phone drawer, where every row is full width: the crown, a space, the words. */
-.mnav-drawer a.nav-pro { display: flex; align-items: center; gap: var(--sp-3); }
-.lang-toggle {
-  background: transparent; border: 1px solid var(--line-strong); color: var(--ink);
-  font: inherit; font-weight: 600; font-size: var(--fs-md); padding: 7px 14px; border-radius: var(--r-pill); cursor: pointer;
-}
-.lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
 
-/* The page's one action: the same colour as every other main action on the
-   site. --blue-solid, not --blue: white text must not sit on a colour that
-   lightens with the theme. */
-.nav-cta {
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--blue-solid); color: #fff !important; border: 1px solid transparent;
-  padding: 9px 18px; border-radius: var(--r-pill); font: inherit; font-weight: 700; font-size: 15px;
-  cursor: pointer; white-space: nowrap;
-  transition: background var(--t-fast), box-shadow var(--t-fast);
+/* ---- the places ---- */
+.nav-tabs {
+  display: flex; align-items: center; gap: 2px; margin-inline: auto; padding: 3px;
+  border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--card);
 }
-.nav-cta:hover { background: var(--blue-solid-hover); box-shadow: var(--shadow-md); }
-/* Signed in, the button is the account, not an action: a quiet outline. */
-.nav-cta.is-user { background: transparent; color: var(--ink) !important; border-color: var(--line-strong); font-weight: 600; }
-.nav-cta.is-user:hover { background: transparent; border-color: var(--blue); color: var(--blue) !important; box-shadow: none; }
-.nav-cta.is-user { direction: ltr; unicode-bidi: isolate; }
+.nav-tabs > a {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-3);
+  border-radius: var(--r-pill); font-size: var(--fs-md); font-weight: 600; color: var(--muted);
+  white-space: nowrap; text-decoration: none;
+  transition: background-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out);
+}
+.nav-tabs > a:hover { color: var(--ink); background: var(--raise-2); }
+/* You are here is a tint, never the blue. */
+.nav-tabs > a[aria-current="page"] { color: var(--blue); background: var(--tint); }
+.nav-tabs svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nav-tabs > a.nav-make { display: none; }
+
+/* ---- you ---- */
+.nav-links { display: flex; align-items: center; gap: var(--sp-1); }
+/* The site's one action: a new tifo. Quiet on a page that has a blue step of its own. */
+.nav-new {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-4);
+  border-radius: var(--r-pill); background: var(--blue-solid); color: var(--on-blue);
+  font-size: var(--fs-md); font-weight: 700; white-space: nowrap; text-decoration: none;
+  transition: background-color var(--duration-quick) var(--ease-smooth-out);
+}
+.nav-new:hover { background: var(--blue-solid-hover); }
+.nav-new.quiet { background: var(--tint); color: var(--blue); }
+.nav-new.quiet:hover { background: var(--tint-hover); }
+.nav-new svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+/* Pro: the gold crown before the word, never the blue. */
+.nav-pro { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 44px; padding: 0 var(--sp-3); border-radius: var(--r-pill); font-size: var(--fs-md); font-weight: 600; color: var(--muted); white-space: nowrap; text-decoration: none; }
+.nav-pro:hover { color: var(--ink); background: var(--raise-2); }
+.nav-pro[aria-current="page"] { color: var(--pro-ink); background: var(--pro-tint); }
+.nav-pro .pro-crown, .nav-mi .pro-crown { width: 1.05em; height: 1.05em; flex: none; fill: currentColor; color: var(--pro-crown); }
+.nav .theme-toggle { border-color: transparent; background: transparent; }
+.nav .theme-toggle:hover { background: var(--raise-2); }
+.lang-toggle {
+  min-height: 44px; padding: 0 var(--sp-3); border: 0; border-radius: var(--r-pill); background: transparent;
+  color: var(--ink); font: inherit; font-weight: 600; font-size: var(--fs-md); white-space: nowrap; cursor: pointer;
+}
+.lang-toggle:hover { background: var(--raise-2); }
+/* The account. Signed out it is the way in: an outline, because the blue is the new tifo's. */
+.nav-cta {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 var(--sp-4); border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: transparent; color: var(--ink); font: inherit; font-weight: 600; font-size: var(--fs-md);
+  white-space: nowrap; cursor: pointer; text-decoration: none;
+  transition: border-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out);
+}
+.nav-cta:hover { border-color: var(--blue); color: var(--blue); }
+/* Signed in it is their letter, and the button that opens their menu. */
+.nav-cta.is-user { width: 44px; padding: 0; border: 0; border-radius: 50%; }
+.nav-cta.is-user::before {
+  content: attr(data-letter); width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--tint); color: var(--blue); font-size: var(--fs-md); font-weight: 800; text-transform: uppercase;
+}
+.nav-cta.is-user:hover::before { background: var(--tint-hover); }
+/* Pro is running: a gold ring round the letter, and the crown on its corner. */
+.nav-cta.is-user[data-pro]::before { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--pro-crown); }
+.nav-av-badge {
+  position: absolute; inset-block-end: 0; inset-inline-end: -3px; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--pro-crown); border: 2px solid var(--paper);
+}
+.nav-av-badge svg { width: 10px; height: 10px; fill: var(--night-900); }
+.nav-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.nav-more {
+  display: none; width: 44px; height: 44px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+.nav-more:hover { background: var(--raise-2); }
+.nav-more svg { width: 22px; height: 22px; fill: currentColor; }
+/* Signed in, Pro and the theme are in the menu, and the letter is the menu's button. */
+.nav[data-user] :is(.nav-pro, .theme-toggle, .nav-more) { display: none; }
+
+/* ---- the menu ---- */
+.nav-menu {
+  position: absolute; z-index: var(--z-popover); top: calc(100% - var(--sp-1)); inset-inline-end: max(var(--sp-3), calc((100vw - 1240px) / 2));
+  width: 288px; max-width: calc(100vw - var(--sp-6)); padding: var(--sp-2);
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+  animation: nav-drop var(--duration-fast) var(--ease-smooth-out);
+}
+@keyframes nav-drop { from { opacity: 0; transform: translateY(calc(var(--distance-base) * -1)); } }
+.nav-menu-head { padding: var(--sp-2) var(--sp-3) var(--sp-3); margin-bottom: var(--sp-2); border-bottom: 1px solid var(--line); }
+.nav-menu-head b { display: block; font-size: var(--fs-base); overflow-wrap: anywhere; }
+.nav-menu-head span { font-size: var(--fs-sm); color: var(--muted); }
+.nav-mi {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%; min-height: 44px; padding: 0 var(--sp-3);
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink);
+  font: inherit; font-size: var(--fs-md); font-weight: 600; text-align: start; text-decoration: none; cursor: pointer;
+}
+.nav-mi:hover { background: var(--raise-2); }
+.nav-mi[aria-current="page"] { background: var(--tint); color: var(--blue); }
+.nav-mi.gold { color: var(--pro-ink); }
+.nav-mi svg:not(.pro-crown) { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+.nav-mi .pro-crown { width: 20px; height: 20px; }
+[dir="rtl"] .nav-mi svg.flip { transform: scaleX(-1); }
+.nav-menu-sep { height: 1px; margin: var(--sp-2) 0; background: var(--line); }
+.nav-mi.only-narrow { display: none; }
+
+/* ---- a small laptop: the words without their pictures, and For clubs in the menu ---- */
+@media (max-width: 1180px) {
+  .nav-tabs svg { display: none; }
+}
+@media (max-width: 1020px) {
+  .nav-tabs > a.nav-wide { display: none; }
+  .nav-mi.only-narrow { display: flex; }
+  .nav-new span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .nav-new { width: 44px; padding: 0; justify-content: center; }
+}
+
+/* ---- a phone: the places are at the thumb ---- */
+@media (max-width: 860px) {
+  .nav { gap: var(--sp-1); padding-inline: var(--sp-4); min-height: 60px; }
+  .nav-links { margin-inline-start: auto; }
+  .nav-tabs {
+    position: fixed; inset: auto 0 0; z-index: var(--z-sticky); margin: 0; gap: 0;
+    padding: var(--sp-1) var(--sp-2) calc(var(--sp-1) + env(safe-area-inset-bottom));
+    border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  }
+  .nav-tabs > a {
+    flex: 1 1 0; min-width: 0; min-height: 52px; flex-direction: column; justify-content: center; gap: 2px; padding: 0 2px;
+    border-radius: var(--r-md); font-size: var(--fs-xs);
+  }
+  .nav-tabs > a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .nav-tabs svg { display: block; width: 22px; height: 22px; }
+  .nav-tabs > a.nav-make { display: flex; flex: 0 0 60px; }
+  .nav-tabs > a.nav-make:hover { background: transparent; }
+  .nav-make-dot { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--blue-solid); color: var(--on-blue); }
+  .nav-make.quiet .nav-make-dot { background: var(--tint); color: var(--blue); }
+  .nav-make-dot svg { stroke-width: 2.2; }
+  .nav-links > :is(.nav-new, .nav-pro, .theme-toggle) { display: none; }
+  .nav:not([data-user]) .nav-more { display: grid; }
+  .nav-menu { inset-inline-end: var(--sp-3); }
+  .nav-mi { min-height: 48px; font-size: var(--fs-base); }
+  /* Room for the tabs under the page, and the cookie bar sits above them. */
+  body:has(.nav-tabs) { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  body:has(.nav-tabs) .consent-bar { bottom: calc(72px + env(safe-area-inset-bottom)); margin-bottom: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .nav-menu { animation: none; } }
+/* colorScheme.css underlines the current link of the old header; here it is a tint. */
+.nav-links > a[aria-current="page"] { text-decoration: none; }
+/* The narrowest phones (320px): the same row, a little tighter. */
+@media (max-width: 359px) {
+  .nav { padding-inline: var(--sp-3); gap: 0; }
+  .brand { font-size: var(--fs-base); }
+  .lang-toggle { padding: 0 var(--sp-2); }
+  .nav-cta:not(.is-user) { padding: 0 var(--sp-3); }
+}

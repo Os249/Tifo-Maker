@@ -17,9 +17,9 @@ import './vendor/tabler-subset.css';
 import './community.css';
 import { hydrateBowls } from './ui/bowlPicture';
 import './projects.css';
-import { initLang, applyDom, localPath, onLangChange, toggleLang, t, tv, tl, getLang } from './ui/i18n';
+import { initLang, applyDom, onLangChange, toggleLang, t, tv, tl, getLang } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
-import { installMobileNav } from './ui/mobileNav';
+import { initSiteHeader, setHeaderUser } from './ui/siteHeader';
 import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
@@ -34,7 +34,6 @@ import {
   fetchThumbnailObjectUrl, takeClaimIntent, type AccountProject,
 } from './net/api';
 import { claimAllLocal } from './net/claimProjects';
-import { mountProChip } from './ui/pro';
 import { mountGiftCard, mountReexportCard, mountRefundCard } from './ui/proCards';
 import { CROWN_SVG } from './ui/crown';
 
@@ -82,7 +81,6 @@ const trashNote = $('pj-trash-note');
 const heading = $('pj-h');
 const searchInput = $<HTMLInputElement>('pj-search');
 const sortSel = $<HTMLSelectElement>('pj-sort');
-const authBtn = $<HTMLButtonElement>('auth-btn');
 
 function readSort(): Sort {
   try {
@@ -781,18 +779,8 @@ async function refreshAuth(): Promise<void> {
   const me = await fetchMe().catch(() => null);
   const named = await ensureUsernameChosen(me);
   signedIn = !!named && isSignedIn();
-  if (named) {
-    authBtn.removeAttribute('data-i18n');
-    authBtn.textContent = `@${named.username}`;
-    // The account, not an action: the shared header draws it as an outline.
-    authBtn.classList.add('is-user');
-    authBtn.onclick = () => location.assign(localPath('/account'));
-  } else {
-    authBtn.setAttribute('data-i18n', 'ed.signup');
-    authBtn.textContent = t('ed.signup');
-    authBtn.classList.remove('is-user');
-    authBtn.onclick = () => void signIn();
-  }
+  // The header draws the account: "Sign up", or a letter that opens the menu.
+  setHeaderUser(named);
 }
 
 // ------------------------------------------------------------------ boot ---
@@ -803,7 +791,7 @@ cleanAddressBar();
 initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
 applyDom(document);
-installMobileNav();
+initSiteHeader({ onSignIn: () => void signIn() });
 installConsent();
 
 const langToggle = $('lang-toggle');
@@ -852,7 +840,6 @@ void (async () => {
   await refreshAuth();
   // Pro: the countdown beside the account, and the gift card under the
   // heading. Both stay hidden unless /api/pro has something to say.
-  if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   // A refund that ended Pro is said here once (and by email): never a silent loss.
   mountRefundCard(where.parentElement ?? document.body, controls);
   mountGiftCard(where.parentElement ?? document.body, controls);

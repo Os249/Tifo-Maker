@@ -147,14 +147,15 @@ console.log('\n— reachable on a phone —');
   const p = await ctx.newPage();
   await p.goto(B + '/', { waitUntil: 'networkidle' });
   await p.waitForTimeout(1200);
-  await p.tap('.mnav-burger');
+  // A phone's bar has no room for the toggle: it is a row of the header's menu (ui/siteHeader.ts).
+  await p.tap('.nav-more');
   await p.waitForTimeout(400);
-  const btn = await p.$('.mnav-drawer .theme-toggle');
-  check('the drawer carries the toggle', !!btn);
+  const btn = await p.$('#nav-menu [data-act="theme"]');
+  check('the menu carries the toggle', !!btn);
   if (btn) {
     const box = await btn.boundingBox();
     check('it is a full-width row, not a stray icon', box.width > 120, `${Math.round(box.width)}px wide`);
-    check('and it is labelled', /light|dark/i.test(await btn.getAttribute('aria-label')));
+    check('and it is labelled', /light|dark/i.test(await btn.textContent()));
     await btn.tap();
     await p.waitForTimeout(300);
     check('tapping it flips the scheme', (await p.evaluate(() => document.documentElement.dataset.theme)) === 'light');

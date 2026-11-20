@@ -75,7 +75,7 @@ try {
     await p.locator('.auth-close').press('Escape');
     check('auth close restores focus to recovery', await p.locator('#reset-recover').evaluate((el) => el === document.activeElement));
     await p.goto(`${B}/account`);
-    check('account has language and theme controls', await p.locator('#lang-toggle').isVisible() && await p.locator('#theme-toggle').isVisible());
+    check('account has language and theme controls', await p.locator('#lang-toggle').isVisible() && (await p.locator('#theme-toggle').isVisible() || await p.locator('.nav-more').isVisible()));
     check('account fits the viewport', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await p.goto(`${B}/legal#privacy`);
     const expected = config.lang === 'ar' ? 'privacy-ar' : 'privacy';
@@ -94,10 +94,8 @@ try {
     await p.goto(`${B}/community`);
     await p.locator('.card-share').first().waitFor();
     const oldLabel = await p.locator('.card-share').first().getAttribute('aria-label');
-    if (config.width < 861) {
-      await p.locator('.mnav-burger').click();
-      await p.locator('.mnav-drawer .lang-toggle').click();
-    } else await p.locator('#lang-toggle').click();
+    // The language button is on the bar at every width.
+    await p.locator('#lang-toggle').click();
     await p.waitForFunction((old) => {
       const label = document.querySelector('.card-share')?.getAttribute('aria-label');
       return !!label && label !== old;

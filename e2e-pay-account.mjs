@@ -175,8 +175,9 @@ console.log('\n— nothing set: the site as it is today —');
   const { ctx, p } = await page(offFan.token);
   await openAccount(p, OFF);
   await sleep(600);
-  const seen = await p.evaluate(() => ({ pro: document.getElementById('pro')?.hidden, pu: !!document.querySelector('.pu, .pu-order, .pro-refunded, [data-act="get"]'), first: document.querySelector('#ac-sections > section:not([hidden])')?.id }));
-  check('the account page is exactly as it was: no Pro section, no purchases', seen.pro === true && !seen.pu && seen.first === 'sec-email', JSON.stringify(seen));
+  const seen = await p.evaluate(() => ({ pro: document.getElementById('pro')?.hidden, pu: !!document.querySelector('.pu, .pu-order, .pro-refunded, [data-act="get"]'), link: document.querySelector('.ac-link[data-to="billing"]')?.hidden, plan: document.getElementById('ac-sum-plan')?.hidden, area: document.getElementById('main')?.dataset.area }));
+  check('the account page has no Pro: no section, no purchases, no billing area in the list, no plan in the summary', seen.pro === true && !seen.pu && seen.link === true && seen.plan === true, JSON.stringify(seen));
+  check('…and the old #pro address lands on the overview, not on an empty area', seen.area === 'overview' || seen.area === 'profile', String(seen.area));
   await p.goto(`${OFF}/projects`, { waitUntil: 'networkidle' });
   check('My projects shows no refund card', await p.evaluate(() => !document.querySelector('.pro-card-refund:not([hidden])')));
   const legal = await (await fetch(`${OFF}/legal`)).text();
@@ -189,9 +190,10 @@ console.log('\n— Pro on sale to this account, nothing bought yet —');
 {
   const { ctx, p } = await page(fresh.token);
   await openAccount(p);
-  check('one section, "Pro and purchases", with the plan', await waitFor(p, () => document.getElementById('pro-ac-h')?.textContent === 'Pro and purchases' && /Free/.test(document.querySelector('#pro .ac-value')?.textContent || '')), await text(p, '#pro'));
-  const ui = await p.evaluate(() => ({ get: document.querySelector('#pro [data-act="get"]')?.textContent, href: document.querySelector('#pro [data-act="get"]')?.getAttribute('href'), list: !!document.querySelector('#pro .pu'), what: !!document.querySelector('#pro [data-act="what"]') }));
-  check('…a short "Get Pro" link to /pro, and nothing else new', ui.get === 'Get Pro for SAR 19.99' && ui.href === '/pro' && !ui.list && !ui.what, JSON.stringify(ui));
+  check('one area, "Pro and billing", opened by #pro, with the plan', await waitFor(p, () => document.getElementById('main')?.dataset.area === 'billing' && document.getElementById('pro-ac-h')?.textContent === 'Pro and billing' && /Free/.test(document.querySelector('#pro .ac-value')?.textContent || '')), await text(p, '#pro'));
+  const ui = await p.evaluate(() => ({ get: document.querySelector('#pro [data-act="get"]')?.textContent, href: document.querySelector('#pro [data-act="get"]')?.getAttribute('href'), list: !!document.querySelector('#pro .pu-order'), empty: document.querySelector('#pro .pu .ac-empty')?.textContent, what: !!document.querySelector('#pro [data-act="what"]'), gold: document.querySelector('#pro [data-act="get"]')?.classList.contains('pro-btn'), note: document.querySelector('#pro .pro-plan .ac-note')?.textContent }));
+  check('…one calm invitation: "TifoMaker stays free", a gold-tinted "Get Pro" link to /pro and "What Pro adds"', ui.get === 'Get Pro for SAR 19.99' && ui.href === '/pro' && ui.gold === true && ui.what && /TifoMaker stays free/.test(ui.note || ''), JSON.stringify(ui));
+  check('…and no purchases yet, said where the receipts will be', !ui.list && /No purchases yet/.test(ui.empty || ''), JSON.stringify(ui));
   await shot(p, 'account-never-bought', '#pro');
   await ctx.close();
   const o = await page(outsider.token);
@@ -213,7 +215,8 @@ console.log('\n— a gift: how many days are left —');
   const { ctx, p } = await page(gifted.token);
   await openAccount(p);
   check('the gift shows the day it ends and "7 days left"', took.status === 200 && (await waitFor(p, () => /Pro gift/.test(document.querySelector('#pro .ac-value')?.textContent || '') && document.querySelector('#pro [data-gift-left]')?.textContent === '7 days left' && /^Ends /.test(document.querySelector('#pro .ac-row .ac-badge[data-state="ok"]')?.textContent || ''))), await text(p, '#pro .ac-row'));
-  check('…with the way to Pro for when it ends, and no purchases to list', await p.evaluate(() => document.querySelector('#pro [data-act="get"]')?.textContent === 'Get Pro for SAR 19.99' && !document.querySelector('#pro .pu')));
+  check('…with the way to Pro for when it ends, and no purchases to list', await p.evaluate(() => document.querySelector('#pro [data-act="get"]')?.textContent === 'Get Pro for SAR 19.99' && !document.querySelector('#pro .pu-order') && /No purchases yet/.test(document.querySelector('#pro .pu .ac-empty')?.textContent || '')));
+  check('…and what happens when the gift ends: back to Free, nothing charged', await p.evaluate(() => /the gift ends and your account goes back to Free\. Nothing is charged/.test(document.querySelector('#pro .pro-when')?.textContent || '')));
   await shot(p, 'account-gift', '#pro');
   await ctx.close();
 }
@@ -394,7 +397,7 @@ console.log('\n— in Arabic, on a phone —');
   await buy(arFan, { card: MADA });
   const { ctx, p } = await page(arFan.token, { lang: 'ar', w: 390, h: 844 });
   await openAccount(p, B, '/ar/account');
-  check('Arabic: the section and the order are there', await waitFor(p, () => document.getElementById('pro-ac-h')?.textContent === 'برو ومشترياتك' && /برو، 30 يوم/.test(document.querySelector('.pu-what')?.textContent || '') && /مدفوع/.test(document.querySelector('.pu-order .ac-badge')?.textContent || '') && /19\.99 ريال/.test(document.querySelector('.pu-amt')?.textContent || '') && /مدى/.test(document.querySelector('.pu-meta')?.textContent || '')), await text(p, '#pro'));
+  check('Arabic: the section and the order are there', await waitFor(p, () => document.getElementById('pro-ac-h')?.textContent === 'برو والفواتير' && /برو، 30 يوم/.test(document.querySelector('.pu-what')?.textContent || '') && /مدفوع/.test(document.querySelector('.pu-order .ac-badge')?.textContent || '') && /19\.99 ريال/.test(document.querySelector('.pu-amt')?.textContent || '') && /مدى/.test(document.querySelector('.pu-meta')?.textContent || '')), await text(p, '#pro'));
   await p.click('.pu-receipt > summary');
   await p.click('[data-act="refund-ask"]');
   await waitFor(p, () => !!document.querySelector('.pu-ask textarea'));
@@ -405,7 +408,8 @@ console.log('\n— in Arabic, on a phone —');
     return {
       over: document.documentElement.scrollWidth - innerWidth,
       dir: getComputedStyle(sec).direction,
-      latin: (clone.textContent.match(/[A-Za-z]{3,}/g) || []).join(','),
+      // The site's own address is written as it is typed, in both languages.
+      latin: (clone.textContent.replace(/tifomaker\.org/g, '').match(/[A-Za-z]{3,}/g) || []).join(','),
       taps: [...sec.querySelectorAll('button, a.ac-btn, summary')].filter((b) => b.offsetParent !== null).map((b) => Math.round(b.getBoundingClientRect().height)),
       font: parseFloat(getComputedStyle(sec.querySelector('.pu-ask textarea')).fontSize),
       inside: [...sec.querySelectorAll('.pu-order, .pu-ask, .pu-lines')].every((e) => e.getBoundingClientRect().left >= -1 && e.getBoundingClientRect().right <= innerWidth + 1),

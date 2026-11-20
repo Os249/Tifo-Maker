@@ -55,7 +55,7 @@ import './community.css';
 import './proPage.css';
 import { initLang, applyDom, getLang, localPath, onLangChange, toggleLang, t, tv } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
-import { installMobileNav } from './ui/mobileNav';
+import { initSiteHeader, setHeaderUser } from './ui/siteHeader';
 import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
@@ -64,13 +64,12 @@ import {
   startCheckout, stopProMail, stopRenewalByLink,
   type AllowanceKind, type CheckoutForm, type CheckoutRefusal, type PayFail, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProState,
 } from './net/api';
-import { CROWN_SVG, endsText, money, mountProChip, proNavOnSale, whenDay, whenRiyadh } from './ui/pro';
+import { CROWN_SVG, endsText, money, proNavOnSale, whenDay, whenRiyadh } from './ui/pro';
 import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
 import { SALE_KEYS, keysOf, saleKey } from './ui/proSaleCopy';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-const authBtn = $<HTMLButtonElement>('auth-btn');
 
 let state: ProState | null = null;
 /** Nothing is painted until /api/pro has answered once. */
@@ -786,17 +785,8 @@ async function load(fresh = false): Promise<void> {
 async function refreshAuth(): Promise<void> {
   const me = await fetchMe().catch(() => null);
   const named = await ensureUsernameChosen(me);
-  if (named) {
-    authBtn.removeAttribute('data-i18n');
-    authBtn.textContent = `@${named.username}`;
-    authBtn.classList.add('is-user');
-    authBtn.onclick = () => location.assign(localPath('/account'));
-  } else {
-    authBtn.setAttribute('data-i18n', 'ed.signup');
-    authBtn.textContent = t('ed.signup');
-    authBtn.classList.remove('is-user');
-    authBtn.onclick = () => void signIn();
-  }
+  // The header draws the account: "Sign up", or a letter that opens the menu.
+  setHeaderUser(named);
 }
 
 /** The sign-in dialog. True once signed in, with the page painted again for the account. */
@@ -815,7 +805,7 @@ cleanAddressBar();
 initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
 applyDom(document);
-installMobileNav();
+initSiteHeader({ onSignIn: () => void signIn() });
 installConsent();
 
 const langToggle = $('lang-toggle');
@@ -901,7 +891,6 @@ window.addEventListener('pageshow', (e) => {
 void (async () => {
   await adoptProviderSession();
   await refreshAuth();
-  if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   await load();
   if (returned) void watchOrder(returned.id, returned.back);
   else if (stopToken) void stopByLink(stopToken);
