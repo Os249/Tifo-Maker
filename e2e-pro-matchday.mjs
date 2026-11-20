@@ -203,7 +203,8 @@ const cornerDiff = (a, b) => {
 const frameSig = (p) => p.evaluate(async () => {
   window.__tifoMatchDay.requestRender();
   await new Promise((r) => setTimeout(r, 1200));
-  const c = document.querySelector('.mds-overlay canvas');
+  // The 3D picture, not the "part to show" strip a Pro account also has in the panel.
+  const c = document.querySelector('.mds-overlay canvas[data-engine]');
   const s = document.createElement('canvas');
   s.width = 160; s.height = 90;
   s.getContext('2d').drawImage(c, 0, 0, 160, 90);
