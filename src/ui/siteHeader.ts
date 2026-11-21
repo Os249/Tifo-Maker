@@ -15,6 +15,7 @@
  * initSiteHeader() alone: the header asks the server itself, and only when the
  * browser holds a session, so a first-time visitor's page loads nothing for it.
  */
+import { escapeHtml } from '../core/escape';
 import { CROWN_SVG } from './crown';
 import { localPath, onLangChange, t, tv } from './i18n';
 
@@ -49,7 +50,6 @@ let proxying = false;
 /** What /api/pro last said that the header shows: whether Pro is running, the countdown's words for it, and whether it is on sale. */
 let pro: { active: boolean; label: () => string; onSale: boolean } = { active: false, label: () => '', onSale: false };
 
-const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 const here = (path: string): boolean => location.pathname.replace(/^\/ar(?=\/|$)/, '').replace(/\/$/, '') === path;
 
 function isDark(): boolean {
@@ -59,22 +59,22 @@ function isDark(): boolean {
 /** The menu's rows, for whoever is looking now. */
 function menuHtml(): string {
   const link = (path: string, icon: string, label: string, cls = ''): string =>
-    `<a class="nav-mi ${cls}" role="menuitem" href="${esc(localPath(path))}"${here(path.split('#')[0]) && !path.includes('#') ? ' aria-current="page"' : ''}>${icon}<span>${esc(label)}</span></a>`;
+    `<a class="nav-mi ${cls}" role="menuitem" href="${escapeHtml(localPath(path))}"${here(path.split('#')[0]) && !path.includes('#') ? ' aria-current="page"' : ''}>${icon}<span>${escapeHtml(label)}</span></a>`;
   const proRow = pro.active
     ? link('/account#billing', CROWN_SVG, t('nav.managePro'), 'gold')
     : link('/pro', CROWN_SVG, t(pro.onSale ? 'nav.pro' : 'nav.proSoon'), 'gold');
-  const theme = `<button type="button" class="nav-mi" role="menuitem" data-act="theme">${isDark() ? ICON.sun : ICON.moon}<span>${esc(t(isDark() ? 'theme.light' : 'theme.dark'))}</span></button>`;
+  const theme = `<button type="button" class="nav-mi" role="menuitem" data-act="theme">${isDark() ? ICON.sun : ICON.moon}<span>${escapeHtml(t(isDark() ? 'theme.light' : 'theme.dark'))}</span></button>`;
   if (!user) return proRow + link('/clubs', ICON.flag, t('nav.clubs')) + `<div class="nav-menu-sep"></div>` + theme;
   return (
-    `<div class="nav-menu-head"><b><bdi dir="ltr">@${esc(user.username)}</bdi></b>` +
-    `<span>${esc((pro.active && pro.label()) || t('nav.planFree'))}</span></div>` +
+    `<div class="nav-menu-head"><b><bdi dir="ltr">@${escapeHtml(user.username)}</bdi></b>` +
+    `<span>${escapeHtml((pro.active && pro.label()) || t('nav.planFree'))}</span></div>` +
     link('/account', ICON.user, t('nav.account')) +
     link('/projects', ICON.folder, t('nav.projects')) +
     proRow +
     link('/clubs', ICON.flag, t('nav.clubs'), 'only-narrow') +
     `<div class="nav-menu-sep"></div>` +
     theme +
-    `<button type="button" class="nav-mi" role="menuitem" data-act="signout">${ICON.out}<span>${esc(t('nav.signOut'))}</span></button>`
+    `<button type="button" class="nav-mi" role="menuitem" data-act="signout">${ICON.out}<span>${escapeHtml(t('nav.signOut'))}</span></button>`
   );
 }
 
@@ -111,7 +111,7 @@ function paintButton(): void {
     authBtn.dataset.letter = user.username.charAt(0);
     authBtn.toggleAttribute('data-pro', pro.active);
     // The name is the button's text for a screen reader; the letter is drawn from data-letter.
-    authBtn.innerHTML = `<span class="nav-sr">@${esc(user.username)}</span>` + (pro.active ? `<span class="nav-av-badge" aria-hidden="true">${CROWN_SVG}</span>` : '');
+    authBtn.innerHTML = `<span class="nav-sr">@${escapeHtml(user.username)}</span>` + (pro.active ? `<span class="nav-av-badge" aria-hidden="true">${CROWN_SVG}</span>` : '');
     authBtn.setAttribute('aria-label', pro.active ? tv('nav.youPro', { name: user.username }) : `@${user.username}`);
     authBtn.setAttribute('aria-haspopup', 'menu');
     authBtn.setAttribute('aria-expanded', String(!!menu && !menu.hidden && opener === authBtn));
