@@ -111,7 +111,7 @@ const TAP = () => {
     cb(ts);
     const rec = window.__rec;
     if (!rec) return;
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     if (!c || !c.width) return;
     const el = document.querySelector('.mds-beats');
     const hud = el && el.classList.contains('show') ? `${el.dataset.phase}${el.querySelectorAll('i.on').length}` : '-';

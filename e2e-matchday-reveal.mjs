@@ -268,7 +268,7 @@ console.log('\n— Match Day: every mode, the CPU\'s frame, on the GPU —');
     const n = window.__up.mdDraws;
     for (let k = 0; k < 400 && window.__up.mdDraws === n; k++) { sim.requestRender(); await new Promise((r) => setTimeout(r, 25)); }
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    return document.querySelector('.mds-overlay canvas').toDataURL('image/png');
+    return document.querySelector('.mds-overlay canvas[data-engine]').toDataURL('image/png');
   });
   await draw();
   await sleep(3000);

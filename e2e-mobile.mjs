@@ -717,13 +717,13 @@ console.log('\n— Match Day: driving it with a finger —');
   await dismissIntro(p);
 
   const frame = () => p.evaluate(() => {
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     const t = document.createElement('canvas'); t.width = 160; t.height = 160;
     t.getContext('2d').drawImage(c, 0, 0, 160, 160);
     return t.toDataURL().slice(2000, 2600);
   });
   const before = await frame();
-  const box = await (await p.$('.mds-overlay canvas')).boundingBox();
+  const box = await (await p.$('.mds-overlay canvas[data-engine]')).boundingBox();
   await p.mouse.move(box.x + 180, box.y + 300);
   await p.mouse.down();
   await p.mouse.move(box.x + 80, box.y + 300, { steps: 14 });
@@ -809,7 +809,7 @@ console.log('\n— Match Day: when the phone says no —');
   await p.waitForTimeout(5000);
   await dismissIntro(p);
   await p.evaluate(() => {
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     (c.getContext('webgl2') || c.getContext('webgl')).getExtension('WEBGL_lose_context').loseContext();
   });
   await p.waitForTimeout(2000);

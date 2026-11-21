@@ -84,7 +84,7 @@ const save = (name, dataUrl) => writeFileSync(`${OUT}/${name}.png`, Buffer.from(
 /** Brightness spread of the 3D view: a blank or single-colour frame is near 0. */
 const spread = (p) =>
   p.evaluate(async () => {
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     const img = new Image();
     img.src = c.toDataURL('image/png');
     await img.decode();

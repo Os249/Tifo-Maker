@@ -64,7 +64,7 @@ const save = (name, dataUrl) => writeFileSync(`${OUT}/${name}.png`, Buffer.from(
 /** Mean brightness (0..255) of the top quarter of the 3D view: the roof. */
 const roofBrightness = (p) =>
   p.evaluate(async () => {
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     const img = new Image();
     img.src = c.toDataURL('image/png');
     await img.decode();
