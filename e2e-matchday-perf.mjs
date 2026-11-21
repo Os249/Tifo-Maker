@@ -190,7 +190,7 @@ console.log('\n— High: no MSAA under the post pass; 1.5x pixels at most —');
 {
   const { ctx, p, errs } = await sim({ memory: 8, dpr: 2 });
   const r = await p.evaluate(() => {
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     const gl = c.getContext('webgl2');
     return { aa: gl.getContextAttributes().antialias, ratio: c.width / c.clientWidth, tier: document.querySelector('.mds-bar select, .mds-panel-acts select')?.value, glow: !document.querySelector('[data-k="glow"]').disabled };
   });
@@ -203,7 +203,7 @@ console.log('\n— High: no MSAA under the post pass; 1.5x pixels at most —');
 {
   const { ctx, p } = await sim({ memory: 4, dpr: 2 });
   const r = await p.evaluate(() => {
-    const c = document.querySelector('.mds-overlay canvas');
+    const c = document.querySelector('.mds-overlay canvas[data-engine]');
     return { aa: c.getContext('webgl2').getContextAttributes().antialias, ratio: c.width / c.clientWidth, tier: document.querySelector('.mds-bar select, .mds-panel-acts select')?.value };
   });
   check('Medium keeps its MSAA (it has no post pass)', r.tier === 'medium' && r.aa === true, JSON.stringify(r));
