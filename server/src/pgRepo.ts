@@ -15,6 +15,7 @@ import type {
   GalleryQuery,
   Lead,
   LeadsRepository,
+  StoredLead,
   NewDesign,
   AiEventInput,
   AiEventsRepository,
@@ -1842,5 +1843,30 @@ export class PgLeadsRepository implements LeadsRepository {
       ],
     );
     return { id: String(res.rows[0].id) };
+  }
+  async list(limit: number): Promise<StoredLead[]> {
+    const res = await this.pool.query(
+      `SELECT id, name, email, organization, org_type, message, handled, created_at
+         FROM leads ORDER BY created_at DESC, id LIMIT $1`,
+      [Math.min(500, Math.max(1, Math.floor(limit) || 1))],
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      name: String(r.name),
+      email: String(r.email),
+      organization: r.organization === null ? null : String(r.organization),
+      orgType: r.org_type === null ? null : String(r.org_type),
+      message: r.message === null ? null : String(r.message),
+      handled: Boolean(r.handled),
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+  }
+  async counts(): Promise<{ total: number; open: number }> {
+    const res = await this.pool.query('SELECT count(*)::int AS total, count(*) FILTER (WHERE NOT handled)::int AS open FROM leads');
+    return { total: Number(res.rows[0]?.total) || 0, open: Number(res.rows[0]?.open) || 0 };
+  }
+  async setHandled(id: string, handled: boolean): Promise<boolean> {
+    const res = await this.pool.query('UPDATE leads SET handled = $2 WHERE id::text = $1', [id, handled]);
+    return (res.rowCount ?? 0) > 0;
   }
 }

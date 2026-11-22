@@ -5114,8 +5114,51 @@ export async function buildApp(
       orgType: field(body.orgType, 40),
       message: field(body.message, 2000),
     });
+    // A club that wrote in should be heard the same day, not when the count on /admin is next looked at. Sent
+    // to the owner's own address (FEEDBACK_TO, where the feedback reports go) and nowhere else; the enquiry is
+    // already stored, so a mail that fails loses nothing.
+    if (options.emailSender && options.feedbackTo) {
+      const organization = field(body.organization, 120);
+      const orgType = field(body.orgType, 40);
+      const message = field(body.message, 2000);
+      const who = `${name} <${email}>`;
+      const from = [organization, orgType].filter(Boolean).join(' · ');
+      void options.emailSender
+        .send({
+          to: options.feedbackTo,
+          subject: `TifoMaker club enquiry: ${(organization ?? name).slice(0, 60).replace(/[\r\n\t]+/g, ' ')}`,
+          html:
+            `<p><b>Club enquiry</b> from ${escapeHtml(name)} (${escapeHtml(email)})</p>` +
+            (from ? `<p>${escapeHtml(from)}</p>` : '') +
+            `<p style="white-space:pre-wrap">${message ? escapeHtml(message) : '(no message)'}</p>` +
+            `<p style="color:#666;font-size:12px">Sent from the For clubs page. It is also in /admin, under Feedback.</p>`,
+          text: `Club enquiry from ${who}\n${from ? from + '\n' : ''}\n${message ?? '(no message)'}\n\nSent from the For clubs page. It is also in /admin, under Feedback.`,
+        })
+        .catch(() => {});
+    }
     return reply.code(201).send({ ok: true, id: lead.id });
   });
+
+  // The enquiries, read back: admin only, like feedback. /admin used to show their number and nothing else.
+  if (options.leads) {
+    const leads = options.leads;
+    app.get('/api/admin/leads', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const q = req.query as { limit?: string };
+      const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
+      const [items, counts] = await Promise.all([leads.list(limit), leads.counts()]);
+      return reply.send({ items, counts });
+    });
+    app.post('/api/admin/leads/:id/handled', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const { id } = req.params as { id: string };
+      if (!/^[0-9a-f-]{8,64}$/i.test(id)) return reply.code(404).send({ error: 'enquiry not found' });
+      const handled = (req.body as { handled?: unknown } | null)?.handled !== false;
+      const ok = await leads.setHandled(id, handled).catch(() => false);
+      if (!ok) return reply.code(404).send({ error: 'enquiry not found' });
+      return reply.send({ ok: true, handled });
+    });
+  }
 
 
   // Serve the built frontend from the same origin as the API, so the client's

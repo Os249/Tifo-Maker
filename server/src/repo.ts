@@ -720,9 +720,23 @@ export interface Lead {
   message?: string | null;
 }
 
+/** An enquiry as /admin reads it back. */
+export interface StoredLead extends Lead {
+  id: string;
+  createdAt: string;
+  /** The owner pressed "Mark handled" on it. */
+  handled: boolean;
+}
+
 export interface LeadsRepository {
   /** Store a B2B enterprise lead from the For Clubs page. */
   createLead(lead: Lead): Promise<{ id: string }>;
+  /** The newest enquiries first, for /admin. */
+  list(limit: number): Promise<StoredLead[]>;
+  /** Every enquiry ever sent, and how many are not marked handled. */
+  counts(): Promise<{ total: number; open: number }>;
+  /** Dealt with, or not after all. False when there is no such enquiry. */
+  setHandled(id: string, handled: boolean): Promise<boolean>;
 }
 
 // ============ AI Tifo Designer quota ============

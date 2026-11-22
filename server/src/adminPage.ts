@@ -498,8 +498,10 @@ async function loadAll(){
     api('/api/admin/pro/subscriptions'),
     api('/api/admin/pro/refund-requests'),
     api('/api/admin/pro/launch'),
-    api('/api/admin/pro/members')
+    api('/api/admin/pro/members'),
+    api('/api/admin/leads?limit=200')
   ]);
+  LEADS = results[16].ok && results[16].data ? results[16].data : { error: results[16].status };
   MEMBERS = results[15].ok && results[15].data ? results[15].data : { error: results[15].status };
   LAUNCH = results[14].ok && results[14].data ? results[14].data : { error: results[14].status };
   REQS = results[13].ok && results[13].data ? results[13].data : { error: results[13].status };
@@ -992,6 +994,77 @@ function timeAgo(iso){
 
 var FB_SHOW = 'open';
 var FB_MSG = '';
+/* ---- Club enquiries: what a club, an agency or a group wrote on the For clubs page ----
+   Stored since the form went up, and counted on the Overview, but never listed: the only way to read one was
+   the database. Same shape as a feedback report: who, when, the message, a reply link, Mark handled. */
+var LEAD_SHOW = 'open';
+var LEAD_MSG = '';
+var LEAD_TYPE = { club:'Club', agency:'Agency', ultras:'Supporters group', other:'Other' };
+function leadsOpen(){ return (LEADS && LEADS.counts && Number(LEADS.counts.open)) || 0; }
+function leadsSection(){
+  if (!LEADS || LEADS.error) return '';
+  var counts = LEADS.counts || { total:0, open:0 }, items = LEADS.items || [];
+  var html = '<h2 class="sec">Club enquiries'
+    + (counts.open ? ' <span class="badge warn">' + fmt(counts.open) + ' not handled</span>' : (counts.total ? ' <span class="badge good">all handled</span>' : ''))
+    + ' <span class="hint">sent from the For clubs page &middot; all time</span></h2>';
+  if (!counts.total && !items.length){
+    return html + '<div class="card"><p class="empty">No club has written yet. The form is at the bottom of the For clubs page.</p></div>';
+  }
+  html += '<p class="note" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+    + '<button type="button" class="tab lead-filter" data-lead="open" aria-current="' + (LEAD_SHOW === 'open') + '">Not handled</button>'
+    + '<button type="button" class="tab lead-filter" data-lead="all" aria-current="' + (LEAD_SHOW === 'all') + '">Everything</button></p>';
+  html += '<p id="lead-out" class="note" role="status" aria-live="polite">' + esc(LEAD_MSG) + '</p>';
+  var shown = [];
+  for (var k = 0; k < items.length; k++) if (LEAD_SHOW === 'all' || !items[k].handled) shown.push(items[k]);
+  if (!shown.length){
+    html += '<div class="card"><p class="empty">' + (LEAD_SHOW === 'open' ? 'Nothing is waiting among the newest ' + fmt(items.length) + '.' : 'Nothing here.') + '</p></div>';
+  } else {
+    html += '<div class="card" style="margin-top:10px">';
+    for (var i = 0; i < shown.length; i++){
+      var it = shown[i];
+      var from = [it.organization, it.orgType ? (LEAD_TYPE[it.orgType] || it.orgType) : ''].filter(Boolean).join(' · ');
+      html += '<div class="fbrow leadrow">'
+        + '<div class="fbtop">'
+        +   '<b>' + esc(it.name) + '</b>'
+        +   '<span class="fbwhen">' + esc(timeAgo(it.createdAt)) + (it.handled ? ' &middot; handled' : '') + '</span>'
+        +   '<a class="fbmail" href="' + esc(mailtoHref(it.email)) + '">' + esc(it.email) + '</a>'
+        +   '<button type="button" class="lead-handle" data-id="' + esc(it.id) + '" data-to="' + (it.handled ? '0' : '1') + '">' + (it.handled ? 'Reopen' : 'Mark handled') + '</button>'
+        + '</div>'
+        + (from ? '<p class="fbsteps">' + esc(from) + '</p>' : '')
+        + '<p class="fbmsg">' + (it.message ? esc(it.message) : '<span class="dim">No message, only the contact details.</span>') + '</p>'
+        + '</div>';
+    }
+    html += '</div>';
+  }
+  if (counts.total > items.length) html += '<p class="note">The newest ' + fmt(items.length) + ' enquiries are listed; ' + fmt(counts.total - items.length) + ' older ones are counted above but not shown.</p>';
+  return html;
+}
+function wireLeads(){
+  var filters = document.querySelectorAll('.lead-filter');
+  for (var i = 0; i < filters.length; i++){
+    filters[i].addEventListener('click', function(e){ LEAD_SHOW = e.currentTarget.getAttribute('data-lead'); LEAD_MSG = ''; paintSection(); });
+  }
+  var btns = document.querySelectorAll('.lead-handle');
+  for (var j = 0; j < btns.length; j++){
+    btns[j].addEventListener('click', async function(e){
+      var b = e.currentTarget, id = b.getAttribute('data-id'), to = b.getAttribute('data-to') === '1';
+      b.disabled = true;
+      var r = await post('/api/admin/leads/' + encodeURIComponent(id) + '/handled', { handled: to });
+      if (!r.ok){ b.disabled = false; el('lead-out').textContent = 'Not saved (' + ((r.data && r.data.error) || ('HTTP ' + r.status)) + '). Try again.'; return; }
+      var items = (LEADS && LEADS.items) || [];
+      for (var k = 0; k < items.length; k++) if (items[k].id === id && !!items[k].handled !== to){
+        items[k].handled = to;
+        if (LEADS.counts) LEADS.counts.open = Math.max(0, (Number(LEADS.counts.open) || 0) + (to ? -1 : 1));
+      }
+      LEAD_MSG = to ? 'Marked handled.' : 'Reopened.';
+      var y = window.scrollY;
+      renderTabs();
+      paintSection();
+      window.scrollTo(0, y);
+    });
+  }
+}
+
 function feedbackSection(fb){
   var counts = (fb && fb.counts) || { total:0, open:0, bugs:0, ideas:0 };
   var items = (fb && fb.items) || [];
@@ -1335,7 +1408,8 @@ function waitingCounts(){
   return {
     review: qc.reports + qc.photos + qc.stadiums,
     orders: pending + look, refunds: pending, look: look,
-    feedback: Number(fb.open) || 0,
+    feedback: (Number(fb.open) || 0) + leadsOpen(),
+    enquiries: leadsOpen(),
     security: DATA ? socFiring().length : 0
   };
 }
@@ -1406,7 +1480,8 @@ function boardSection(){
   html += todoRow(qc.stadiums, 'Stadium submissions to review', 'Review', '#review');
   html += todoRow(qc.photos, 'Match photos to verify', 'Review', '#review');
   html += todoRow(qc.reports, 'Reported designs', 'Review', '#review');
-  html += todoRow(w.feedback, 'Feedback not marked handled', 'Feedback', '#feedback');
+  html += todoRow(w.feedback - w.enquiries, 'Feedback not marked handled', 'Feedback', '#feedback');
+  html += todoRow(w.enquiries, 'Club enquiries not marked handled', 'Feedback', '#feedback');
   html += todoRow(w.security, 'Security alerts firing', 'Security', '#security');
   html += '</div>';
 
@@ -1422,7 +1497,7 @@ function boardSection(){
     'Every design row: private drafts, published ones and ones in the Trash (kept 30 days, then removed for good). ' + fmt(r7.designs) + ' were made in the last 7 days.');
   html += stat(t.publicDesigns, 'designs', 'Published', 'of which ' + fmt(t.templates) + plural(t.templates, ' is a template', ' are templates'), 'Designs marked public. Templates are published designs too, so they are inside this number, not beside it.');
   html += aiBoardKpi();
-  html += stat(t.leads, 'leads', 'Club enquiries', fmt(r7.leads) + ' in the last 7 days', 'Messages sent from the For clubs page.');
+  html += stat(t.leads, 'leads', 'Club enquiries', fmt(r7.leads) + ' in the last 7 days', 'Messages sent from the For clubs page. Read and answer them under Feedback.');
   html += '</div>';
 
   html += '<h2 class="sec">Growth <span class="hint">last 30 days &middot; Riyadh days &middot; every day drawn, empty ones as zero</span></h2><div class="grid two">';
@@ -1669,7 +1744,7 @@ function wireLibrary(){
   });
 }
 
-function feedbackTab(){ return feedbackSection(DATA.fb); }
+function feedbackTab(){ return leadsSection() + feedbackSection(DATA.fb); }
 
 /* ---- AI: what people actually did with the designer ----
 
@@ -1999,7 +2074,7 @@ function paintSection(){
   if (currentTab === 'email') wireEmailTest();
   if (currentTab === 'security') wireSecurity();
   if (currentTab === 'review') wireLibrary();
-  if (currentTab === 'feedback') wireFeedback();
+  if (currentTab === 'feedback'){ wireFeedback(); wireLeads(); }
   if (currentTab === 'traffic') wireLinkBuilder();
   if (currentTab === 'pro') wireLaunch();
   if (currentTab === 'orders'){ wireOrders(); wireRequests(); wireSubs(); }
@@ -2683,6 +2758,7 @@ function wireLookup(){
    refunds (that is Pro, Payments). "Give Pro" is the same grant as the Pro
    tab's. Both are written to the Security tab's audit trail. Usernames only. */
 var MEMBERS = null;
+var LEADS = null;
 var MEM_FILTER = 'now';
 var MEM_MSG = '';
 var MEM_GIVE = '';
