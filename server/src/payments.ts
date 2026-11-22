@@ -94,6 +94,20 @@
  * shows on the site once; a fan can ask for the refund the terms promise from
  * the account page, and the request waits for the owner in /admin.
  *
+ * ---------------------------------------------------------------------------
+ * The match pass (22 Nov 2026). A second thing to buy: a few days of the same
+ * Pro (PRO_MATCH_DAYS, 3 by default) for one small payment (PRO_MATCH_PRICE).
+ * Off until PRO_MATCH_PASS=on. It is an order like any other, so every
+ * guarantee above holds for it unchanged: one pass per paid order, the amount
+ * and the currency checked against Moyasar's own answer, a refund ends the
+ * pass, nothing believed from the browser (the browser names the product;
+ * the server sets its price and its length). What is different:
+ *   - it never renews: "Keep Pro on" is not offered with it, a tick for it is
+ *     refused, and a card saved with it is deleted at once;
+ *   - it never carries the founders bonus;
+ *   - its pass starts when the Pro the account holds ends, like a month bought
+ *     early, so nothing paid for overlaps.
+ *
  *   PRO_AUTO_REFUND=on       refund such a request at once, with no person
  *                            looking, when the order was paid within
  *                            REFUND_DAYS, its pass shows no use, and the
@@ -105,7 +119,7 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { MoyasarError, failReason, isMoyasarId, readPayment, type MoyasarApi, type MoyasarInvoice, type MoyasarPayment } from './moyasar';
 import type { PaymentRepository, ProOrder, ProSubscription, ProSubscriptionRow, RefundRequest, RefundRequestRow } from './payRepo';
-import { OFFER, liveFor, previewUsers, proMode } from './proPlan';
+import { OFFER, liveFor, matchPass, previewUsers, proMode, type MatchPass, type Product } from './proPlan';
 import { priceAt, regularHalalas } from './proLaunch';
 import type { ProService } from './pro';
 import type { ProPass } from './proRepo';
@@ -332,6 +346,9 @@ export interface FormConfig {
   renew: { price: number; days: number; nextAt: string; methods: string[]; mada: boolean } | null;
   /** The founders offer, when this order's account can still take it: paid by `until`, the pass is `total` days. */
   founder: { until: string; bonusDays: number; total: number } | null;
+  /** What this order buys, and for how many days: the page's words follow it. */
+  product: Product;
+  days: number;
 }
 
 /**
@@ -471,6 +488,12 @@ export class PaymentService {
     return checkoutKind(this.env);
   }
 
+  /** The match pass as it is sold now: its price and length, and whether it is on sale at all. */
+  match(): MatchPass {
+    const m = matchPass(this.env);
+    return { ...m, on: m.on && this.on() };
+  }
+
   /** "Keep Pro on" is offered, and renewals are charged. Never while Pro itself is switched off (PRO_MODE=off). */
   renewOn(): boolean {
     return this.on() && proMode(this.env) !== 'off' && autoRenewOn(this.env) && !!this.api?.chargeToken && !!this.api.payment;
@@ -516,7 +539,8 @@ export class PaymentService {
     return ends.length ? Math.max(...ends) : null;
   }
 
-  private description(lang: 'en' | 'ar', days: number): string {
+  private description(lang: 'en' | 'ar', days: number, product: Product = 'monthly'): string {
+    if (product === 'match') return lang === 'ar' ? `تيفو ميكر برو، باقة المباراة: ${days * 24} ساعة` : `TifoMaker Pro match pass: ${days * 24} hours`;
     return lang === 'ar' ? `تيفو ميكر برو: ${days} يوم` : `TifoMaker Pro: ${days} days`;
   }
 
@@ -529,17 +553,18 @@ export class PaymentService {
       publishableKey: (this.env.MOYASAR_PUBLISHABLE_KEY ?? '').trim(),
       amount: order.amount,
       currency: 'SAR',
-      description: this.description(lang, order.days),
+      description: this.description(lang, order.days, order.product),
       callbackUrl: `${base}${lang === 'ar' ? '/ar/pro' : '/pro'}?order=${order.id}`,
       givenId: order.paymentId ?? '',
       methods,
       networks: ['mada', 'visa', 'mastercard'],
       applePay: methods.includes('applepay') ? { label: 'TifoMaker', country: 'SA' } : null,
       samsungPay: methods.includes('samsungpay') ? { serviceId: samsung, orderNumber: order.id } : null,
-      renew: this.renewOn()
+      // A match pass never renews: the box is not offered with it.
+      renew: this.renewOn() && order.product === 'monthly'
         ? {
           // Renewals are always at the regular price, whatever this first month cost.
-          price: regularHalalas() / 100,
+          price: regularHalalas(this.env) / 100,
           days: order.days,
           nextAt: new Date(start.getTime() + first * DAY_MS).toISOString(),
           methods: methods.filter((m) => RENEWABLE.includes(m)),
@@ -547,12 +572,18 @@ export class PaymentService {
         }
         : null,
       founder: fo ? { until: fo.until, bonusDays: fo.bonusDays, total: first } : null,
+      product: order.product,
+      days: order.days,
     };
   }
 
   /** "Get Pro": an order and a Moyasar invoice (or the form for one), or the open one this account already has. */
-  async checkout(b: Buyer, lang: 'en' | 'ar', base: string): Promise<CheckoutResult> {
+  async checkout(b: Buyer, lang: 'en' | 'ar', base: string, what: { product?: Product; src?: string | null } = {}): Promise<CheckoutResult> {
     if (!this.openFor(b.username)) return { ok: false, reason: 'off' };
+    const product: Product = what.product === 'match' ? 'match' : 'monthly';
+    const pass = this.match();
+    // The match pass is only sold while its own switch is on.
+    if (product === 'match' && !pass.on) return { ok: false, reason: 'off' };
     // The receipt goes to the email, and a verified one is the account's proof of being a person.
     if (!b.emailVerified || !b.email) return { ok: false, reason: 'verify' };
     const now = this.pro.now();
@@ -567,16 +598,19 @@ export class PaymentService {
       recent = await this.repo.recentFor(b.id, since);
     }
     const when = await this.startFor(b.id, now);
-    // The founders offer, while this account can still take it (never with test money).
-    const fo = this.testMode() ? null : (await this.opts.founders?.offerFor(b.id, now).catch(() => null)) ?? null;
+    // The founders offer, while this account can still take it (never with test money, never on a match pass).
+    const fo = this.testMode() || product !== 'monthly' ? null : (await this.opts.founders?.offerFor(b.id, now).catch(() => null)) ?? null;
     // Holding Pro for longer than a week normally means "come back later". A founder's offer has a deadline,
     // so they may buy now: the month starts when the Pro they hold ends, as any month bought early does.
     if ('held' in when && !fo) return { ok: false, reason: 'held', endsAt: when.held };
     const start = 'held' in when ? new Date(when.held) : when.start;
-    const amount = priceHalalas(now, this.env);
+    // The server's price and length for the product named: the browser chooses which, never how much.
+    const amount = product === 'match' ? pass.halalas : priceHalalas(now, this.env);
+    const days = product === 'match' ? pass.days : OFFER.monthly.days;
+    const src = what.src ?? null;
     const kind = this.checkoutKind();
     const fresh = (o: ProOrder): boolean =>
-      o.status === 'pending' && o.amount === amount && o.testMode === this.testMode() && now.getTime() - Date.parse(o.createdAt) < REUSE_MINUTES * 60_000;
+      o.status === 'pending' && o.product === product && o.days === days && o.amount === amount && o.testMode === this.testMode() && now.getTime() - Date.parse(o.createdAt) < REUSE_MINUTES * 60_000;
 
     if (kind === 'form') {
       // An order whose form was opened but never sent is the same order again: nothing exists at Moyasar for it yet.
@@ -598,7 +632,7 @@ export class PaymentService {
           return { ok: false, reason: 'unavailable' };
         }
       }
-      const order = await this.repo.create({ userId: b.id, amount, days: OFFER.monthly.days, lang, testMode: this.testMode(), now, kind: 'form', paymentId: givenId });
+      const order = await this.repo.create({ userId: b.id, amount, days, lang, testMode: this.testMode(), now, kind: 'form', paymentId: givenId, product, src });
       return { ok: true, orderId: order.id, form: this.formConfig(order, lang, base, start, fo) };
     }
 
@@ -608,13 +642,13 @@ export class PaymentService {
     if (open?.invoiceUrl) return { ok: true, orderId: open.id, url: open.invoiceUrl };
     if (recent.length >= ORDERS_PER_DAY) return { ok: false, reason: 'busy' };
 
-    const order = await this.repo.create({ userId: b.id, amount, days: OFFER.monthly.days, lang, testMode: this.testMode(), now });
+    const order = await this.repo.create({ userId: b.id, amount, days, lang, testMode: this.testMode(), now, product, src });
     const page = lang === 'ar' ? '/ar/pro' : '/pro';
     try {
       const inv = await this.api.createInvoice({
         amount,
         currency: 'SAR',
-        description: this.description(lang, OFFER.monthly.days),
+        description: this.description(lang, days, product),
         callbackUrl: `${base}/api/pro/pay/invoice`,
         successUrl: `${base}${page}?order=${order.id}`,
         // "Back" on Moyasar's page: /pro says nothing was charged (or that it was paid after all).
@@ -639,6 +673,8 @@ export class PaymentService {
    */
   async setKeep(userId: string, orderId: string, keep: boolean): Promise<boolean> {
     if (keep && !this.renewOn()) return false;
+    // A match pass is bought outright: it cannot be asked to renew.
+    if (keep && (await this.repo.get(orderId))?.product !== 'monthly') return false;
     return this.repo.setKeep(orderId, userId, keep, this.pro.now());
   }
 
@@ -664,7 +700,7 @@ export class PaymentService {
     }
     // The founders bonus this confirmation is in time for (proLaunch.ts has the rule). Whether this account may
     // have it, once and never again, is decided by the store in the step that marks the order paid.
-    const bonusDays = (await this.opts.founders?.bonusDays(order, now).catch(() => 0)) ?? 0;
+    const bonusDays = order.product === 'monthly' ? (await this.opts.founders?.bonusDays(order, now).catch(() => 0)) ?? 0 : 0;
     const r = await this.repo.markPaid(order.id, { paymentId, method, brand, now, startsAt: start, endsAt: new Date(start.getTime() + order.days * DAY_MS), bonusDays });
     if (!r.ok) return (await this.repo.get(order.id)) ?? order;
     if (r.first) {
@@ -1170,7 +1206,7 @@ export class PaymentService {
   private async afterPaid(order: ProOrder, p: MoyasarPayment | null, pass: ProPass | null, now: Date): Promise<ProSubscription | null> {
     if (order.kind === 'renewal') return order.subscriptionId ? this.repo.subById(order.subscriptionId) : null;
     const token = p?.token ?? null;
-    const asked = order.kind === 'form' && order.keep && !!order.userId && !!pass && this.renewOn();
+    const asked = order.kind === 'form' && order.product === 'monthly' && order.keep && !!order.userId && !!pass && this.renewOn();
     const mada = p?.company === 'mada';
     const canRenew = !!p && RENEWABLE.includes(p.sourceType ?? '') && (!mada || renewMada(this.env));
     if (!asked || !token || !canRenew || !order.userId || !pass) {
@@ -1188,7 +1224,7 @@ export class PaymentService {
       userId: order.userId, token, method: p.sourceType, brand: t.brand ?? p.company ?? null, lastFour: t.lastFour, expMonth: t.month, expYear: t.year,
       // Each renewal is the regular price for the plan's days, whatever the first month cost or however long a
       // founder's first month ran: what the box said before the fan ticked it.
-      amount: regularHalalas(), days: order.days, lang: order.lang, testMode: order.testMode,
+      amount: regularHalalas(this.env), days: order.days, lang: order.lang, testMode: order.testMode,
       optedInAt: new Date(order.keepAt ?? now), nextChargeAt: new Date(pass.endsAt), now,
     });
     console.log(`[tifo] payments: auto-renew started with order ${order.id}`);
@@ -1334,6 +1370,10 @@ export class PaymentService {
 
   private async renewOne(sub: ProSubscription, now: Date, out: RenewRun): Promise<void> {
     if (!sub.token || !sub.nextChargeAt || !this.api?.chargeToken || !this.api.payment) return;
+    // The price of a month came down since this fan ticked the box: they renew at the price the page shows
+    // now, never at more than it. (It only ever goes down here: a price that rose is not passed on.)
+    const regular = regularHalalas(this.env);
+    if (regular < sub.amount && (await this.repo.lowerSubAmount(sub.id, regular, now))) sub.amount = regular;
     // Real money and test money never mix: a subscription made on the other kind of key waits.
     if (sub.testMode !== this.testMode()) return;
     const due = Date.parse(sub.nextChargeAt);
@@ -1451,6 +1491,14 @@ export interface PayLegalMore {
   launch?: { price: number; regular: number; until: string } | null;
   /** The founders offer is on (it is, unless PRO_FOUNDERS_BONUS=off). */
   founders?: boolean;
+  /** The match pass, while it is sold: its price in halalas and its length in hours. <template data-pay="match">, {{matchPrice}}, {{matchHours}}. */
+  match?: { price: number; hours: number } | null;
+  /**
+   * The automatic gift, while it is on (it needs no sale: shown whenever Pro
+   * is on): <template data-pay="gift"> with {{giftDays}}; and, when its emails
+   * are on too, <template data-pay="giftmail">.
+   */
+  gift?: { days: number; mails: boolean } | null;
 }
 
 export function payLegal(html: string, onSale: boolean, renew = false, more: PayLegalMore = {}): string {
@@ -1464,8 +1512,15 @@ export function payLegal(html: string, onSale: boolean, renew = false, more: Pay
   const l = onSale ? more.launch ?? null : null;
   out = keep(out, 'launch', !!l);
   out = keep(out, 'founders', onSale && more.founders === true);
+  const sar = (h: number): string => (h % 100 === 0 ? String(h / 100) : (h / 100).toFixed(2));
+  const mp = onSale ? more.match ?? null : null;
+  out = keep(out, 'match', !!mp);
+  if (mp) out = out.replace(/\{\{matchPrice\}\}/g, sar(mp.price)).replace(/\{\{matchHours\}\}/g, String(mp.hours));
+  const gift = more.gift ?? null;
+  out = keep(out, 'gift', !!gift);
+  out = keep(out, 'giftmail', !!gift?.mails);
+  if (gift) out = out.replace(/\{\{giftDays\}\}/g, String(gift.days));
   if (l) {
-    const sar = (h: number): string => (h % 100 === 0 ? String(h / 100) : (h / 100).toFixed(2));
     const day = (lang: string): string =>
       new Intl.DateTimeFormat(lang, { timeZone: 'Asia/Riyadh', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(l.until));
     out = out

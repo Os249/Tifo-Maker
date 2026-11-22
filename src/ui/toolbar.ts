@@ -8,7 +8,10 @@ import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
 import { PALETTE_PRESETS } from '../core/template';
 import { PATTERN_PRESETS } from '../core/patterns';
-import { takeClaimIntent } from '../net/api';
+import { availableProviders, startProviderSignIn, takeClaimIntent } from '../net/api';
+
+/** Set when the account offer on Post it or share sends someone to Google's page: read once on the way back. */
+const POST_SIGNUP_KEY = 'tifo_post_signup';
 import { MiniMapPixels, canvasOf, dataUrlOf, stripPixels } from '../render/seatPixels';
 import { findFontCss, fontCssOf, renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import { loadProFonts, loadTifoFonts } from '../core/tifoFonts';
@@ -39,7 +42,7 @@ import type { ProToolsContext } from './proTools';
 import { designProItems, exportGate, withoutDesignProItems, type GateAnswer } from './proGate';
 import { currentCredit } from './creditLine';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
-import { openAuthModal } from './authModal';
+import { POLICY_VERSION, inAppBrowser, openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import type { AiDrawerHandle } from './aiDrawer';
 import { mountAiPanel } from './aiPanel';
@@ -127,6 +130,14 @@ export interface ToolbarApi {
   playReveal(): number;
   /** What "Post it" needs: the name to print, and the public page if there is one. */
   postTarget(): { title: string; publicId: string | null };
+  /**
+   * An account, offered where the fan is proud of the tifo (the Post it sheet
+   * and the share dialog). The work is kept in this browser first, so it
+   * survives either way: 'google' leaves for Google's page in one tap and the
+   * draft is moved to the account on return; 'email' opens the sign-up form
+   * and moves the draft when it is done. Resolves true once signed in here.
+   */
+  accountFromPost(how: 'google' | 'email'): Promise<boolean>;
   /** The key this project's banners are kept under in this browser, if any. */
   bannersKey(): string | null;
 }
@@ -1735,7 +1746,7 @@ export function mountToolbar(
       message.textContent = i18nT('ed.msg.saveBeforeShare');
       return;
     }
-    openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') });
+    openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'), extra: shareExtra });
   });
 
   // Download the current design as a portable .tifo file (JSON: template + palette + cells).
@@ -2242,6 +2253,10 @@ export function mountToolbar(
    * next line never runs. The flag rides across the redirect instead, and the
    * block near the save buttons picks the claim up on the way back.
    */
+  // The share dialog's row to the Pro versions (ui/postPro.ts): loaded when the dialog opens, shown only when the server says so.
+  const shareExtra = (host: HTMLElement, close: () => void): void => {
+    void import('./postPro').then((m) => m.mountShareRow(host, close)).catch(() => {});
+  };
   const ensureSignedIn = async (claim = false): Promise<boolean> => {
     if (isSignedIn()) return true;
     track('auth_opened');
@@ -2283,7 +2298,24 @@ export function mountToolbar(
     accountOffer.innerHTML =
       `<p class="ao-lead">${i18nT('offer.lead')}</p>` +
       `<button class="primary ao-go" type="button">${i18nT('offer.cta')}</button>` +
+      `<button class="ao-google" type="button" hidden><i class="ti ti-brand-google" aria-hidden="true"></i> ${i18nT('auth.google')}</button>` +
       `<button class="ao-dismiss" type="button">${i18nT('offer.later')}</button>`;
+    // Where a new account gets the 7 days by itself, the offer says so (the server's word: /api/pro offer.autoGift).
+    void fetchPro().then((st) => {
+      const lead = accountOffer.querySelector('.ao-lead');
+      if (lead && st.live && st.offer?.autoGift) lead.textContent = i18nT('offer.leadGift').replace('{n}', String(st.offer.gift.days));
+    }).catch(() => {});
+    // Google in one tap, where Google's page can open (not inside TikTok's or X's own browser). The work is
+    // already kept in this browser, and is moved to the account on the way back.
+    void availableProviders().then((list) => {
+      const g = accountOffer.querySelector<HTMLButtonElement>('.ao-google');
+      if (!g || !list.includes('google') || inAppBrowser()) return;
+      g.hidden = false;
+      g.addEventListener('click', () => {
+        track('auth_opened');
+        startProviderSignIn('google', { claim: true, policy: POLICY_VERSION });
+      });
+    });
     accountOffer.querySelector('.ao-dismiss')!.addEventListener('click', () => {
       accountOffer.hidden = true;
     });
@@ -2355,8 +2387,11 @@ export function mountToolbar(
       // The offer waits for the second save. The first is often seconds into
       // a brand-new tifo, when an account is the last thing on anyone's mind;
       // saving again means the work is worth keeping, which is the offer.
+      // With PRO_POST_OFFERS on (the server's word: /api/pro offer.post) it comes on the first save: most fans
+      // save once a visit, so the second save was a moment that seldom came (30 saw the offer, 2 opened sign-up).
       localSaves += 1;
       if (localSaves >= 2) showAccountOffer(trigger);
+      else void fetchPro().then((st) => { if (st.offer?.post) showAccountOffer(trigger); }).catch(() => {});
       return;
     }
     await saveToAccount(true);
@@ -2376,9 +2411,36 @@ export function mountToolbar(
       if (!me?.username) return;
       reflectSignedIn(me.username, me.id, true);
       reflectAdmin(me.isAdmin);
+      // The account was offered on Post it or share, and Google's page was the way: counted now that they are back.
+      try {
+        if (sessionStorage.getItem(POST_SIGNUP_KEY)) {
+          sessionStorage.removeItem(POST_SIGNUP_KEY);
+          track('signup_post');
+        }
+      } catch { /* private mode: the count is lost, the account is not */ }
       await claimDraftOntoAccount();
     })();
   }
+  const accountFromPost = async (how: 'google' | 'email'): Promise<boolean> => {
+    if (isSignedIn()) return true;
+    // Kept in this browser first: whatever happens next, the tifo is not lost.
+    await ensureProject();
+    await draftWriter.flush();
+    if (how === 'google') {
+      try { sessionStorage.setItem(POST_SIGNUP_KEY, '1'); } catch { /* counted or not, the sign-in goes on */ }
+      startProviderSignIn('google', { claim: true, policy: POLICY_VERSION });
+      return false;
+    }
+    track('auth_opened');
+    const name = await openAuthModal(true, 'signup');
+    if (!name) return false;
+    const me = await fetchMe();
+    reflectSignedIn(name, me?.id, true);
+    reflectAdmin(me?.isAdmin ?? false);
+    track('signup_post');
+    await claimDraftOntoAccount();
+    return true;
+  };
   // Ctrl/Cmd+S is what people reach for before they hunt for a button.
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -2426,7 +2488,7 @@ export function mountToolbar(
       // The moment it is public is the moment it can be shared: offer it now,
       // with the links already tagged, rather than leaving Share as a separate
       // button to find later (sharing ran at three presses a month).
-      openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') });
+      openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'), extra: shareExtra });
     } catch (err) {
       message.textContent = `${i18nT('publish.failed')}: ${(err as Error).message}`;
     } finally {
@@ -4033,6 +4095,8 @@ export function mountToolbar(
         publicId: publicChk.checked ? designId : null,
       };
     },
+
+    accountFromPost,
 
     bannersKey() {
       return ref ? keysFor(ref).banners : null;

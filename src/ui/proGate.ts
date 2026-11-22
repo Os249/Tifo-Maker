@@ -148,7 +148,11 @@ export async function exportGate(items: string[], both?: BothWays): Promise<Gate
   if (!list.length) return 'pro';
   const st = await fetchPro(true).catch(() => null);
   if (!st?.live) return 'pro';
-  if (st.plan && st.plan !== 'free') return 'pro';
+  if (st.plan && st.plan !== 'free') {
+    // During the 7-day gift, what leaves with Pro items is remembered for the card that says it ended (ui/proUse.ts).
+    if (st.plan === 'gift') void import('./proUse').then((m) => m.noteProUse(list)).catch(() => {});
+    return 'pro';
+  }
   const { openExportSheet } = await import('./proSheets');
   const choice = await openExportSheet(list, st, both);
   return choice === 'free' ? 'free' : null;

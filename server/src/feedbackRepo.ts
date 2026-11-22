@@ -70,6 +70,8 @@ export interface FeedbackRepository {
   create(input: FeedbackInput): Promise<{ id: string }>;
   list(limit: number): Promise<FeedbackRow[]>;
   counts(): Promise<{ total: number; open: number; bugs: number; ideas: number }>;
+  /** Mark one report dealt with (or not): what /admin's Feedback count is made of. False when there is no such report. */
+  setHandled(id: string, handled: boolean): Promise<boolean>;
 }
 
 const MAX_MESSAGE = 4000;
@@ -98,6 +100,13 @@ export class MemoryFeedbackRepository implements FeedbackRepository {
 
   async list(limit: number): Promise<FeedbackRow[]> {
     return this.rows.slice().reverse().slice(0, limit);
+  }
+
+  async setHandled(id: string, handled: boolean): Promise<boolean> {
+    const row = this.rows.find((r) => r.id === id);
+    if (!row) return false;
+    row.handled = handled;
+    return true;
   }
 
   async counts(): Promise<{ total: number; open: number; bugs: number; ideas: number }> {
@@ -170,6 +179,11 @@ export class PgFeedbackRepository implements FeedbackRepository {
     } catch {
       return [];
     }
+  }
+
+  async setHandled(id: string, handled: boolean): Promise<boolean> {
+    const res = await this.maintenance.query('UPDATE feedback SET handled = $2 WHERE id::text = $1', [id, handled]);
+    return (res.rowCount ?? 0) > 0;
   }
 
   async counts(): Promise<{ total: number; open: number; bugs: number; ideas: number }> {

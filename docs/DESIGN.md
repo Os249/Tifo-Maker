@@ -310,6 +310,18 @@ One title, one sentence, one blue action, at most one quiet alternative.
   crown where it is picked, is free to try, meets the export sheet at
   export, has English and Saudi Arabic words that load only with it, and has
   checks in a browser suite (`e2e-pro*.mjs`).
+- **Behind switches (22 Nov 2026, docs/pro-turnaround.md).** The price can be
+  a setting, with a 72-hour match pass under the month on /pro (quiet: the
+  month keeps the one blue button). The 7 days can start by themselves: then
+  one welcome sheet, once, with one thing to try, and one end sheet, once,
+  with what the fan made, one blue "Keep Pro" and "Not now" beside it.
+- **Pro on Post it.** Under the sheet's own buttons, never above them and
+  never blue: one closed row ("Pro versions of this tifo") that opens to the
+  three versions, a small marked preview of the fan's own tifo, then one way
+  on (they just work with Pro; else the gift, a free account, or Get Pro with
+  the price in words). Signed out, one line offers an account. At most one
+  offer per moment; no timer, nothing pre-ticked, and the free picture's
+  buttons do what they always did.
 - **Everything shown comes from `/api/pro`.** The interface decides nothing;
   with `PRO_MODE=off` none of it appears, except /pro itself.
 - **Coming soon** (8 Nov 2026, until payments open): /pro shows Free ("Always

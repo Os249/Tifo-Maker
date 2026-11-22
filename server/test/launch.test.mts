@@ -733,7 +733,7 @@ function world(env: Record<string, string> = PRICED) {
     id: randomUUID(), userId: 'u', amount: 1399, currency: 'SAR' as const, days: 30, lang: 'en' as const, testMode: false, status: 'paid' as const,
     invoiceId: null, invoiceUrl: null, paymentId: randomUUID(), method: 'creditcard', passId: 'p', note: null, createdAt: T0.toISOString(), paidAt: T0.toISOString(),
     refundedAt: null, refunded: 0, kind: 'form' as const, keep: true, keepAt: T0.toISOString(), attemptedAt: null, subscriptionId: null, cycle: null, fail: null,
-    brand: 'visa', refundMailAt: null, refundSeenAt: null, bonusDays: 30,
+    brand: 'visa', refundMailAt: null, refundSeenAt: null, bonusDays: 30, product: 'monthly' as const, src: null,
   };
   const rc = receiptEmail({ order, to: 'f@example.test', endsAt: new Date(T0.getTime() + 60 * DAY).toISOString(), base: 'https://tifomaker.test', contact: 'owner@example.test', renew: { nextAt: new Date(T0.getTime() + 60 * DAY).toISOString(), cancelUrl: 'https://tifomaker.test/pro?stop=x', amount: 1999 } });
   assert.ok(rc.html.includes('30 days + 30 founder days free (60 days in all)') && rc.html.includes('30 يوم هدية المؤسسين'), 'the receipt shows the bonus');

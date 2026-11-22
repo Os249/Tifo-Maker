@@ -44,7 +44,22 @@ export type FunnelEvent =
   | 'gift_accepted'    // accepted the 7-day Pro gift
   | 'cutout_used'      // a smart cut-out came back
   | 'export_sheet'     // the export sheet listed Pro items
-  | 'export_free';     // ...and they exported without them
+  | 'export_free'      // ...and they exported without them
+  // The Pro funnel (22 Nov 2026): a Pro offer was seen, and Get Pro pressed, by where (ui/proWhere.ts).
+  | `pro_offer_${ProPlace}`
+  | `pro_get_${ProPlace}`
+  | 'pro_preview_post'   // saw their own tifo as the Pro version, on Post it
+  | 'monthly_bought'     // came back from paying for 30 days of Pro
+  | 'match_bought'       // came back from paying for a match pass
+  | 'gift_auto'          // the 7-day gift started by itself for them
+  | 'gift_welcome'       // ...and they saw the welcome
+  | 'gift_end_seen'      // saw the card that says the gift ended
+  | 'bought_after_gift'  // paid for Pro after their gift
+  | 'signup_offer_post'  // the account offer was shown on Post it or share
+  | 'signup_post';       // ...and they made an account from it
+
+/** Where a Pro offer can be seen (server/src/proRoutes.ts OFFER_PLACES keeps the same list). */
+export type ProPlace = 'post' | 'share' | 'export' | 'page' | 'giftend' | 'limit' | 'account';
 
 const SESSION_KEY = 'tifo_session_v1';
 const fired = new Set<FunnelEvent>();
@@ -54,7 +69,7 @@ const fired = new Set<FunnelEvent>();
  * the consent banner's localStorage key directly (no import) to avoid coupling;
  * until the user accepts all, nothing is sent.
  */
-function analyticsAllowed(): boolean {
+export function analyticsAllowed(): boolean {
   try {
     return localStorage.getItem('tifo_consent_v1') === 'all';
   } catch {

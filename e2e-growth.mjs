@@ -353,8 +353,12 @@ console.log('\n— 5. the admin link builder —');
   check('it builds the link asked for', url === `${B}/projects?new=1&utm_source=tiktok&utm_medium=bio&utm_campaign=reveal-video-1`, url);
   const shared = await p.evaluate(() => [...document.querySelectorAll('.card .lt')].some((e) => e.textContent === 'Shared by visitors'));
   check('and "Shared by visitors" has its own panel', shared);
-  const badge = await p.evaluate(() => document.querySelector('.tab[data-tab="traffic"] .pill')?.textContent ?? '');
-  check('the Where from tab badge shows page views again', /\d/.test(badge), badge);
+  // A number in the menu only ever means "waiting for you": page views are on the screen, with their unit.
+  const seen = await p.evaluate(() => ({
+    badge: document.querySelector('.tab[data-tab="traffic"] .pill')?.textContent ?? '',
+    views: [...document.querySelectorAll('#dash-body .card')].find((c) => c.querySelector('.k-lab')?.textContent === 'Page views')?.querySelector('.k-val')?.textContent ?? '',
+  }));
+  check('Visitors has no number in the menu, and says page views with the unit', seen.badge === '' && /^[\d,]+page views?$/.test(seen.views), JSON.stringify(seen));
   await p.context().close();
 }
 

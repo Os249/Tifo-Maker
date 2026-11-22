@@ -102,6 +102,14 @@ export interface TrafficSummary {
   languages: Bucket[];
   countries: Bucket[];
   daily: DayCount[];
+  /**
+   * Page views of tifo pages (/t/:id, /d/:id and their /ar twins), over every
+   * such page. `pages` (above) is the site's 15 busiest paths, and summing the
+   * tifo pages out of that list left most of them out.
+   */
+  tifoPages: { visits: number; pages: number; top: Bucket[] };
+  /** Page views that arrived on a link from the site's share buttons, per UTC day. */
+  sharedDaily: { day: string; visits: number }[];
 }
 
 export interface TrafficRepository {
@@ -497,6 +505,8 @@ const EMPTY = (days: number, enabled: boolean): TrafficSummary => ({
   campaigns: [],
   shared: [],
   pages: [],
+  tifoPages: { visits: 0, pages: 0, top: [] },
+  sharedDaily: [],
   devices: [],
   browsers: [],
   languages: [],
@@ -536,6 +546,21 @@ export class MemoryTrafficRepository implements VisitBatchStore {
         .sort((a, b) => b.visits - a.visits)
         .slice(0, 15);
     };
+    const tifo = human.filter((r) => /^(?:\/ar)?\/(d|t)\//.test(r.path ?? ''));
+    const tifoBy = new Map<string, { visits: number; vis: Set<string> }>();
+    for (const r of tifo) {
+      const k = String(r.path).replace(/^\/ar(?=\/)/, '');
+      const e = tifoBy.get(k) ?? { visits: 0, vis: new Set<string>() };
+      e.visits++;
+      e.vis.add(r.visitorKey);
+      tifoBy.set(k, e);
+    }
+    const sharedBy = new Map<string, number>();
+    for (const r of human) {
+      if (r.source !== 'shared') continue;
+      const d = new Date(r.at).toISOString().slice(0, 10);
+      sharedBy.set(d, (sharedBy.get(d) ?? 0) + 1);
+    }
     const dayMap = new Map<string, { visits: number; vis: Set<string> }>();
     for (const r of human) {
       const d = new Date(r.at).toISOString().slice(0, 10);
@@ -561,6 +586,15 @@ export class MemoryTrafficRepository implements VisitBatchStore {
       ),
       shared: bucket((r) => (r.source === 'shared' ? r.utmSource ?? 'link' : null)),
       pages: bucket((r) => r.path),
+      tifoPages: {
+        visits: tifo.length,
+        pages: tifoBy.size,
+        top: [...tifoBy.entries()]
+          .map(([key, e]) => ({ key, visits: e.visits, visitors: e.vis.size }))
+          .sort((a, b) => b.visits - a.visits)
+          .slice(0, 10),
+      },
+      sharedDaily: [...sharedBy.entries()].map(([day, visits]) => ({ day, visits })).sort((a, b) => a.day.localeCompare(b.day)),
       devices: bucket((r) => r.device),
       browsers: bucket((r) => r.browser),
       languages: bucket((r) => r.lang),
@@ -692,6 +726,38 @@ export class PgTrafficRepository implements VisitBatchStore {
     );
     out.shared = await this.bucket("coalesce(utm_source,'link')", days, "AND source = 'shared'");
     out.pages = await this.bucket('path', days);
+    // Tifo pages, all of them: the Arabic twin of a page is the same tifo.
+    try {
+      const key = "regexp_replace(path, '^/ar/', '/')";
+      const where = "NOT is_bot AND created_at >= now() - ($1::int * interval '1 day') AND path ~ '^(/ar)?/(d|t)/'";
+      const [tot, top] = await Promise.all([
+        this.maintenance.query(`SELECT count(*)::int AS visits, count(DISTINCT ${key})::int AS pages FROM visits WHERE ${where}`, [days]),
+        this.maintenance.query(
+          `SELECT ${key} AS key, count(*)::int AS visits, count(DISTINCT visitor_key)::int AS visitors
+             FROM visits WHERE ${where} GROUP BY 1 ORDER BY visits DESC LIMIT 10`,
+          [days],
+        ),
+      ]);
+      out.tifoPages = {
+        visits: Number(tot.rows[0]?.visits) || 0,
+        pages: Number(tot.rows[0]?.pages) || 0,
+        top: top.rows.map((x) => ({ key: String(x.key), visits: Number(x.visits) || 0, visitors: Number(x.visitors) || 0 })),
+      };
+    } catch {
+      /* keep zeros */
+    }
+    try {
+      const r = await this.maintenance.query(
+        `SELECT to_char(date_trunc('day', created_at),'YYYY-MM-DD') AS day, count(*)::int AS visits
+           FROM visits
+          WHERE NOT is_bot AND source = 'shared' AND created_at >= now() - ($1::int * interval '1 day')
+          GROUP BY 1 ORDER BY 1`,
+        [days],
+      );
+      out.sharedDaily = r.rows.map((x) => ({ day: String(x.day).slice(0, 10), visits: Number(x.visits) || 0 }));
+    } catch {
+      out.sharedDaily = [];
+    }
     out.devices = await this.bucket('device', days);
     out.browsers = await this.bucket('browser', days);
     out.languages = await this.bucket('lang', days);

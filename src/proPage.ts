@@ -68,8 +68,30 @@ import { CROWN_SVG, endsText, money, proNavOnSale, whenDay, whenRiyadh } from '.
 import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
 import { SALE_KEYS, keysOf, saleKey } from './ui/proSaleCopy';
+import { getPressed, offerSeen, orderSrc, readArrival } from './ui/proWhere';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
+
+/**
+ * Where this visit to /pro came from (a Get Pro link on Post it, the export
+ * sheet, the card after the gift...) and which of the two things on sale the
+ * link was about. Read once and taken out of the address bar; the place goes
+ * with the checkout, for /admin's funnel, only for a visitor who allowed counting.
+ */
+const arrival = ((): ReturnType<typeof readArrival> => {
+  try {
+    const u = new URL(location.href);
+    const a = readArrival(u.search);
+    if (u.searchParams.has('from') || u.searchParams.has('plan')) {
+      u.searchParams.delete('from');
+      u.searchParams.delete('plan');
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    }
+    return a;
+  } catch {
+    return { from: null, plan: 'monthly' };
+  }
+})();
 
 let state: ProState | null = null;
 /** Nothing is painted until /api/pro has answered once. */
@@ -198,6 +220,22 @@ function buyHtml(): string {
     ? `<p class="pb-founder" id="pb-founder">${CROWN_SVG}<span><b>${escapeHtml(tv('pb.founder', { date: whenRiyadh(founder.until) }))}</b>` +
       `${escapeHtml(tv('pb.founder.terms', { total: founder.total, days: o.monthly.days }))}</span></p>`
     : '';
+  // The match pass, while it is sold: the same Pro for a match week, under the month and quieter than it.
+  // Its whole price, its length, that it is one payment and never renews are all said before the button.
+  const mp = o.match;
+  let match = '';
+  if (mp) {
+    const mprice = money(mp.price);
+    const mact = !state?.signedIn
+      ? `<button type="button" class="pp-btn quiet" data-act="match-signin">${escapeHtml(tv('pm2.buy', { price: mprice }))}</button>`
+      : state.emailVerified === false || (held && !renew)
+        ? ''
+        : `<button type="button" class="pp-btn quiet" data-act="buy-match">${escapeHtml(tv('pm2.buy', { price: mprice }))}</button>`;
+    match =
+      `<div class="pb-match" id="pb-match"${arrival.plan === 'match' ? ' data-asked="1"' : ''}>` +
+      `<p class="pb-match-h"><b>${escapeHtml(t('pm2.title'))}</b> ${escapeHtml(tv('pm2.body', { hours: mp.hours, price: mprice }))}</p>` +
+      mact + `</div>`;
+  }
   return (
     `<div class="pb-buy" id="pb-buy">` +
     `<p class="pb-price"><b>${escapeHtml(tv('pb.price', { price }))}</b>${was} <span>${escapeHtml(tv('pb.per', { days: o.monthly.days }))}</span></p>` +
@@ -205,6 +243,7 @@ function buyHtml(): string {
     `<p class="pb-once">${escapeHtml(t(renewOffered() ? 'pr.once' : 'pb.once'))} ${escapeHtml(t('pb.vat'))}</p>` +
     offer +
     act +
+    match +
     // Moyasar's form opens here (openForm), in place of the button.
     `<div class="pb-form" id="pb-form" hidden></div>` +
     `<p class="pb-msg" id="pb-msg" role="status" aria-live="polite">${msg}</p>` +
@@ -233,7 +272,15 @@ function sayBuy(m: { key: string; vars?: Record<string, string> } | null): void 
 function wireBuy(): void {
   const box = document.getElementById('pb-buy');
   if (!box) return;
+  box.querySelector('[data-act="match-signin"]')?.addEventListener('click', async () => {
+    getPressed('page');
+    if (!(await signIn('signup'))) return;
+    const next = document.querySelector<HTMLElement>('#pb-buy [data-act="buy-match"], #pb-buy [data-act="verify"]');
+    next?.focus();
+    if (next?.dataset.act === 'buy-match') next.click();
+  });
   box.querySelector('[data-act="buy-signin"]')?.addEventListener('click', async () => {
+    getPressed('page');
     if (!(await signIn('signup'))) return;
     // Signed in. They pressed "Get Pro for SAR ..." with the price on it, so the page carries on to the
     // payment without a second press, when this account can buy now. Otherwise the next step has the
@@ -243,11 +290,12 @@ function wireBuy(): void {
     if (next?.dataset.act === 'buy' && !monthHeld()) next.click();
   });
   const btn = box.querySelector<HTMLButtonElement>('[data-act="buy"]');
-  btn?.addEventListener('click', async () => {
+  const buy = (btn: HTMLButtonElement, product: 'monthly' | 'match'): void => void (async () => {
     btn.disabled = true;
     const label = btn.textContent ?? '';
     btn.textContent = t(formCheckout() ? 'pf.opening' : 'pb.going');
-    const r = await startCheckout(getLang());
+    getPressed('page');
+    const r = await startCheckout(getLang(), { product, src: orderSrc(arrival.from) });
     if (r.ok && 'url' in r) {
       track('pro_checkout');
       // Moyasar's own page: the card, Apple Pay or mada is handled there, never here.
@@ -269,7 +317,10 @@ function wireBuy(): void {
     btn.disabled = false;
     btn.textContent = label;
     sayBuy({ key: REFUSED[r.reason], vars: r.endsAt ? { date: whenDay(r.endsAt) } : undefined });
-  });
+  })();
+  btn?.addEventListener('click', () => buy(btn, 'monthly'));
+  const matchBtn = box.querySelector<HTMLButtonElement>('[data-act="buy-match"]');
+  matchBtn?.addEventListener('click', () => buy(matchBtn, 'match'));
   // A repaint (a language switch) while the form is open: open it again, in the new language.
   if (openOrder && btn) void openForm(openOrder.id, openOrder.form, openOrder.keep);
 }
@@ -309,8 +360,7 @@ function closeForm(): void {
     box.hidden = true;
     box.innerHTML = '';
   }
-  const btn = document.querySelector<HTMLButtonElement>('#pb-buy [data-act="buy"]');
-  if (btn) btn.hidden = false;
+  document.querySelectorAll<HTMLElement>('#pb-buy [data-act="buy"], #pb-match').forEach((el) => { el.hidden = false; });
 }
 
 /**
@@ -342,6 +392,9 @@ async function openForm(orderId: string, form: CheckoutForm, keep: boolean): Pro
     `<button type="button" class="pb-form-close" data-act="form-close">${escapeHtml(t('pf.close'))}</button>`;
   box.hidden = false;
   if (btn) btn.hidden = true;
+  // One thing is being paid for: the other offer steps aside while the form is open.
+  const other = document.getElementById('pb-match');
+  if (other) other.hidden = true;
   box.querySelector('[data-act="form-close"]')?.addEventListener('click', () => {
     // Unticked on the server too: a form opened again always starts unticked.
     if (openOrder?.keep) void setKeepPro(openOrder.id, false);
@@ -466,13 +519,16 @@ async function watchOrder(id: string, back: boolean, declined = false): Promise<
     const o = await fetchOrder(id);
     if (o?.status === 'paid') {
       track('pro_paid');
+      track(o.product === 'match' ? 'match_bought' : 'monthly_bought');
+      // Paid after the 7 days they were given: the gift did its work.
+      if (state?.gift?.state === 'used' && state.gift.auto) track('bought_after_gift');
       forgetPro();
       closeForm();
       // "Keep Pro on" was ticked: say whether it took. A method that cannot renew leaves a one-time pass.
       // A founder's first purchase: the page says the extra month was given, as the receipt does.
       const total = o.bonusDays ? (o.days ?? 0) + o.bonusDays : 0;
       paidMsg = {
-        key: o.kept ? (o.renews ? 'pr.paid.renews' : 'pr.paid.once') : total ? 'pb.paid.founder' : 'pb.paid',
+        key: o.product === 'match' ? 'pm2.paid' : o.kept ? (o.renews ? 'pr.paid.renews' : 'pr.paid.once') : total ? 'pb.paid.founder' : 'pb.paid',
         vars: { date: o.endsAt ? whenDay(o.endsAt) : '', total: String(total) }, tone: 'ok',
       };
       await load(true);
@@ -779,7 +835,18 @@ async function load(fresh = false): Promise<void> {
   loaded = true;
   $('pp-plans').removeAttribute('aria-busy');
   paint();
+  // The question about the 7 days says how they work now: once they start by themselves, "it waits until you press Start" is not true.
+  if (state?.offer?.autoGift) {
+    for (const [from, to] of [['pp.faq.q6', 'pp.faq.q6auto'], ['pp.faq.a6', 'pp.faq.a6auto']] as const) {
+      const el = document.querySelector<HTMLElement>(`[data-i18n="${from}"]`);
+      if (el) {
+        el.setAttribute('data-i18n', to);
+        el.textContent = t(to);
+      }
+    }
+  }
   if (first) track('pro_viewed');
+  if (first && state?.offer?.paymentsOpen) offerSeen('page');
 }
 
 async function refreshAuth(): Promise<void> {

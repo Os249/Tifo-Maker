@@ -57,7 +57,7 @@ const MAIL_MARK =
  * sniff that tries to be exhaustive ends up hiding the button from people whose
  * browser was fine.
  */
-function inAppBrowser(): boolean {
+export function inAppBrowser(): boolean {
   const ua = navigator.userAgent;
   return /\b(FBAN|FBAV|FB_IAB|Instagram|TikTok|musical_ly|Line\/|Snapchat|Twitter|MicroMessenger)\b/i.test(ua);
 }

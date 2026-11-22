@@ -147,6 +147,31 @@ export function proNavOnSale(state: ProState | null): void {
   });
 }
 
+/**
+ * The automatic gift's two moments (22 Nov 2026), from whatever page first
+ * learns of them: the welcome while a gift that started by itself has not been
+ * shown, and the end card once it has run out. Each is said once (the server
+ * remembers), in one place: the sheets are ui/proSheets.ts, loaded only now.
+ * A page asks at most once per load; a sheet that finds another first-run
+ * layer up does nothing, and the next page load asks again.
+ */
+let momentAsked = false;
+export function giftMoment(state: ProState | null): void {
+  const g = state?.live ? state.gift : undefined;
+  if (!g || momentAsked) return;
+  const welcome = g.state === 'active' && g.welcome === true;
+  const ended = g.state === 'used' && g.endCard === true && state!.plan === 'free';
+  if (!welcome && !ended) return;
+  momentAsked = true;
+  // A beat after the page settles, so it never lands on top of the page's own first paint.
+  window.setTimeout(() => {
+    void import('./proSheets')
+      .then((m) => (welcome ? m.openWelcomeSheet(state!) : m.openGiftEndSheet(state!)))
+      .then(() => { if (!document.querySelector('[data-pro-welcome], [data-pro-gift-end]')) momentAsked = false; })
+      .catch(() => { momentAsked = false; });
+  }, 1200);
+}
+
 /** A moment as a fan in Saudi Arabia reads it, whatever the device's clock: "4 December 2026, 12:00". */
 export function whenRiyadh(iso: string, time = true): string {
   return new Intl.DateTimeFormat(getLang() === 'ar' ? 'ar-SA-u-ca-gregory-nu-latn' : 'en-GB', {
@@ -181,6 +206,7 @@ export function mountProChip(host: HTMLElement, before?: Element | null): void {
     state = isSignedIn() ? await fetchPro(fresh).catch(() => null) : null;
     proNavOnSale(state);
     paint();
+    giftMoment(state);
   };
   void load();
   window.addEventListener('tifo:pro', () => void load(true));

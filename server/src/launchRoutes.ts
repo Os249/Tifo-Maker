@@ -21,6 +21,8 @@ export interface LaunchRouteDeps {
   /** Whether email is really being delivered. */
   mailLive: () => boolean;
   stopConfig?: object;
+  /** Another kind of email whose link stops the same thing (the gift's emails, proGift.ts): tried when the token is not a founder's. */
+  alsoStop?: (token: string) => Promise<boolean>;
 }
 
 export function registerLaunchRoutes(app: FastifyInstance, deps: LaunchRouteDeps): void {
@@ -33,7 +35,7 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: LaunchRouteDeps
     const b = req.body as { t?: unknown } | null;
     const q = req.query as { t?: unknown };
     const t = typeof b?.t === 'string' ? b.t : typeof q.t === 'string' ? q.t : '';
-    if (!(await launch.stopMail(t))) return reply.code(404).send({ error: 'not found' });
+    if (!(await launch.stopMail(t)) && !(await deps.alsoStop?.(t).catch(() => false))) return reply.code(404).send({ error: 'not found' });
     return { ok: true };
   });
 

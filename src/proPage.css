@@ -320,3 +320,9 @@ body.pp-selling .nav-cta:not(.is-user):hover { background: transparent; border-c
   .pp-btn, .ps-ask .pp-btn { width: 100%; justify-self: stretch; }
   .ps-sends { flex-direction: column; align-items: stretch; }
 }
+
+/* The match pass, under the month: the same Pro for a match week, quieter than the month's own button. */
+.pb-match { display: grid; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--line); }
+.pb-match[hidden] { display: none; }
+.pb-match[data-asked] { border-color: var(--pro-line); background: var(--pro-tint); }
+.pb-match-h { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }

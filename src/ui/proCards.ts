@@ -12,10 +12,11 @@
  * only: it is a courtesy, and the worst a cleared browser does is show a card
  * again.
  */
-import { fetchPro, isSignedIn, notifyPro, seenRefundNotice, type ProState } from '../net/api';
+import { fetchPro, isSignedIn, markGiftSeen, notifyPro, seenRefundNotice, type ProState } from '../net/api';
 import { track } from '../net/analytics';
 import { escapeHtml } from '../core/escape';
-import { CROWN_SVG, money, whenDate, whenDay } from './pro';
+import { CROWN_SVG, giftMoment, money, whenDate, whenDay } from './pro';
+import { getPressed, offerSeen, proLink } from './proWhere';
 import { localPath, onLangChange, t, tv } from './i18n';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -58,6 +59,8 @@ function viewOf(st: ProState | null, now = Date.now()): View | null {
     return read(SEEN_KEY) === stage ? null : { kind: 'remind', stage, last, endsAt: g.endsAt };
   }
   if (g.state === 'used' && g.endedAt) {
+    // A gift that started by itself says it ended in its own sheet, once (ui/pro.ts giftMoment), not here too.
+    if (g.auto) return null;
     if (now - Date.parse(g.endedAt) > 14 * DAY) return null;
     const stage = `end:${g.endedAt}`;
     return read(SEEN_KEY) === stage ? null : { kind: 'ended', stage };
@@ -190,6 +193,7 @@ export function mountGiftCard(host: HTMLElement, before: Element | null): void {
     let body: string;
     let main: string;
     let quiet: string;
+    const selling = !!state.offer?.paymentsOpen;
     if (v.kind === 'offer') {
       title = tv('gift.cardTitle', { n: v.days });
       body = t('gift.cardBody');
@@ -203,17 +207,20 @@ export function mountGiftCard(host: HTMLElement, before: Element | null): void {
     } else {
       title = t('gift.endTitle');
       body = t('gift.endBody');
-      main = t(state.notified ? 'pro.act.notified' : 'pro.act.notify');
+      // Once Pro can be bought, the way on is Pro itself, not "tell me when it opens".
+      main = selling ? tv('pro.act.getPro', { price: money(state.offer!.monthly.price) }) : t(state.notified ? 'pro.act.notified' : 'pro.act.notify');
       quiet = t('gift.ok');
     }
     card.innerHTML =
       `<div class="pro-sheet-mark" aria-hidden="true">${CROWN_SVG}</div>` +
       `<div><h2 id="pro-card-h">${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p>` +
       `<div class="pro-card-actions">` +
-      `<button type="button" class="pro-btn" data-act="main"${v.kind === 'ended' && state.notified ? ' disabled' : ''}>${CROWN_SVG}<span>${escapeHtml(main)}</span></button>` +
+      `<button type="button" class="pro-btn" data-act="main"${v.kind === 'ended' && !selling && state.notified ? ' disabled' : ''}>${CROWN_SVG}<span>${escapeHtml(main)}</span></button>` +
       `<button type="button" class="pro-text-btn" data-act="quiet">${escapeHtml(quiet)}</button>` +
       `</div><p class="pro-note" role="status" aria-live="polite"></p></div>`;
     card.hidden = false;
+    if (v.kind === 'offer') markGiftSeen();
+    if (v.kind === 'ended' && selling) offerSeen('giftend');
     const note = card.querySelector('.pro-note') as HTMLElement;
     const mainBtn = card.querySelector('[data-act="main"]') as HTMLButtonElement;
     card.querySelector('[data-act="quiet"]')!.addEventListener('click', () => {
@@ -229,6 +236,9 @@ export function mountGiftCard(host: HTMLElement, before: Element | null): void {
       } else if (v.kind === 'remind') {
         const st = state;
         void import('./proSheets').then((m) => m.openProSheet(st));
+      } else if (selling) {
+        getPressed('giftend');
+        location.assign(proLink('giftend'));
       } else {
         mainBtn.disabled = true;
         if (await notifyPro()) {
@@ -246,6 +256,7 @@ export function mountGiftCard(host: HTMLElement, before: Element | null): void {
   const load = async (fresh = false): Promise<void> => {
     state = isSignedIn() ? await fetchPro(fresh).catch(() => null) : null;
     paint();
+    giftMoment(state);
   };
   void load();
   window.addEventListener('tifo:auth', () => void load(true));

@@ -106,7 +106,7 @@
     <!-- ============ ABOUT ============ -->
     <section id="about">
       <h1>About TifoMaker</h1>
-      <p class="updated">Last updated: 10 November 2026</p>
+      <p class="updated">Last updated: 22 November 2026</p>
       <p>TifoMaker is an independent project made and run by one person: an individual developer, not a company. Throughout these pages "I", "me", and "my" mean that developer, and "you" means you, the person using the site.</p>
       <div class="callout">
         <h3>Built with the help of AI</h3>
@@ -161,6 +161,12 @@
       <template data-pay="founders">
       <p><b>The founders offer.</b> A founder is an account with a verified email that, before Pro went on sale, pressed "Tell me when Pro opens" or answered "What would you pay for a month of Pro?" while signed in. A founder who buys Pro within 72 hours of the moment Pro went on sale gets 30 extra days on that first purchase at no charge: 60 days for the price of 30. The exact deadline, in Riyadh time, is in the founders email and on the Pro page before you pay. The offer is once per account, for a purchase only (not a gift or a renewal), and cannot be passed to another account. If that purchase is refunded, the extra days end with it and the offer is not given again. With auto-renew, the first renewal comes after the 60 days.</p>
       </template>
+      <template data-pay="match">
+      <p><b>The match pass.</b> A match pass is the same Pro for {{matchHours}} hours from the moment it is paid, for one payment of SAR {{matchPrice}}. That is the whole amount: nothing is added at checkout and no VAT is charged. It never renews, and no card is kept for it: when the hours end, your account goes back to the free plan by itself. If you already hold Pro, a match pass starts when that Pro ends. The refund is the same as for a month: all of your money back within 7 days of paying if you haven't used Pro with it, asked for in the same way. Those 7 days still run after the pass itself has ended.</p>
+      </template>
+      <template data-pay="gift">
+      <p><b>The {{giftDays}} free days.</b> An account with a verified email address that has never held Pro gets Pro for {{giftDays}} days, once, at no charge. The days start by themselves the first time you are on the site with a verified email. No card is asked for, nothing is charged when they end and nothing renews: your account goes back to the free plan, and everything you made stays yours. They are not given to throwaway email addresses, and cannot be passed to another account or exchanged for money.</p>
+      </template>
       <template data-pay="sale">
       <p><b>The price.</b> The price shown on the Pro page before you pay is the whole amount, in Saudi riyals: nothing is added at checkout. No VAT is charged, because I am not registered for VAT; what you get by email is a receipt, not a tax invoice.</p>
       <p>Payments are taken by <b>Moyasar</b>, a payment company under the supervision of the Saudi Central Bank, on its own secure payment page or form. Your card or wallet details go to Moyasar, never to me, and I don't store them. You get a receipt by email.</p>
@@ -209,6 +215,8 @@
           keeps a random key so you can change your answer, and I keep only a one‑way code made from that key: nothing that
           names you. I read the answers only to set Pro's price. Answering while signed in also means you'll hear first when Pro opens.</li>
         <template data-pay="sale"><li><b>If you asked to hear when Pro opens</b> (the "Tell me when Pro opens" button, or answering the price question while signed in): I email your account's verified address once when Pro goes on sale. I keep that you were on that list, whether the email went, and, if you buy within the founders offer, which order it applied to. Every such email has a link that stops them; I then keep only that you asked for none. It all goes when you delete your account.</li></template>
+        <template data-pay="gift"><li><b>The {{giftDays}} free days of Pro:</b> I keep that your account had them and when, whether you were shown that they started and that they ended, and which Pro features your exports used during them (to show you on the card when they end). It all goes when you delete your account.</li></template>
+        <template data-pay="giftmail"><li><b>Emails about the free days:</b> I email your account's verified address when the days start, about a day before they end, and when they have ended. These say what is on your account and until when; they carry no price. Only if you tick "Email me Pro news and offers" (it is never ticked for you, and I keep when you ticked it) does the last one also say what Pro costs, marked as an advertisement. Every one has a link that stops them all; I then keep only that you asked for none.</li></template>
         <template data-pay="sale"><li><b>If you buy Pro:</b> the order: its amount, when it was paid, how (for example Apple Pay or mada; never a card number) and Moyasar's reference for it. Moyasar handles the payment itself under its own privacy policy. A record of a sale has to be kept, so when you delete your account the order stays, no longer linked to you.</li></template>
         <template data-pay="renew"><li><b>If you turn on auto-renew:</b> Moyasar keeps your card so it can be charged for the renewals, and gives me a reference to it (a "token"). I store that token with the card's brand, its last four digits and its expiry date, the date you agreed to auto-renew, and the dates of the reminders and renewals. I never see or store the card number. The token is deleted, here and at Moyasar, when you turn auto-renew off, when it stops by itself, or when you delete your account. Your data export says whether a card is saved and which.</li></template>
         <li><b>Audience measurement (no cookie, no consent needed):</b> for each page view I store a small set of
@@ -231,13 +239,13 @@
 
       <h3>Why I use it</h3>
       <p>To run the site and your account, verify your email, keep accounts secure, prevent abuse, and send you important account
-      emails (verification, password reset). Separately, to understand how many people visit and where they come from, so I know
+      emails (verification, password reset, receipts, and notices about Pro on your account). Separately, to understand how many people visit and where they come from, so I know
       whether the site is worth continuing: that part uses no cookie and no personal data, as described above, and it is never
       used for advertising, profiling or personalisation. The extra in‑editor usage stats run only if you consent.</p>
 
       <h3>Who else is involved</h3>
       <p>A few trusted services help run TifoMaker and may process some data on my behalf: web hosting, an email service (for
-      verification and password‑reset messages), and the AI provider (which processes your prompts when you use the AI Designer).
+      the emails this page describes: verification and password‑reset messages, receipts, and notices about Pro on your account), and the AI provider (which processes your prompts when you use the AI Designer).
       If you use smart cut-out, the picture you choose is sent, with its location and camera details removed first, to
       Cloudflare's AI service, which runs Bria's background‑removal model on it and sends the result back. I don't keep the
       picture; the service keeps the finished cut‑out for a short time (up to three days) so it can be collected, then deletes it.
@@ -308,7 +316,7 @@
     <!-- ============ عن الموقع ============ -->
     <section id="about-ar">
       <h1>عن تيفو ميكر</h1>
-      <p class="updated">آخر تحديث: 10 نوفمبر 2026</p>
+      <p class="updated">آخر تحديث: 22 نوفمبر 2026</p>
       <p>تيفو ميكر مشروع مستقل يصنعه ويديره شخص واحد: مطوّر فردي، مو شركة. في كل هذي الصفحات، «أنا» و«لي» تعني هذا المطوّر، و«أنت» تعني الشخص اللي يستخدم الموقع.</p>
       <div class="callout">
         <h3>مبني بمساعدة الذكاء الاصطناعي</h3>
@@ -362,6 +370,12 @@
       <template data-pay="founders">
       <p><b>عرض المؤسسين.</b> المؤسس هو حساب بريده موثّق، وقبل ما ينزل برو للبيع ضغط «علّمني إذا فتح برو» أو جاوب على «كم تدفع على شهر برو؟» وهو مسجّل دخوله. المؤسس اللي يشتري برو خلال 72 ساعة من لحظة نزوله للبيع ياخذ 30 يوم زيادة على أول شراء له بدون مقابل: 60 يوم بسعر 30. والموعد النهائي بالضبط، بتوقيت الرياض، مكتوب في إيميل المؤسسين وفي صفحة برو قبل ما تدفع. والعرض مرة وحدة لكل حساب، وعلى الشراء بس (مو الهدية ولا التجديد)، وما ينتقل لحساب ثاني. وإذا استرديت مبلغ هالشراء تنتهي الأيام الزيادة معه وما ينعطى العرض مرة ثانية. ومع التجديد التلقائي، أول تجديد يكون بعد الـ60 يوم.</p>
       </template>
+      <template data-pay="match">
+      <p><b>باقة المباراة.</b> باقة المباراة هي نفس برو لمدة {{matchHours}} ساعة من لحظة الدفع، بدفعة وحدة قدرها {{matchPrice}} ريال. هذا المبلغ كامل: ما ينضاف عليه شي وقت الدفع، وما فيه ضريبة قيمة مضافة. ما تتجدد أبد، وما نحفظ لها بطاقة: إذا خلصت الساعات يرجع حسابك للباقة المجانية لحاله. وإذا عندك برو من قبل، تبدأ باقة المباراة لما يخلص. والاسترداد مثل الشهر: ترجع لك فلوسك كاملة خلال 7 أيام من الدفع إذا ما استخدمت برو فيها، وتطلبه بنفس الطريقة. وهالـ7 أيام تبقى ماشية حتى بعد ما تخلص الباقة نفسها.</p>
+      </template>
+      <template data-pay="gift">
+      <p><b>أيام برو الـ{{giftDays}} المجانية.</b> الحساب اللي بريده موثّق وما سبق له أخذ برو، ياخذ برو {{giftDays}} أيام، مرة وحدة، بدون مقابل. تبدأ الأيام لحالها أول مرة تكون في الموقع وبريدك موثّق. ما نطلب بطاقة، وما ينخصم شي لما تخلص، وما يتجدد شي: يرجع حسابك للباقة المجانية، وكل شي سويته يبقى لك. وما تنعطى لعناوين البريد المؤقتة، وما تتحوّل لحساب ثاني ولا تتبدّل بفلوس.</p>
+      </template>
       <template data-pay="sale">
       <p><b>السعر.</b> السعر المعروض في صفحة برو قبل الدفع هو المبلغ كامل بالريال السعودي: ما ينضاف عليه شي وقت الدفع. وما فيه ضريبة قيمة مضافة، لأني غير مسجّل في ضريبة القيمة المضافة؛ واللي يوصلك على الإيميل إيصال، مو فاتورة ضريبية.</p>
       <p>الدفع يتم عن طريق <b>ميسّر</b>، شركة مدفوعات تحت إشراف البنك المركزي السعودي، في صفحة أو نموذج الدفع الآمن حقها. بيانات بطاقتك أو محفظتك تروح لميسّر، وما توصل لي أبد ولا أخزّنها. ويوصلك إيصال على الإيميل.</p>
@@ -410,6 +424,8 @@
           عشان تقدر تغيّر جوابك، وأنا أحتفظ بس برمز أحادي الاتجاه من هذا المفتاح، بدون شي يدل عليك.
           أقرأ الأجوبة بس عشان أحدد سعر برو. وإذا جاوبت وأنت مسجّل دخول، بتكون أول من يدري إذا فتح برو.</li>
         <template data-pay="sale"><li><b>إذا طلبت نعلّمك لما يفتح برو</b> (زر «علّمني إذا فتح برو»، أو جاوبت على سؤال السعر وأنت مسجّل دخول): أرسل على إيميل حسابك الموثّق مرة وحدة لما ينزل برو للبيع. وأحتفظ بإنك كنت في القائمة، وهل انرسل الإيميل، وإذا اشتريت ضمن عرض المؤسسين، أي طلب انطبق عليه. وكل إيميل من هالنوع فيه رابط يوقفها، ووقتها أحتفظ بس بإنك ما تبيها. وكل هذا ينحذف إذا حذفت حسابك.</li></template>
+        <template data-pay="gift"><li><b>أيام برو الـ{{giftDays}} المجانية:</b> أحتفظ بأن حسابك أخذها ومتى، وهل انعرض لك إنها بدأت وإنها خلصت، وأي مزايا برو استخدمتها في تصديرك خلالها (عشان نوريك إياها في البطاقة لما تخلص). وكله يروح إذا حذفت حسابك.</li></template>
+        <template data-pay="giftmail"><li><b>رسائل عن الأيام المجانية:</b> أرسل على إيميل حسابك الموثّق لما تبدأ الأيام، وقبل ما تخلص بحوالي يوم، ولما تخلص. هالرسائل تقول وش شغّال على حسابك ولين متى، وما فيها سعر. وبس إذا أنت علّمت على «ارسلوا لي أخبار برو وعروضه» (ما نعلّم عليها عنك أبد، وأحتفظ بوقت تعليمك) تقول الأخيرة كم سعر برو، ومكتوب عليها إنها إعلان. وكل رسالة فيها رابط يوقفها كلها، ووقتها أحتفظ بس بأنك طلبت ما توصلك.</li></template>
         <template data-pay="sale"><li><b>إذا اشتريت برو:</b> الطلب: مبلغه، ووقت دفعه، وطريقة الدفع (مثل Apple Pay أو مدى، وأبدًا مو رقم بطاقة)، ورقم المرجع حقه عند ميسّر. وميسّر يعالج الدفع نفسه وفق سياسة الخصوصية الخاصة فيه. وسجل البيع لازم ينحفظ، فإذا حذفت حسابك يبقى الطلب، بدون ما يرتبط فيك.</li></template>
         <template data-pay="renew"><li><b>إذا فعّلت التجديد التلقائي:</b> ميسّر يحفظ بطاقتك عشان ينخصم منها التجديد، ويعطيني مرجع لها (يسمونه «توكن»). أخزّن هالمرجع ومعه نوع البطاقة وآخر أربعة أرقام منها وتاريخ انتهائها، وتاريخ موافقتك على التجديد التلقائي، وتواريخ التذكيرات والتجديدات. وأبدًا ما أشوف رقم البطاقة ولا أخزّنه. والمرجع ينحذف، عندي وعند ميسّر، إذا أوقفت التجديد التلقائي، أو توقف لحاله، أو حذفت حسابك. وملف بياناتك يوضح إذا فيه بطاقة محفوظة وأي بطاقة.</li></template>
         <li><b>قياس الزيارات (بدون كوكيز وبدون موافقة):</b> لكل زيارة صفحة أخزّن مجموعة صغيرة من
@@ -432,13 +448,13 @@
 
       <h3>ليش أستخدمها</h3>
       <p>لتشغيل الموقع وحسابك، والتحقق من بريدك، والحفاظ على أمان الحسابات، ومنع الإساءة، وإرسال رسائل الحساب
-      المهمة لك (التحقق وإعادة تعيين كلمة المرور). وبشكل منفصل، لمعرفة كم شخص يزور ومن وين يجون، عشان أعرف
+      المهمة لك (التحقق وإعادة تعيين كلمة المرور، والإيصالات، وتنبيهات برو على حسابك). وبشكل منفصل، لمعرفة كم شخص يزور ومن وين يجون، عشان أعرف
       هل يستاهل الموقع الاستمرار: وهذا الجزء ما يستخدم أي كوكيز ولا بيانات شخصية كما وُضّح فوق، وما يُستخدم أبدًا
       للإعلانات أو التصنيف أو التخصيص. أما إحصاءات الاستخدام الإضافية داخل المحرر فما تشتغل إلا بموافقتك.</p>
 
       <h3>مين غيري يشارك</h3>
       <p>فيه خدمات موثوقة قليلة تساعد في تشغيل تيفو ميكر وقد تعالج بعض البيانات نيابة عني: الاستضافة، وخدمة بريد
-      (لرسائل التحقق وإعادة تعيين كلمة المرور)، ومزوّد الذكاء الاصطناعي (اللي يعالج أوامرك لما تستخدم مصمّم الذكاء الاصطناعي).
+      (للرسائل المذكورة في هذي الصفحة: التحقق وإعادة تعيين كلمة المرور، والإيصالات، وتنبيهات برو على حسابك)، ومزوّد الذكاء الاصطناعي (اللي يعالج أوامرك لما تستخدم مصمّم الذكاء الاصطناعي).
       وإذا استخدمت القص الذكي، تنرسل الصورة اللي تختارها، بعد ما نشيل منها معلومات الموقع والكاميرا، لخدمة الذكاء الاصطناعي
       في Cloudflare، اللي تشغّل عليها نموذج Bria لإزالة الخلفية وترجّع النتيجة. أنا ما أحتفظ بالصورة، والخدمة تحتفظ بالصورة
       المقصوصة فترة قصيرة (لين ثلاثة أيام) عشان تنستلم، وبعدها تحذفها.

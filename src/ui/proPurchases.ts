@@ -55,7 +55,9 @@ function refundLine(o: PurchaseView, refundDays: number): string {
 
 function purchaseHtml(o: PurchaseView, refundDays: number, asking: boolean, receiptOpen: boolean, note: OrderNote | undefined): string {
   // A founder's first purchase lists the days it bought and the days it was given.
-  const item = o.bonusDays ? tv('pu.itemBonus', { days: o.days, bonus: o.bonusDays }) : tv(o.renewal ? 'pu.itemRenewal' : 'pu.item', { days: o.days });
+  const item = o.product === 'match'
+    ? tv('pu.itemMatch', { hours: o.days * 24 })
+    : o.bonusDays ? tv('pu.itemBonus', { days: o.days, bonus: o.bonusDays }) : tv(o.renewal ? 'pu.itemRenewal' : 'pu.item', { days: o.days });
   const price = tv('pu.price', { price: money(o.amount) });
   const how = howPaid(o);
   const when = whenDay(o.paidAt ?? o.createdAt);

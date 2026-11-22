@@ -11,7 +11,7 @@
  *  - acceptGift() succeeds once per account, ever. The gift row is keyed by
  *    the account and only moves from offered to accepted.
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AllowanceKind, PassPlan } from './proPlan';
 import { LEGACY_PAID_PLANS, PAID_PLANS, PASS_PLANS, normalizePlan } from './proPlan';
@@ -33,9 +33,50 @@ export interface ProPass {
 export interface ProGift {
   userId: string;
   offeredAt: string;
+  /** When the offer was first shown to its holder; null if never, or shown before this was recorded. */
+  seenAt: string | null;
   acceptedAt: string | null;
   passId: string | null;
+  /** It started by itself (PRO_AUTO_GIFT), not from the Accept button. */
+  auto: boolean;
+  /** The language its holder was reading when it started, when the browser said (the emails are in both anyway). */
+  lang: 'en' | 'ar' | null;
+  /** When its holder was shown that Pro is on (the welcome), and the end card. */
+  welcomeAt: string | null;
+  endSeenAt: string | null;
+  /** Pro items its holder's exports carried while it ran, by the interface's key, with how many times. */
+  uses: Record<string, number>;
+  /** When its holder ticked "email me Pro's news and offers" (null: never, or unticked since). */
+  offersOkAt: string | null;
 }
+
+/** The gift's three emails (proGift.ts): it started, it ends in about a day, it ended. */
+export type GiftMailKind = 'start' | 'soon' | 'end';
+export const GIFT_MAIL_KINDS: GiftMailKind[] = ['start', 'soon', 'end'];
+
+/** A gift one of the emails is due for. */
+export interface GiftDue {
+  userId: string;
+  lang: 'en' | 'ar' | null;
+  /** For the email's "stop these emails" link. */
+  stopToken: string;
+  startsAt: string;
+  endsAt: string;
+  uses: Record<string, number>;
+  /** Its holder asked for Pro's news and offers by email: the email after the gift may then carry a price. */
+  offersOk: boolean;
+}
+
+/** A started gift as /admin counts it. */
+export interface GiftRow {
+  userId: string;
+  auto: boolean;
+  startedAt: string;
+  /** When its pass ends or ended (null: the pass is gone). */
+  endsAt: string | null;
+}
+
+const newStopToken = (): string => randomBytes(24).toString('base64url');
 
 /** A pass as /admin's Members tab lists it: whose it is, who gave it, how much of Pro it has used. */
 export interface ProMemberPass extends ProPass {
@@ -54,9 +95,17 @@ export interface AllowanceSlot {
 }
 
 export interface ProStats {
-  gifts: { offered: number; accepted: number; active: number };
+  /**
+   * offered: accounts the server found eligible (a row exists). seen: of those,
+   * the ones the offer was shown to, or who started it. seenSince: the first
+   * time a showing was recorded (null: never), since offers shown earlier have no mark.
+   */
+  gifts: { offered: number; seen: number; seenSince: string | null; accepted: number; active: number };
   passes: Record<PassPlan, number>;
+  /** Accounts on the "tell me when Pro opens" list. */
   notify: number;
+  /** Of those, the ones with an answer to the price question (answering adds the account to the list), and how many of them said "not for me". */
+  notifyVia: { price: number; wontPay: number };
 }
 
 /** One answer to "what would you pay for a month of Pro?" (proPrice.ts). */
@@ -115,11 +164,36 @@ export interface ProRepository {
   gift(userId: string): Promise<ProGift | null>;
   /** Create the offer if there is none; return whatever is there. */
   offerGift(userId: string, now: Date): Promise<ProGift>;
+  /** The offer was shown to its holder: kept the first time only. False when there is no offer or it was already marked. */
+  giftSeen(userId: string, now: Date): Promise<boolean>;
   /**
    * Turn an offered gift into a pass of `days` days starting now. Refused when
    * there is no offer or it was already accepted.
    */
-  acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }>;
+  acceptGift(userId: string, now: Date, days: number, how?: { auto?: boolean; lang?: 'en' | 'ar' | null }): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }>;
+  /** The welcome or the end card was shown: kept the first time only. False when there is no started gift or it was marked already. */
+  giftMark(userId: string, which: 'welcome' | 'end', now: Date): Promise<boolean>;
+  /** Count one more use of each of these Pro items on the account's gift. At most `maxKeys` different items are kept. */
+  giftUse(userId: string, keys: string[], maxKeys: number): Promise<boolean>;
+  /** "Email me Pro's news and offers", ticked or unticked by the gift's holder. False when there is no started gift. */
+  giftOffersOk(userId: string, ok: boolean, now: Date): Promise<boolean>;
+  /**
+   * Automatic gifts one of the emails is due for and has not had:
+   *   start  started in the last day, still running;
+   *   soon   ends between `soonFrom` and `soonTo` from now (about a day);
+   *   end    ended in the last two days, by running out (not taken back).
+   */
+  giftsDue(kind: GiftMailKind, now: Date, limit: number): Promise<GiftDue[]>;
+  /** Take a gift's email to send it: one caller gets it, ever. And give it back when the mail service refused the message. */
+  claimGiftMail(userId: string, kind: GiftMailKind, now: Date): Promise<boolean>;
+  unclaimGiftMail(userId: string, kind: GiftMailKind): Promise<void>;
+  /** Whose gift a "stop these emails" link belongs to. */
+  giftByStopToken(token: string): Promise<string | null>;
+  /** "Stop these emails": the account gets no more of Pro's news and offers (the same list the founders email keeps). */
+  stopMail(userId: string, now: Date, via: string): Promise<void>;
+  mailStopped(userId: string): Promise<boolean>;
+  /** Every gift that was started, for /admin's counts. */
+  giftRows(limit: number): Promise<GiftRow[]>;
 
   /** Record "tell me when Pro opens". Returns false when already recorded. */
   notify(userId: string): Promise<boolean>;
@@ -156,6 +230,9 @@ export class MemoryProRepository implements ProRepository {
   /** Who gave each pass that was given by hand (pass id to admin account id). */
   private givers = new Map<string, string>();
   private gifts = new Map<string, ProGift>();
+  private giftMails = new Map<string, Partial<Record<GiftMailKind, string>>>();
+  private stopTokens = new Map<string, string>();
+  private mailStops = new Set<string>();
   private notifies = new Set<string>();
   private prices = new Map<string, PriceAnswer & { userId: string | null; seq: number }>();
   private priceSeq = 0;
@@ -246,22 +323,120 @@ export class MemoryProRepository implements ProRepository {
   async offerGift(userId: string, now: Date): Promise<ProGift> {
     const have = this.gifts.get(userId);
     if (have) return { ...have };
-    const g: ProGift = { userId, offeredAt: now.toISOString(), acceptedAt: null, passId: null };
+    const g: ProGift = { userId, offeredAt: now.toISOString(), seenAt: null, acceptedAt: null, passId: null, auto: false, lang: null, welcomeAt: null, endSeenAt: null, uses: {}, offersOkAt: null };
     this.gifts.set(userId, g);
+    this.stopTokens.set(userId, newStopToken());
     return { ...g };
   }
 
-  async acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }> {
+  async giftSeen(userId: string, now: Date): Promise<boolean> {
+    const g = this.gifts.get(userId);
+    if (!g || g.seenAt) return false;
+    g.seenAt = now.toISOString();
+    return true;
+  }
+
+  async acceptGift(userId: string, now: Date, days: number, how: { auto?: boolean; lang?: 'en' | 'ar' | null } = {}): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }> {
     const g = this.gifts.get(userId);
     if (!g) return { ok: false, reason: 'none' };
     if (g.acceptedAt) return { ok: false, reason: 'used' };
     // Marked before the pass exists, so a second call in the same tick is refused.
     g.acceptedAt = now.toISOString();
+    g.auto = how.auto === true;
+    g.lang = how.lang ?? null;
     const pass = await this.grantPass({
       userId, plan: 'gift', startsAt: now, endsAt: new Date(now.getTime() + days * 24 * 60 * 60 * 1000), source: 'gift', createdBy: null,
     });
     g.passId = pass.id;
     return { ok: true, pass };
+  }
+
+  async giftMark(userId: string, which: 'welcome' | 'end', now: Date): Promise<boolean> {
+    const g = this.gifts.get(userId);
+    if (!g || !g.acceptedAt) return false;
+    if (which === 'welcome') {
+      if (g.welcomeAt) return false;
+      g.welcomeAt = now.toISOString();
+    } else {
+      if (g.endSeenAt) return false;
+      g.endSeenAt = now.toISOString();
+    }
+    return true;
+  }
+
+  async giftUse(userId: string, keys: string[], maxKeys: number): Promise<boolean> {
+    const g = this.gifts.get(userId);
+    if (!g || !g.acceptedAt) return false;
+    let any = false;
+    for (const k of keys) {
+      if (!(k in g.uses) && Object.keys(g.uses).length >= maxKeys) continue;
+      g.uses[k] = Math.min(999, (g.uses[k] ?? 0) + 1);
+      any = true;
+    }
+    return any;
+  }
+
+  async giftOffersOk(userId: string, ok: boolean, now: Date): Promise<boolean> {
+    const g = this.gifts.get(userId);
+    if (!g || !g.acceptedAt) return false;
+    g.offersOkAt = ok ? now.toISOString() : null;
+    return true;
+  }
+
+  async giftsDue(kind: GiftMailKind, now: Date, limit: number): Promise<GiftDue[]> {
+    const t = now.getTime();
+    const out: GiftDue[] = [];
+    for (const g of this.gifts.values()) {
+      if (!g.auto || !g.acceptedAt || !g.passId || this.giftMails.get(g.userId)?.[kind]) continue;
+      const p = this.passes.find((x) => x.id === g.passId);
+      if (!p || p.revokedAt) continue;
+      if (!giftMailDue(kind, Date.parse(g.acceptedAt), Date.parse(p.endsAt), t)) continue;
+      out.push({ userId: g.userId, lang: g.lang, stopToken: this.stopTokens.get(g.userId) ?? '', startsAt: p.startsAt, endsAt: p.endsAt, uses: { ...g.uses }, offersOk: !!g.offersOkAt });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  async claimGiftMail(userId: string, kind: GiftMailKind, now: Date): Promise<boolean> {
+    const m = this.giftMails.get(userId) ?? {};
+    if (m[kind] || !this.gifts.has(userId)) return false;
+    m[kind] = now.toISOString();
+    this.giftMails.set(userId, m);
+    return true;
+  }
+
+  async unclaimGiftMail(userId: string, kind: GiftMailKind): Promise<void> {
+    const m = this.giftMails.get(userId);
+    if (m) delete m[kind];
+  }
+
+  /** When each of a gift's emails was taken to be sent (the tests read it). */
+  giftMailsOf(userId: string): Partial<Record<GiftMailKind, string>> {
+    return { ...(this.giftMails.get(userId) ?? {}) };
+  }
+
+  async giftByStopToken(token: string): Promise<string | null> {
+    for (const [userId, tok] of this.stopTokens) if (tok === token) return userId;
+    return null;
+  }
+
+  async stopMail(userId: string): Promise<void> {
+    this.mailStops.add(userId);
+  }
+
+  async mailStopped(userId: string): Promise<boolean> {
+    return this.mailStops.has(userId);
+  }
+
+  async giftRows(limit: number): Promise<GiftRow[]> {
+    const out: GiftRow[] = [];
+    for (const g of this.gifts.values()) {
+      if (!g.acceptedAt) continue;
+      const p = g.passId ? this.passes.find((x) => x.id === g.passId) : undefined;
+      out.push({ userId: g.userId, auto: g.auto, startedAt: g.acceptedAt, endsAt: p ? (p.revokedAt ?? p.endsAt) : null });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   async notify(userId: string): Promise<boolean> {
@@ -322,14 +497,19 @@ export class MemoryProRepository implements ProRepository {
     const live = this.passes.filter((p) => !p.revokedAt && Date.parse(p.startsAt) <= t && Date.parse(p.endsAt) > t);
     const passes = Object.fromEntries(PASS_PLANS.map((pl) => [pl, live.filter((p) => p.plan === pl).length])) as Record<PassPlan, number>;
     const gifts = [...this.gifts.values()];
+    const marks = gifts.map((g) => g.seenAt).filter((x): x is string => !!x).sort();
+    const answered = [...this.prices.values()].filter((a) => a.userId && this.notifies.has(a.userId));
     return {
       gifts: {
         offered: gifts.length,
+        seen: gifts.filter((g) => g.seenAt || g.acceptedAt).length,
+        seenSince: marks[0] ?? null,
         accepted: gifts.filter((g) => g.acceptedAt).length,
         active: passes.gift,
       },
       passes,
       notify: this.notifies.size,
+      notifyVia: { price: new Set(answered.map((a) => a.userId)).size, wontPay: new Set(answered.filter((a) => a.wontPay).map((a) => a.userId)).size },
     };
   }
 
@@ -380,14 +560,51 @@ export function rowToPass(r: Record<string, unknown>): ProPass {
   };
 }
 
+/** The items a gift's holder used, as stored: a flat object of small counts. Anything else reads as none. */
+function usesOf(v: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof n === 'number' && Number.isFinite(n) && n > 0) out[k] = Math.min(999, Math.floor(n));
+  }
+  return out;
+}
+
 function rowToGift(r: Record<string, unknown>): ProGift {
   return {
     userId: String(r.user_id),
     offeredAt: iso(r.offered_at as string)!,
+    seenAt: iso((r.seen_at ?? null) as string | null),
     acceptedAt: iso(r.accepted_at as string | null),
     passId: r.pass_id ? String(r.pass_id) : null,
+    auto: r.auto === true,
+    lang: r.lang === 'ar' ? 'ar' : r.lang === 'en' ? 'en' : null,
+    welcomeAt: iso((r.welcome_at ?? null) as string | null),
+    endSeenAt: iso((r.end_seen_at ?? null) as string | null),
+    uses: usesOf(r.uses),
+    offersOkAt: iso((r.offers_ok_at ?? null) as string | null),
   };
 }
+
+const GIFT_COLS = 'user_id, offered_at, seen_at, accepted_at, pass_id, auto, lang, welcome_at, end_seen_at, uses, offers_ok_at';
+
+const HOUR_MS = 3600_000;
+/** The start email is for a gift no older than this. */
+export const GIFT_START_MAIL_HOURS = 24;
+/** The "ends soon" email goes out when this much or less is left, and not with less than GIFT_SOON_MIN_HOURS. */
+export const GIFT_SOON_HOURS = 26;
+export const GIFT_SOON_MIN_HOURS = 6;
+/** The "it ended" email is for a gift that ended no longer ago than this. */
+export const GIFT_END_MAIL_HOURS = 48;
+
+/** Whether a gift that started at `started` and ends at `ends` is due its `kind` of email at `t` (all ms). */
+export function giftMailDue(kind: GiftMailKind, started: number, ends: number, t: number): boolean {
+  if (kind === 'start') return ends > t && t - started <= GIFT_START_MAIL_HOURS * HOUR_MS;
+  if (kind === 'soon') return ends - t <= GIFT_SOON_HOURS * HOUR_MS && ends - t >= GIFT_SOON_MIN_HOURS * HOUR_MS;
+  return ends <= t && t - ends <= GIFT_END_MAIL_HOURS * HOUR_MS;
+}
+
+const MAIL_COL: Record<GiftMailKind, string> = { start: 'mail_start_at', soon: 'mail_soon_at', end: 'mail_end_at' };
 
 export const PASS_COLS = 'id, user_id, plan, starts_at, ends_at, source, created_at, revoked_at';
 
@@ -503,20 +720,25 @@ export class PgProRepository implements ProRepository {
   }
 
   async gift(userId: string): Promise<ProGift | null> {
-    const r = await this.pool.query('SELECT user_id, offered_at, accepted_at, pass_id FROM pro_gifts WHERE user_id = $1', [userId]);
+    const r = await this.pool.query(`SELECT ${GIFT_COLS} FROM pro_gifts WHERE user_id = $1`, [userId]);
     return r.rows[0] ? rowToGift(r.rows[0]) : null;
   }
 
   async offerGift(userId: string, now: Date): Promise<ProGift> {
     // claim_by stays empty: the gift never expires (schema.sql, "Pro becomes one monthly plan").
     await this.pool.query(
-      'INSERT INTO pro_gifts (user_id, offered_at) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
-      [userId, now],
+      'INSERT INTO pro_gifts (user_id, offered_at, stop_token) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING',
+      [userId, now, newStopToken()],
     );
     return (await this.gift(userId))!;
   }
 
-  async acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }> {
+  async giftSeen(userId: string, now: Date): Promise<boolean> {
+    const r = await this.pool.query('UPDATE pro_gifts SET seen_at = $2 WHERE user_id = $1 AND seen_at IS NULL', [userId, now]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async acceptGift(userId: string, now: Date, days: number, how: { auto?: boolean; lang?: 'en' | 'ar' | null } = {}): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -537,7 +759,11 @@ export class PgProRepository implements ProRepository {
         [userId, now, ends],
       );
       const pass = rowToPass(p.rows[0]);
-      await client.query('UPDATE pro_gifts SET accepted_at = $2, pass_id = $3 WHERE user_id = $1', [userId, now, pass.id]);
+      // An offer made before stop tokens existed gets its own here, for the emails' "stop these emails" link.
+      await client.query(
+        'UPDATE pro_gifts SET accepted_at = $2, pass_id = $3, auto = $4, lang = $5, stop_token = COALESCE(stop_token, $6) WHERE user_id = $1',
+        [userId, now, pass.id, how.auto === true, how.lang ?? null, newStopToken()],
+      );
       await client.query('COMMIT');
       return { ok: true, pass };
     } catch (e) {
@@ -546,6 +772,95 @@ export class PgProRepository implements ProRepository {
     } finally {
       client.release();
     }
+  }
+
+  async giftMark(userId: string, which: 'welcome' | 'end', now: Date): Promise<boolean> {
+    const col = which === 'welcome' ? 'welcome_at' : 'end_seen_at';
+    const r = await this.pool.query(`UPDATE pro_gifts SET ${col} = $2 WHERE user_id = $1 AND accepted_at IS NOT NULL AND ${col} IS NULL`, [userId, now]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async giftUse(userId: string, keys: string[], maxKeys: number): Promise<boolean> {
+    let any = false;
+    for (const k of keys) {
+      // One more of an item already kept, or a new item while there is room for one.
+      const r = await this.pool.query(
+        `UPDATE pro_gifts SET uses = jsonb_set(uses, ARRAY[$2::text], to_jsonb(LEAST(999, COALESCE((uses->>$2)::int, 0) + 1)))
+         WHERE user_id = $1 AND accepted_at IS NOT NULL
+           AND (uses ? $2 OR (SELECT count(*) FROM jsonb_object_keys(uses)) < $3)`,
+        [userId, k, maxKeys],
+      );
+      if ((r.rowCount ?? 0) > 0) any = true;
+    }
+    return any;
+  }
+
+  async giftOffersOk(userId: string, ok: boolean, now: Date): Promise<boolean> {
+    const r = await this.pool.query(
+      'UPDATE pro_gifts SET offers_ok_at = CASE WHEN $2 THEN $3::timestamptz ELSE NULL END WHERE user_id = $1 AND accepted_at IS NOT NULL',
+      [userId, ok, now],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async giftsDue(kind: GiftMailKind, now: Date, limit: number): Promise<GiftDue[]> {
+    const col = MAIL_COL[kind];
+    const t = now.getTime();
+    const when =
+      kind === 'start' ? 'p.ends_at > $1 AND g.accepted_at >= $2'
+        : kind === 'soon' ? 'p.ends_at <= $2 AND p.ends_at >= $3'
+          : 'p.ends_at <= $1 AND p.ends_at >= $2';
+    const args: unknown[] =
+      kind === 'start' ? [now, new Date(t - GIFT_START_MAIL_HOURS * HOUR_MS)]
+        : kind === 'soon' ? [now, new Date(t + GIFT_SOON_HOURS * HOUR_MS), new Date(t + GIFT_SOON_MIN_HOURS * HOUR_MS)]
+          : [now, new Date(t - GIFT_END_MAIL_HOURS * HOUR_MS)];
+    // $1 is always passed; the 'soon' window does not read it, so it is named in a harmless comparison.
+    const r = await this.pool.query(
+      `SELECT g.user_id, g.lang, g.stop_token, g.uses, g.offers_ok_at, p.starts_at, p.ends_at
+       FROM pro_gifts g JOIN pro_passes p ON p.id = g.pass_id
+       WHERE g.auto AND g.accepted_at IS NOT NULL AND g.${col} IS NULL AND g.stop_token IS NOT NULL
+         AND p.revoked_at IS NULL AND $1::timestamptz IS NOT NULL AND ${when}
+       ORDER BY g.accepted_at LIMIT ${Math.max(1, Math.min(500, Math.floor(limit)))}`,
+      args,
+    );
+    return r.rows.map((x) => ({
+      userId: String(x.user_id), lang: x.lang === 'ar' ? 'ar' as const : x.lang === 'en' ? 'en' as const : null, stopToken: String(x.stop_token),
+      startsAt: iso(x.starts_at as string)!, endsAt: iso(x.ends_at as string)!, uses: usesOf(x.uses), offersOk: !!x.offers_ok_at,
+    }));
+  }
+
+  async claimGiftMail(userId: string, kind: GiftMailKind, now: Date): Promise<boolean> {
+    const col = MAIL_COL[kind];
+    const r = await this.pool.query(`UPDATE pro_gifts SET ${col} = $2 WHERE user_id = $1 AND ${col} IS NULL`, [userId, now]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async unclaimGiftMail(userId: string, kind: GiftMailKind): Promise<void> {
+    await this.pool.query(`UPDATE pro_gifts SET ${MAIL_COL[kind]} = NULL WHERE user_id = $1`, [userId]);
+  }
+
+  async giftByStopToken(token: string): Promise<string | null> {
+    const r = await this.pool.query('SELECT user_id FROM pro_gifts WHERE stop_token = $1', [token]);
+    return r.rows[0] ? String(r.rows[0].user_id) : null;
+  }
+
+  async stopMail(userId: string, now: Date, via: string): Promise<void> {
+    await this.pool.query('INSERT INTO pro_mail_stops (user_id, created_at, via) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING', [userId, now, via.slice(0, 40)]);
+  }
+
+  async mailStopped(userId: string): Promise<boolean> {
+    const r = await this.pool.query('SELECT 1 FROM pro_mail_stops WHERE user_id = $1', [userId]);
+    return r.rows.length > 0;
+  }
+
+  async giftRows(limit: number): Promise<GiftRow[]> {
+    const r = await this.pool.query(
+      `SELECT g.user_id, g.auto, g.accepted_at, COALESCE(p.revoked_at, p.ends_at) AS ends_at
+       FROM pro_gifts g LEFT JOIN pro_passes p ON p.id = g.pass_id
+       WHERE g.accepted_at IS NOT NULL ORDER BY g.accepted_at DESC LIMIT $1`,
+      [limit],
+    );
+    return r.rows.map((x) => ({ userId: String(x.user_id), auto: x.auto === true, startedAt: iso(x.accepted_at as string)!, endsAt: iso((x.ends_at ?? null) as string | null) }));
   }
 
   async notify(userId: string): Promise<boolean> {
@@ -626,21 +941,35 @@ export class PgProRepository implements ProRepository {
   }
 
   async stats(now: Date): Promise<ProStats> {
-    const [g, p, n] = await Promise.all([
-      this.pool.query('SELECT count(*)::int AS offered, count(accepted_at)::int AS accepted FROM pro_gifts'),
+    const [g, p, n, v] = await Promise.all([
+      this.pool.query(
+        `SELECT count(*)::int AS offered, count(accepted_at)::int AS accepted,
+                count(*) FILTER (WHERE seen_at IS NOT NULL OR accepted_at IS NOT NULL)::int AS seen, min(seen_at) AS seen_since
+         FROM pro_gifts`,
+      ),
       this.pool.query(
         `SELECT plan, count(*)::int AS n FROM pro_passes
          WHERE revoked_at IS NULL AND starts_at <= $1 AND ends_at > $1 GROUP BY plan`,
         [now],
       ),
       this.pool.query('SELECT count(*)::int AS n FROM pro_notify'),
+      // Each account once, however its answer row is keyed; "not for me" is the answer's own flag.
+      this.pool.query(
+        `SELECT count(*)::int AS price, count(*) FILTER (WHERE a.wont)::int AS wont
+         FROM pro_notify n
+         JOIN (SELECT user_id, bool_or(wont_pay) AS wont FROM pro_price_answers WHERE user_id IS NOT NULL GROUP BY user_id) a ON a.user_id = n.user_id`,
+      ),
     ]);
     const passes = Object.fromEntries(PASS_PLANS.map((pl) => [pl, 0])) as Record<PassPlan, number>;
     for (const r of p.rows) passes[normalizePlan(String(r.plan))] += Number(r.n);
     return {
-      gifts: { offered: Number(g.rows[0]?.offered ?? 0), accepted: Number(g.rows[0]?.accepted ?? 0), active: passes.gift },
+      gifts: {
+        offered: Number(g.rows[0]?.offered ?? 0), seen: Number(g.rows[0]?.seen ?? 0), seenSince: iso((g.rows[0]?.seen_since ?? null) as string | null),
+        accepted: Number(g.rows[0]?.accepted ?? 0), active: passes.gift,
+      },
       passes,
       notify: Number(n.rows[0]?.n ?? 0),
+      notifyVia: { price: Number(v.rows[0]?.price ?? 0), wontPay: Number(v.rows[0]?.wont ?? 0) },
     };
   }
 

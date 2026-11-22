@@ -41,6 +41,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { PASS_COLS, rowToPass, type MemoryProRepository, type ProPass } from './proRepo';
+import type { Product } from './proPlan';
 
 export type OrderStatus = 'pending' | 'paid' | 'refunded' | 'failed' | 'expired' | 'review';
 /** How an order is paid: Moyasar's hosted invoice page (v1), its form on /pro, or a renewal on a saved card. */
@@ -93,6 +94,23 @@ export interface ProOrder {
   refundSeenAt: string | null;
   /** Extra days its pass was given on top of `days`: the founders bonus (proLaunch.ts). 0 for every other order. */
   bonusDays: number;
+  /** What it buys: 30 days of Pro, or the match pass (22 Nov 2026). Every order before that is 'monthly'. */
+  product: Product;
+  /** Where "Get Pro" was pressed (src/ui/proWhere.ts), when the browser said and its owner allowed counting. For /admin's funnel only. */
+  src: string | null;
+}
+
+/** Where an offer was seen, as an order remembers it: a short name, never free text. */
+export const ORDER_SRC = /^[a-z]{2,12}$/;
+
+/** A real purchase as /admin counts it (never a test order or a renewal). */
+export interface PaidOrder {
+  userId: string | null;
+  paidAt: string;
+  product: Product;
+  src: string | null;
+  amount: number;
+  refunded: boolean;
 }
 
 export interface ProOrderRow extends ProOrder {
@@ -137,6 +155,9 @@ export interface NewOrder {
   kind?: OrderKind;
   /** For 'form' and 'renewal': the id the payment will be created under. */
   paymentId?: string;
+  /** Default 'monthly'. */
+  product?: Product;
+  src?: string | null;
 }
 
 export interface PaidWith {
@@ -320,6 +341,14 @@ export interface PaymentRepository {
   trash(token: string, now: Date): Promise<void>;
   trashed(limit: number): Promise<string[]>;
   untrash(token: string): Promise<void>;
+  /**
+   * The price of a month came down (PRO_MONTHLY_PRICE): a subscription that
+   * agreed to more is charged the lower price from now on. Never raises one.
+   * True when it changed.
+   */
+  lowerSubAmount(id: string, amount: number, now: Date): Promise<boolean>;
+  /** Real purchases paid since `since` (test orders and renewals left out), newest first, for /admin's counts. */
+  paidOrders(since: Date, limit: number): Promise<PaidOrder[]>;
 
   // Refunds, told and asked for (19 Nov 2026).
   /**
@@ -380,6 +409,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
       createdAt: o.now.toISOString(), paidAt: null, refundedAt: null, refunded: 0,
       kind: o.kind ?? 'invoice', keep: false, keepAt: null, attemptedAt: null, subscriptionId: null, cycle: null, fail: null,
       brand: null, refundMailAt: null, refundSeenAt: null, bonusDays: 0,
+      product: o.product ?? 'monthly', src: o.src && ORDER_SRC.test(o.src) ? o.src : null,
     };
     if (order.paymentId && [...this.orders.values()].some((x) => x.kind !== 'invoice' && x.paymentId === order.paymentId)) throw new Error('payment id already used');
     this.orders.set(order.id, order);
@@ -572,7 +602,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
       status: 'pending', invoiceId: null, invoiceUrl: null, paymentId, method: null, passId: null, note: null,
       createdAt: now.toISOString(), paidAt: null, refundedAt: null, refunded: 0,
       kind: 'renewal', keep: false, keepAt: null, attemptedAt: null, subscriptionId: s.id, cycle: s.cycle, fail: null,
-      brand: null, refundMailAt: null, refundSeenAt: null, bonusDays: 0,
+      brand: null, refundMailAt: null, refundSeenAt: null, bonusDays: 0, product: 'monthly', src: null,
     };
     this.orders.set(order.id, order);
     return { order: { ...order }, resumed: false };
@@ -650,6 +680,21 @@ export class MemoryPaymentRepository implements PaymentRepository {
 
   async untrash(token: string): Promise<void> {
     this.bin.delete(token);
+  }
+
+  async lowerSubAmount(id: string, amount: number, _now: Date): Promise<boolean> {
+    const s = this.subOf(id);
+    if (!s || (s.status !== 'active' && s.status !== 'failing') || amount < 100 || s.amount <= amount) return false;
+    s.amount = amount;
+    return true;
+  }
+
+  async paidOrders(since: Date, limit: number): Promise<PaidOrder[]> {
+    return [...this.orders.values()]
+      .filter((o) => !o.testMode && o.kind !== 'renewal' && (o.status === 'paid' || o.status === 'refunded') && !!o.paidAt && Date.parse(o.paidAt) >= since.getTime())
+      .sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''))
+      .slice(0, limit)
+      .map((o) => ({ userId: o.userId, paidAt: o.paidAt!, product: o.product, src: o.src, amount: o.amount, refunded: o.status === 'refunded' }));
   }
 
   async claimRefundMail(orderId: string, now: Date): Promise<boolean> {
@@ -734,7 +779,7 @@ export class MemoryPaymentRepository implements PaymentRepository {
 const ORDER_COLS =
   'o.id, o.user_id, o.amount, o.currency, o.days, o.lang, o.test_mode, o.status, o.invoice_id, o.invoice_url, o.payment_id, ' +
   'o.method, o.pass_id, o.note, o.created_at, o.paid_at, o.refunded_at, o.refunded, ' +
-  'o.kind, o.keep, o.keep_at, o.attempted_at, o.subscription_id, o.cycle, o.fail, o.brand, o.refund_mail_at, o.refund_seen_at, o.bonus_days';
+  'o.kind, o.keep, o.keep_at, o.attempted_at, o.subscription_id, o.cycle, o.fail, o.brand, o.refund_mail_at, o.refund_seen_at, o.bonus_days, o.product, o.src';
 
 const s = (v: unknown): string | null => (v == null ? null : String(v));
 const n = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -770,6 +815,8 @@ function rowToOrder(r: Record<string, unknown>): ProOrder {
     refundMailAt: iso(r.refund_mail_at as string | null),
     refundSeenAt: iso(r.refund_seen_at as string | null),
     bonusDays: Number(r.bonus_days ?? 0),
+    product: r.product === 'match' ? 'match' : 'monthly',
+    src: s(r.src),
   };
 }
 
@@ -848,9 +895,9 @@ export class PgPaymentRepository implements PaymentRepository {
 
   async create(o: NewOrder): Promise<ProOrder> {
     const r = await this.pool.query(
-      `INSERT INTO pro_orders AS o (user_id, amount, currency, days, lang, test_mode, created_at, kind, payment_id)
-       VALUES ($1, $2, 'SAR', $3, $4, $5, $6, $7, $8) RETURNING ${ORDER_COLS}`,
-      [o.userId, o.amount, o.days, o.lang, o.testMode, o.now, o.kind ?? 'invoice', o.paymentId ?? null],
+      `INSERT INTO pro_orders AS o (user_id, amount, currency, days, lang, test_mode, created_at, kind, payment_id, product, src)
+       VALUES ($1, $2, 'SAR', $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${ORDER_COLS}`,
+      [o.userId, o.amount, o.days, o.lang, o.testMode, o.now, o.kind ?? 'invoice', o.paymentId ?? null, o.product ?? 'monthly', o.src && ORDER_SRC.test(o.src) ? o.src : null],
     );
     return rowToOrder(r.rows[0]);
   }
@@ -1180,6 +1227,28 @@ export class PgPaymentRepository implements PaymentRepository {
 
   async untrash(token: string): Promise<void> {
     await this.pool.query('DELETE FROM pro_token_trash WHERE token = $1', [token]);
+  }
+
+  async lowerSubAmount(id: string, amount: number, now: Date): Promise<boolean> {
+    if (amount < 100) return false;
+    const r = await this.pool.query(
+      `UPDATE pro_subscriptions SET amount = $2, updated_at = $3 WHERE id = $1 AND status IN ('active', 'failing') AND amount > $2`,
+      [id, amount, now],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async paidOrders(since: Date, limit: number): Promise<PaidOrder[]> {
+    const r = await this.pool.query(
+      `SELECT user_id, paid_at, product, src, amount, status FROM pro_orders
+       WHERE NOT test_mode AND kind <> 'renewal' AND status IN ('paid', 'refunded') AND paid_at >= $1
+       ORDER BY paid_at DESC LIMIT $2`,
+      [since, limit],
+    );
+    return r.rows.map((x) => ({
+      userId: s(x.user_id), paidAt: iso(x.paid_at as string)!, product: x.product === 'match' ? 'match' as const : 'monthly' as const,
+      src: s(x.src), amount: Number(x.amount), refunded: x.status === 'refunded',
+    }));
   }
 
   async claimRefundMail(orderId: string, now: Date): Promise<boolean> {

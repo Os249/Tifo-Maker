@@ -9,8 +9,10 @@
  * asks the server to act; it decides nothing.
  */
 import { escapeHtml } from '../core/escape';
-import { acceptProGift, notifyPro, type ProOffer, type ProState } from '../net/api';
+import { acceptProGift, giftEndSeen, giftWelcomed, markGiftSeen, notifyPro, type ProOffer, type ProState } from '../net/api';
 import { track } from '../net/analytics';
+import { getPressed, offerSeen, proLink, type ProPlace } from './proWhere';
+import { madeList } from './proUse';
 import { containDialog } from './dialogFocus';
 import { localPath, t, tv } from './i18n';
 import { CROWN_SVG, money, whenDate } from './pro';
@@ -98,6 +100,7 @@ function perksOf(keys: string[], st?: ProState | null): string[] {
  */
 export function openGiftSheet(state?: ProState | null): Promise<boolean> {
   const days = state?.gift && 'days' in state.gift ? state.gift.days : 7;
+  markGiftSeen();
   const endsIfNow = new Date(Date.now() + days * DAY).toISOString();
   const sheet = openSheet(
     mark() +
@@ -144,12 +147,131 @@ export function priceLine(offer: ProOffer): string {
   return tv(offer.autoRenew ? 'pro.priceLineRenew' : 'pro.priceLine', { price: money(offer.monthly.price), days: offer.monthly.days });
 }
 
+/** The match pass in one quiet line that is also the way to it, while it is sold; otherwise nothing. */
+function matchLine(offer: ProOffer | undefined, place: ProPlace): string {
+  const m = offer?.paymentsOpen ? offer.match : undefined;
+  if (!m) return '';
+  return `<a class="pro-text-btn" data-act="match" href="${escapeHtml(proLink(place, 'match'))}">${escapeHtml(tv('pro.matchLine', { hours: m.hours, price: money(m.price) }))}</a>`;
+}
+
+/** Get Pro and the match pass link in a sheet count as "pressed Get Pro" at this place. */
+function wireGet(sheet: Sheet, place: ProPlace): void {
+  sheet.body.querySelectorAll('[data-act="get"], [data-act="match"]').forEach((a) => a.addEventListener('click', () => getPressed(place)));
+}
+
+// -------------------------------------------------- the automatic gift ---
+
+/** Whether another first-run layer is up: a sheet of ours waits its turn rather than stack on one. */
+const busyScreen = (): boolean => !!document.querySelector('.tour-overlay, .news-card, .mds-overlay, [data-post-sheet], .pm-nudge, .pro-sheet-backdrop, .auth-backdrop, .onb-overlay');
+
+/**
+ * Open the editor's export panel with the vertical video picked: the one
+ * thing the welcome points at. Only in the editor; false anywhere else.
+ */
+function showVertical(): boolean {
+  const rail = document.getElementById('rail-anim');
+  if (!rail) return false;
+  const more = document.querySelector<HTMLElement>('.m-tab[data-tab="more"]');
+  const pick = (): void => {
+    const size = document.getElementById('sx-size') as HTMLSelectElement | null;
+    if (!size) return;
+    size.value = 'vertical';
+    size.dispatchEvent(new Event('change', { bubbles: true }));
+    size.scrollIntoView({ block: 'center' });
+  };
+  if (more && more.getClientRects().length) {
+    // A phone: the export is behind More, then the film tile.
+    more.click();
+    window.setTimeout(() => {
+      document.querySelector<HTMLElement>('.m-tool:has(.ti-movie)')?.click();
+      window.setTimeout(pick, 200);
+    }, 60);
+  } else {
+    rail.click();
+    window.setTimeout(pick, 200);
+  }
+  return true;
+}
+
+/**
+ * The welcome: Pro is on for 7 days, by itself. Said once, calmly, with the
+ * one thing to try first. The box (never ticked for anyone) asks whether Pro's
+ * news and offers may come by email; closing the sheet any way keeps the
+ * answer and marks the welcome as shown, on every device.
+ */
+export function openWelcomeSheet(state: ProState): Promise<void> {
+  const g = state.gift;
+  if (!g || g.state !== 'active' || busyScreen()) return Promise.resolve();
+  const inEditor = !!document.getElementById('rail-anim');
+  const sheet = openSheet(
+    mark() +
+    `<h2>${escapeHtml(tv('gw.title', { n: g.days }))}</h2>` +
+    `<p>${escapeHtml(t('gw.lead'))} <span class="pro-when">${escapeHtml(whenDate(g.endsAt))}</span>.</p>` +
+    `<div class="pro-try"><b>${escapeHtml(t('gw.tryTitle'))}</b><p>${escapeHtml(t(inEditor ? 'gw.try' : 'gw.tryOut'))}</p></div>` +
+    `<label class="pro-option pro-mail-ok"><input type="checkbox" data-act="offers" /> <span>${escapeHtml(t('gw.offers'))}</span></label>` +
+    `<div class="pro-actions">` +
+    `<button type="button" class="pro-primary" data-act="go">${escapeHtml(t(inEditor ? 'gw.go' : 'gw.ok'))}</button>` +
+    (inEditor ? `<button type="button" class="pro-text-btn" data-act="later">${escapeHtml(t('pro.act.notNow'))}</button>` : '') +
+    `</div>`,
+  );
+  sheet.root.dataset.proWelcome = '1';
+  track('gift_auto');
+  track('gift_welcome');
+  const box = sheet.body.querySelector('[data-act="offers"]') as HTMLInputElement;
+  let go = false;
+  (sheet.body.querySelector('[data-act="go"]') as HTMLButtonElement).addEventListener('click', () => { go = true; sheet.close(); });
+  sheet.body.querySelector('[data-act="later"]')?.addEventListener('click', sheet.close);
+  (sheet.body.querySelector('[data-act="go"]') as HTMLButtonElement).focus();
+  return sheet.closed.then(async () => {
+    await giftWelcomed(box.checked);
+    if (go && inEditor) showVertical();
+  });
+}
+
+/**
+ * The gift ended: what they made with Pro, what stays theirs, what Pro did
+ * that Free does not, and one blue way to keep it at the price it is now.
+ * Shown once per gift; "Not now" is as easy as the button.
+ */
+export function openGiftEndSheet(state: ProState): Promise<void> {
+  const g = state.gift;
+  if (!g || g.state !== 'used' || !g.endCard || busyScreen()) return Promise.resolve();
+  const offer = state.offer;
+  const made = madeList(g.made?.items ?? {});
+  const ai = g.made?.ai ?? 0;
+  const lines = [...made, ...(ai > 0 ? [tv('ge.madeAi', { n: ai })] : [])];
+  const sheet = openSheet(
+    mark() +
+    `<h2>${escapeHtml(tv('ge.title', { n: offer?.gift.days ?? 7 }))}</h2>` +
+    (lines.length
+      ? `<p><b>${escapeHtml(t('ge.madeTitle'))}</b></p><ul class="pro-items">${lines.map((l) => `<li>${CROWN_SVG}<span>${escapeHtml(l)}</span></li>`).join('')}</ul>`
+      : '') +
+    `<p>${escapeHtml(t('ge.keep'))}</p>` +
+    `<p>${escapeHtml(t('ge.lose'))}</p>` +
+    (offer?.paymentsOpen ? `<p>${escapeHtml(priceLine(offer))}</p>` : '') +
+    `<div class="pro-actions">` +
+    (offer?.paymentsOpen
+      ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink('giftend'))}">${escapeHtml(tv('ge.keepBtn', { price: money(offer.monthly.price) }))}</a>` + matchLine(offer, 'giftend')
+      : `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(t('pro.act.seePage'))}</a>`) +
+    `<button type="button" class="pro-text-btn" data-act="later">${escapeHtml(t('pro.act.notNow'))}</button>` +
+    `</div>`,
+  );
+  sheet.root.dataset.proGiftEnd = '1';
+  track('gift_end_seen');
+  offerSeen('giftend');
+  void giftEndSeen();
+  wireGet(sheet, 'giftend');
+  sheet.body.querySelector('[data-act="later"]')!.addEventListener('click', sheet.close);
+  return sheet.closed;
+}
+
 /**
  * What Pro adds, from a limit card or a crown: the perks, the prices, and the
  * one way forward that exists right now (until payments open, being told when
  * they do).
  */
-export function openProSheet(state: ProState, opts: { title?: string; lead?: string } = {}): Promise<void> {
+export function openProSheet(state: ProState, opts: { title?: string; lead?: string; place?: ProPlace } = {}): Promise<void> {
+  const place = opts.place ?? 'limit';
   const offer = state.offer;
   const notified = !!state.notified;
   const gift = state.gift?.state === 'offered';
@@ -163,11 +285,13 @@ export function openProSheet(state: ProState, opts: { title?: string; lead?: str
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>`
+        ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink(place))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>` + matchLine(offer, place)
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<a class="pro-text-btn" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(t('pro.act.seePage'))}</a>` +
     `</div><p class="pro-note" role="status" aria-live="polite"></p>`,
   );
+  offerSeen(place);
+  wireGet(sheet, place);
   const note = sheet.body.querySelector('.pro-note') as HTMLElement;
   sheet.body.querySelector('[data-act="gift"]')?.addEventListener('click', () => {
     sheet.close();
@@ -250,12 +374,15 @@ export function openExportSheet(items: string[], state: ProState, both?: BothWay
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>`
+        ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink('export'))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>`
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<button type="button" class="pro-alt" data-act="free">${escapeHtml(t('pro.export.free'))}</button>` +
+    (gift ? '' : matchLine(offer, 'export')) +
     `</div><p class="pro-note" role="status" aria-live="polite">${escapeHtml(t('pro.export.never'))}</p>`,
   );
   track('export_sheet');
+  offerSeen('export');
+  wireGet(sheet, 'export');
   // Free first, then Pro, one at a time (they share the device's one 3D view).
   // A side with no picture is left out; with neither, the block goes.
   const stop = new AbortController();

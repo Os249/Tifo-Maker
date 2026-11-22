@@ -39,7 +39,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { REFUND_DAYS, type PaymentService, type Purchase } from './payments';
-import type { ProOrder, ProSubscription } from './payRepo';
+import { ORDER_SRC, type ProOrder, type ProSubscription } from './payRepo';
 import type { UserRow } from './repo';
 
 export interface PayRouteDeps {
@@ -64,7 +64,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 const ownView = (o: ProOrder, endsAt: string | null, renews: boolean) => ({
   id: o.id, status: o.status === 'review' ? 'pending' : o.status, endsAt,
-  why: o.status === 'failed' ? o.fail : null, kept: o.keep, renews,
+  why: o.status === 'failed' ? o.fail : null, kept: o.keep, renews, product: o.product,
   // The founders bonus this order's pass was given, when it was (proLaunch.ts).
   ...(o.status === 'paid' && o.bonusDays > 0 ? { bonusDays: o.bonusDays, days: o.days } : {}),
 });
@@ -81,6 +81,7 @@ const purchaseView = (p: Purchase) => ({
   status: p.order.status === 'review' ? 'checking' : p.order.status,
   amount: p.order.amount / 100,
   days: p.order.days,
+  product: p.order.product,
   bonusDays: p.order.bonusDays,
   method: p.order.method,
   brand: p.order.brand,
@@ -118,11 +119,15 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user) return reply.code(401).send({ error: 'authentication required' });
     if (!pay.openFor(user.username)) return notFound(reply);
-    const lang = (req.body as { lang?: unknown } | null)?.lang === 'ar' ? 'ar' : 'en';
+    const body = (req.body ?? {}) as { lang?: unknown; product?: unknown; src?: unknown };
+    const lang = body.lang === 'ar' ? 'ar' : 'en';
+    // Which of the two things on sale: anything but 'match' is the month. The price is the server's.
+    if (body.product !== undefined && body.product !== 'monthly' && body.product !== 'match') return reply.code(400).send({ error: 'product must be monthly or match' });
     const r = await pay.checkout(
       { id: user.id, username: user.username, email: user.email, emailVerified: !!user.emailVerifiedAt },
       lang,
       deps.baseOf(req),
+      { product: body.product === 'match' ? 'match' : 'monthly', src: typeof body.src === 'string' && ORDER_SRC.test(body.src) ? body.src : null },
     );
     if (r.ok) return 'url' in r ? { ok: true, order: r.orderId, url: r.url } : { ok: true, order: r.orderId, form: r.form };
     const status = r.reason === 'off' ? 404 : r.reason === 'verify' ? 403 : r.reason === 'held' ? 409 : r.reason === 'busy' ? 429 : 503;
@@ -290,6 +295,9 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
         note: o.note,
         kind: o.kind,
         keep: o.keep,
+        product: o.product,
+        days: o.days,
+        src: o.src,
         bonusDays: o.bonusDays,
         // The pass this order bought: /admin's Members tab says "bought for SAR 13.99" from it.
         passId: o.passId,

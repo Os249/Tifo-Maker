@@ -276,7 +276,7 @@ let twoOrder;
   await p.fill('#p', ADMIN_PW);
   await p.click('#login-form button');
   await p.waitForSelector('#tabs .tab', { timeout: 30000 });
-  await p.click('.tab[data-tab="pro"]');
+  await p.click('.tab[data-tab="orders"]');
   check('Pro tab: "Refund requests", two waiting, each with who, the order, Pro used or not, and what they wrote', await waitFor(p, () => {
     const h = [...document.querySelectorAll('h2.sec')].find((x) => x.textContent === 'Refund requests');
     const t = h?.nextElementSibling?.nextElementSibling;
