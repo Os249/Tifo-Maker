@@ -4014,5 +4014,92 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ev.band.winner': { en: 'Winner: "{title}" by @{name}', ar: 'الفايز: "{title}" من @{name}' },
   'ev.band.label': { en: 'Tifo event', ar: 'مسابقة تيفو' },
 
+  // ---- Pro turnaround (22 Nov 2026): the gift that starts by itself, Pro on Post it, the match pass ----
+  // The welcome (ui/proSheets.ts openWelcomeSheet).
+  'gw.title': { en: 'Pro is on for you: {n} days, free', ar: 'برو شغّال لك {n} أيام مجانًا' },
+  'gw.lead': { en: 'No card, and nothing to cancel. It ends by itself on', ar: 'بدون بطاقة، وما تحتاج تلغي شي. ينتهي لحاله' },
+  'gw.tryTitle': { en: 'Try this first', ar: 'جرّب هذا أول' },
+  'gw.try': {
+    en: 'The vertical video of your tifo, for Snap, TikTok and WhatsApp status. It comes out without the tifomaker.org mark.',
+    ar: 'فيديو تيفوك الطولي لسناب وتيك توك وحالة الواتساب. ويطلع بدون علامة tifomaker.org.',
+  },
+  'gw.tryOut': {
+    en: 'Open a tifo, press Export and pick the vertical 9:16 video: made for Snap, TikTok and WhatsApp status, without the tifomaker.org mark.',
+    ar: 'افتح تيفو، واضغط «تصدير» واختر الفيديو الطولي 9:16: على مقاس سناب وتيك توك وحالة الواتساب، وبدون علامة tifomaker.org.',
+  },
+  'gw.go': { en: 'Try the vertical video', ar: 'جرّب الفيديو الطولي' },
+  'gw.ok': { en: 'Start designing', ar: 'يلا نصمّم' },
+  'gw.offers': { en: 'Email me Pro news and offers. I can stop them any time.', ar: 'ارسلوا لي أخبار برو وعروضه على الإيميل. وأقدر أوقفها بأي وقت.' },
+  'gw.made.other': { en: 'Pro fonts, portrait styles or your club kit', ar: 'خطوط برو، أو ستايلات الصور، أو هوية ناديك' },
+  // The card when it ends (openGiftEndSheet).
+  'ge.title': { en: 'Your {n} days of Pro have ended', ar: 'خلصت أيام برو الـ{n}' },
+  'ge.madeTitle': { en: 'What you made with Pro', ar: 'اللي سويته مع برو' },
+  'ge.madeAi': { en: 'AI designs and reviews from Pro: {n}', ar: 'تصاميم ومراجعات بالذكاء من برو: {n}' },
+  'ge.keep': {
+    en: 'Everything you made stays yours: your designs, and every video and picture you saved.',
+    ar: 'كل شي سويته يبقى لك: تصاميمك، وكل فيديو وصورة حفظتها.',
+  },
+  'ge.lose': {
+    en: 'From now on, exports carry the tifomaker.org mark again, and the vertical video, Full HD and the 4K poster need Pro.',
+    ar: 'ومن الحين يرجع التصدير بعلامة tifomaker.org، والفيديو الطولي وFull HD وبوستر 4K يحتاجون برو.',
+  },
+  'ge.keepBtn': { en: 'Keep Pro for SAR {price}', ar: 'كمّل مع برو بـ{price} ريال' },
+  'pro.matchLine': { en: 'Or a {hours}-hour match pass for SAR {price}', ar: 'أو باقة المباراة: {hours} ساعة بـ{price} ريال' },
+  // Pro on the Post it sheet (ui/postPro.ts).
+  'pp2.sum': { en: 'Pro versions of this tifo', ar: 'نسخ برو من تيفوك' },
+  'pp2.shareRow': { en: 'Pro versions: vertical video, Full HD, 4K poster', ar: 'نسخ برو: فيديو طولي، Full HD، بوستر 4K' },
+  'pp2.v': { en: 'Vertical video for Snap, TikTok and WhatsApp status', ar: 'فيديو طولي لسناب وتيك توك وحالة الواتساب' },
+  'pp2.hd': { en: 'Full HD, without the tifomaker.org mark', ar: 'بدقة Full HD وبدون علامة tifomaker.org' },
+  'pp2.poster': { en: '4K poster', ar: 'بوستر 4K' },
+  'pp2.see': { en: 'See it on your tifo', ar: 'شوفه على تيفوك' },
+  'pp2.seeing': { en: 'Making a short preview…', ar: 'نجهّز لك معاينة قصيرة…' },
+  'pp2.seeNote': {
+    en: 'A small preview, with the mark. The Pro video is full size and without it.',
+    ar: 'معاينة صغيرة وعليها العلامة. فيديو برو بالحجم الكامل وبدونها.',
+  },
+  'pp2.seeFail': { en: 'The preview could not be made on this device.', ar: 'ما قدرنا نجهّز المعاينة على هالجهاز.' },
+  'pp2.price': { en: 'Pro is SAR {price} for {days} days, one payment.', ar: 'برو بـ{price} ريال لمدة {days} يوم، دفعة وحدة.' },
+  'pp2.priceMatch': { en: 'Or SAR {price} for a {hours}-hour match pass.', ar: 'أو باقة المباراة: {hours} ساعة بـ{price} ريال.' },
+  'pp2.get': { en: 'Get Pro', ar: 'اشترك في برو' },
+  'pp2.matchGet': { en: 'Match pass', ar: 'باقة المباراة' },
+  'pp2.acct': {
+    en: 'A free account gets all of it for {n} days, free: no card, and it ends by itself.',
+    ar: 'الحساب المجاني ياخذها كلها {n} أيام مجانًا: بدون بطاقة، وتنتهي لحالها.',
+  },
+  'pp2.free': { en: 'Posting the picture is always free.', ar: 'نشر الصورة مجاني دايم.' },
+  'pp2.yours': { en: 'Pro is on for you: these are ready.', ar: 'برو شغّال عندك: كلها جاهزة لك.' },
+  'pp2.make.v': { en: 'Make the vertical video', ar: 'سوّ الفيديو الطولي' },
+  'pp2.make.hd': { en: 'Make the Full HD video', ar: 'سوّ فيديو Full HD' },
+  'pp2.make.poster': { en: 'Make the 4K poster', ar: 'سوّ بوستر 4K' },
+  // The account offer on Post it.
+  'pa.line': { en: 'Save your tifo to an account', ar: 'احفظ تيفوك في حساب' },
+  'pa.lineGift': { en: 'Save your tifo to an account and get {n} days of Pro free', ar: 'احفظ تيفوك في حساب وخذ {n} أيام برو مجانًا' },
+  'pa.email': { en: 'Use my email', ar: 'بالإيميل' },
+  'pa.note': { en: 'Posting stays free without one.', ar: 'والنشر مجاني حتى بدون حساب.' },
+  'pa.saving': { en: 'Keeping your tifo safe first…', ar: 'نحفظ تيفوك أول…' },
+  'pa.done': { en: 'Your tifo is saved to your account.', ar: 'انحفظ تيفوك في حسابك.' },
+  'offer.leadGift': {
+    en: 'Your tifo is kept in this browser. Create a free account to keep it anywhere, and get {n} days of Pro free.',
+    ar: 'تيفوك محفوظ في هذا المتصفح. سوّ حساب مجاني عشان يبقى معك في أي جهاز، وتاخذ {n} أيام برو مجانًا.',
+  },
+  // The match pass on /pro (src/proPage.ts) and in the purchases list.
+  'pm2.title': { en: 'Derby this weekend?', ar: 'الديربي هالأسبوع؟' },
+  'pm2.body': {
+    en: 'A match pass is all of Pro for {hours} hours: SAR {price}, one payment, and it never renews.',
+    ar: 'باقة المباراة: كل مزايا برو لمدة {hours} ساعة بـ{price} ريال. دفعة وحدة، وما تتجدد أبد.',
+  },
+  'pm2.buy': { en: 'Get a match pass for SAR {price}', ar: 'خذ باقة المباراة بـ{price} ريال' },
+  'pm2.paid': {
+    en: 'Payment received! Your match pass is on until {date}. Your receipt is on its way to your email.',
+    ar: 'وصلت دفعتك! باقة المباراة شغّالة لين {date}. والإيصال في طريقه لإيميلك.',
+  },
+  'pu.itemMatch': { en: 'Pro match pass, {hours} hours', ar: 'برو، باقة المباراة {hours} ساعة' },
+  // /pro's question about the 7 days, once they start by themselves (PRO_AUTO_GIFT).
+  'pp.faq.q6auto': { en: 'How do the 7 free days work?', ar: 'كيف تشتغل الـ7 أيام المجانية؟' },
+  'pp.faq.a6auto': {
+    en: 'An account with a verified email that has never had Pro gets Pro for 7 days, once. They start by themselves the first time you are on the site with a verified email. No card, nothing is charged, and they end by themselves.',
+    ar: 'الحساب اللي بريده موثّق وما سبق له أخذ برو ياخذ برو 7 أيام، مرة وحدة. تبدأ لحالها أول مرة تكون في الموقع وبريدك موثّق. بدون بطاقة، وما ينخصم شي، وتنتهي لحالها.',
+  },
+
   'common.language': { en: 'العربية', ar: 'English' }, // toggle shows the OTHER language
 };

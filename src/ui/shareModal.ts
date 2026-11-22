@@ -25,6 +25,11 @@ export interface ShareTarget {
   title: string;
   /** Override the link (defaults to the canonical /t/:id). */
   url?: string;
+  /**
+   * Something the page adds under the dialog's own buttons (the editor's row
+   * to the Pro versions, ui/postPro.ts). `close` closes the dialog.
+   */
+  extra?: (host: HTMLElement, close: () => void) => void;
 }
 
 const CSS = `
@@ -206,6 +211,8 @@ export function openShareModal(target: ShareTarget): void {
   overlay.querySelector('.sm-copy')!.addEventListener('click', async () => {
     await copy('copy', t('sm.copied'));
   });
+
+  target.extra?.(overlay.querySelector('.sm-foot') as HTMLElement, close);
 
   // QR code (lazy: only build the qrcode lib + image when requested).
   const qrWrap = overlay.querySelector('.sm-qr') as HTMLElement;

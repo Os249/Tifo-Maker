@@ -610,6 +610,33 @@ ALTER TABLE pro_passes ADD CONSTRAINT pro_passes_plan_check CHECK (plan IN ('mon
 ALTER TABLE pro_gifts ALTER COLUMN claim_by DROP NOT NULL;
 UPDATE pro_gifts SET claim_by = NULL WHERE claim_by IS NOT NULL;
 
+-- When the gift was first put in front of its holder (22 Nov 2026): the card on
+-- My projects or the gift sheet. A row is made when an account qualifies, on
+-- any page; this says the offer was actually shown, so /admin can tell
+-- "eligible" from "saw it". Empty for offers shown before this was recorded.
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ;
+
+-- The automatic gift (22 Nov 2026, PRO_AUTO_GIFT): a gift that started by
+-- itself (auto), the language its holder was reading, when the welcome and
+-- the end card were shown (once each), the Pro items its holder's exports
+-- carried while it ran (for the end card), and its three emails, each taken
+-- once before it is sent (proGift.ts). stop_token is the emails' "stop these
+-- emails" link; a row made before this gets one when its gift starts.
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS auto BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS lang TEXT CHECK (lang IS NULL OR lang IN ('en', 'ar'));
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS welcome_at TIMESTAMPTZ;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS end_seen_at TIMESTAMPTZ;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS uses JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS mail_start_at TIMESTAMPTZ;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS mail_soon_at TIMESTAMPTZ;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS mail_end_at TIMESTAMPTZ;
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS stop_token TEXT CHECK (stop_token IS NULL OR char_length(stop_token) BETWEEN 24 AND 64);
+CREATE UNIQUE INDEX IF NOT EXISTS pro_gifts_stop_idx ON pro_gifts (stop_token) WHERE stop_token IS NOT NULL;
+-- When its holder ticked "email me Pro's news and offers" on the welcome
+-- (never ticked for them). Only then does the email after the gift ends carry
+-- a price; without it that email is a plain notice. NULL: not asked, or no.
+ALTER TABLE pro_gifts ADD COLUMN IF NOT EXISTS offers_ok_at TIMESTAMPTZ;
+
 -- Club kits on the account (Pro, 1 Nov 2026; server/src/kitRepo.ts). A fan's
 -- kits used to live in one browser only; now they are on the account, on every
 -- device. At most 3 kits per account (kitRepo.put decides under a lock); a kit
@@ -858,6 +885,15 @@ CREATE TABLE IF NOT EXISTS pro_mail_stops (
 -- days it bought (0 for every order but a founder's first, paid in time).
 -- They are part of the order's one pass, so a refund ends them with it.
 ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS bonus_days INT NOT NULL DEFAULT 0 CHECK (bonus_days BETWEEN 0 AND 60);
+
+-- What an order buys (22 Nov 2026): 30 days of Pro ('monthly', every order
+-- before this) or the match pass ('match': a few days of the same Pro, bought
+-- outright, never renewed). Both give a pass of plan 'monthly'; the product
+-- only decides the price, the length and that a match pass cannot renew.
+-- src: where "Get Pro" was pressed (post, share, export, page, giftend,
+-- limit, account), for /admin's funnel; NULL when the browser did not say.
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT 'monthly' CHECK (product IN ('monthly', 'match'));
+ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS src TEXT CHECK (src IS NULL OR src ~ '^[a-z]{2,12}$');
 
 -- Tifo events (15 Nov 2026; server/src/eventRepo.ts, tifoEvents.ts,
 -- eventRoutes.ts). A themed contest the admin makes on /admin: announced, open

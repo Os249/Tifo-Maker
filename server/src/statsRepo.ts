@@ -30,7 +30,11 @@ export interface AdminOverview {
     verifiedPhotos: number;
     comments: number;
     follows: number;
+    /** Likes only (value +1). Dislikes are counted apart: adding them in called a dislike a like. */
     votes: number;
+    dislikes: number;
+    /** Of `designs`: in the Trash (deleted_at set), still counted until purged. */
+    trashedDesigns: number;
     totalViews: number;
     shares: number;
   };
@@ -79,7 +83,7 @@ export interface AdminStatsRepository {
 
 const ZERO_TOTALS: AdminOverview['totals'] = {
   users: 0, designs: 0, publicDesigns: 0, templates: 0, aiGenerations: 0, aiUsers: 0,
-  leads: 0, photos: 0, verifiedPhotos: 0, comments: 0, follows: 0, votes: 0, totalViews: 0, shares: 0,
+  leads: 0, photos: 0, verifiedPhotos: 0, comments: 0, follows: 0, votes: 0, dislikes: 0, trashedDesigns: 0, totalViews: 0, shares: 0,
 };
 
 /** What the in-memory stats repo needs to aggregate sharing without SQL. */
@@ -214,7 +218,9 @@ export class PgAdminStatsRepository implements AdminStatsRepository {
           '(SELECT count(*) FROM design_photos WHERE is_verified) AS verified_photos, ' +
           '(SELECT count(*) FROM comments) AS comments, ' +
           '(SELECT count(*) FROM follows) AS follows, ' +
-          '(SELECT count(*) FROM design_votes) AS votes, ' +
+          '(SELECT count(*) FROM design_votes WHERE value > 0) AS votes, ' +
+          '(SELECT count(*) FROM design_votes WHERE value < 0) AS dislikes, ' +
+          '(SELECT count(*) FROM designs WHERE deleted_at IS NOT NULL) AS trashed_designs, ' +
           '(SELECT COALESCE(sum(view_count),0) FROM designs) AS total_views, ' +
           // All time: raw presses plus the ones rolled up past 400 days (P3.5).
           "((SELECT count(*) FROM design_shares WHERE kind='share') + (SELECT coalesce(sum(n), 0) FROM design_shares_daily WHERE kind='share')) AS shares, " +
@@ -231,6 +237,7 @@ export class PgAdminStatsRepository implements AdminStatsRepository {
         users: n('users'), designs: n('designs'), publicDesigns: n('public_designs'), templates: n('templates'),
         aiGenerations: n('ai_generations'), aiUsers: n('ai_users'), leads: n('leads'), photos: n('photos'),
         verifiedPhotos: n('verified_photos'), comments: n('comments'), follows: n('follows'), votes: n('votes'),
+        dislikes: n('dislikes'), trashedDesigns: n('trashed_designs'),
         totalViews: n('total_views'), shares: n('shares'),
       };
       recent7d = { signups: n('signups7d'), designs: n('designs7d'), leads: n('leads7d'), aiActiveUsers: n('ai_active7d') };
@@ -250,12 +257,13 @@ export class PgAdminStatsRepository implements AdminStatsRepository {
       "SELECT to_char(date_trunc('day', created_at),'YYYY-MM-DD') AS day, count(DISTINCT session_id) AS count " +
         "FROM events WHERE name='landed' AND " + win + ' GROUP BY 1 ORDER BY 1',
     );
+    // Riyadh days, like the Pro screens: a day on these charts used to run 03:00 to 03:00 there.
     const signups = await this.daily(
-      "SELECT to_char(date_trunc('day', created_at),'YYYY-MM-DD') AS day, count(*) AS count " +
+      "SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'Asia/Riyadh'),'YYYY-MM-DD') AS day, count(*) AS count " +
         'FROM users WHERE ' + win + ' GROUP BY 1 ORDER BY 1',
     );
     const designsDaily = await this.daily(
-      "SELECT to_char(date_trunc('day', created_at),'YYYY-MM-DD') AS day, count(*) AS count " +
+      "SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'Asia/Riyadh'),'YYYY-MM-DD') AS day, count(*) AS count " +
         'FROM designs WHERE ' + win + ' GROUP BY 1 ORDER BY 1',
     );
 

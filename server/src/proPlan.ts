@@ -180,6 +180,13 @@ export const OFFER = {
    * Auto-renew always renews at `price`. Halalas: 1999 and 1399.
    */
   monthly: { price: 19.99, launchPrice: 13.99, days: CYCLE_DAYS },
+  /**
+   * The match pass (22 Nov 2026): Pro for one match week, bought outright,
+   * never renewed. These are its numbers when PRO_MATCH_PRICE and
+   * PRO_MATCH_DAYS do not say otherwise; nothing is sold until PRO_MATCH_PASS
+   * is on (matchPass, below). Halalas: 499.
+   */
+  match: { price: 4.99, days: 3 },
   /** Once per account, started whenever its holder likes: it never expires unclaimed. */
   gift: { days: 7 },
   /*
@@ -189,6 +196,74 @@ export const OFFER = {
    * is what Moyasar charges once they are on.
    */
 } as const;
+
+// -------------------------------------------------------------- settings ---
+//
+// (22 Nov 2026.) Everything below is OFF until its own variable is set, so a
+// deploy changes nothing by itself. docs/pro-turnaround.md has the order to
+// switch them on.
+//
+//   PRO_MONTHLY_PRICE=9.99   what 30 days of Pro cost, in riyals. Set, it IS
+//                            the price: there is no launch price beside it,
+//                            and auto-renew renews at it. Unset, the prices
+//                            above and PRO_LAUNCH_PRICE_UNTIL decide, as before.
+//   PRO_MATCH_PASS=on        the match pass is sold.
+//   PRO_MATCH_PRICE=4.99     its price in riyals (default OFFER.match.price).
+//   PRO_MATCH_DAYS=3         its length in whole days (default OFFER.match.days).
+//   PRO_AUTO_GIFT=on         the 7-day gift starts by itself (pro.ts giftFor).
+//   PRO_GIFT_MAILS=on        the gift's three emails are sent (proGift.ts).
+//   PRO_POST_OFFERS=on       Pro and the account offer show on Post it and share.
+
+const settingOn = (v: string | undefined): boolean => (v ?? '').trim().toLowerCase() === 'on';
+
+/**
+ * One payment may not pass this (Moyasar's limit on the account is SAR 100 a
+ * payment): a price setting above it is refused rather than sold and declined.
+ */
+export const PRICE_MAX_HALALAS = 100_00;
+
+/** A price in riyals as typed into a variable ("9.99", "10") as halalas, or null when it is not one. */
+export function readPrice(v: string | undefined): number | null {
+  const s = (v ?? '').trim();
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(s)) return null;
+  const h = Math.round(Number(s) * 100);
+  return h >= 100 && h <= PRICE_MAX_HALALAS ? h : null;
+}
+
+/** PRO_MONTHLY_PRICE in halalas, or null when it is unset (or not a price: then it is ignored, and /admin says so). */
+export function monthlyPriceSetting(env: NodeJS.ProcessEnv = process.env): number | null {
+  return readPrice(env.PRO_MONTHLY_PRICE);
+}
+
+/** PRO_MONTHLY_PRICE is set but cannot be read as a price from SAR 1 to SAR 100. */
+export function monthlyPriceInvalid(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !!(env.PRO_MONTHLY_PRICE ?? '').trim() && monthlyPriceSetting(env) === null;
+}
+
+export interface MatchPass {
+  /** Sold: PRO_MATCH_PASS=on (and, like everything paid, only where payments are open). */
+  on: boolean;
+  halalas: number;
+  days: number;
+}
+
+/** The match pass as the settings have it. A price or a length that cannot be read falls back to OFFER.match. */
+export function matchPass(env: NodeJS.ProcessEnv = process.env): MatchPass {
+  const d = (env.PRO_MATCH_DAYS ?? '').trim();
+  const days = /^\d{1,2}$/.test(d) && Number(d) >= 1 && Number(d) <= 14 ? Number(d) : OFFER.match.days;
+  return { on: settingOn(env.PRO_MATCH_PASS), halalas: readPrice(env.PRO_MATCH_PRICE) ?? Math.round(OFFER.match.price * 100), days };
+}
+
+/** What an order buys: 30 days of Pro, or the match pass. Both are the same Pro. */
+export type Product = 'monthly' | 'match';
+export const PRODUCTS: Product[] = ['monthly', 'match'];
+
+/** The 7-day gift starts by itself for every account that qualifies (pro.ts). */
+export const autoGiftOn = (env: NodeJS.ProcessEnv = process.env): boolean => settingOn(env.PRO_AUTO_GIFT);
+/** The gift's emails are sent. Only with the automatic gift: the old Accept gift never had emails. */
+export const giftMailsOn = (env: NodeJS.ProcessEnv = process.env): boolean => settingOn(env.PRO_GIFT_MAILS) && autoGiftOn(env);
+/** Pro's versions and the account offer show on the Post it sheet and the share dialog. */
+export const postOffersOn = (env: NodeJS.ProcessEnv = process.env): boolean => settingOn(env.PRO_POST_OFFERS);
 
 // --------------------------------------------------------------- periods ---
 

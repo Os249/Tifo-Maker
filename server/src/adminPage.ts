@@ -65,23 +65,57 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   button.primary{ background:#1C6FE0; color:#fff; border-color:#1C6FE0; font-weight:600; }
   button.primary:hover{ background:#155EC4; }
 
-  /* Section tabs. The dashboard used to be one long scroll of nine peer
-     panels — everything visible, nothing findable. Each tab is now one
-     question, and the URL hash names it so a section can be linked to. */
-  .tabs{ position:sticky; top:49px; z-index:19; display:flex; gap:4px; overflow-x:auto; scrollbar-width:none;
-         padding:8px 20px; background:rgba(11,17,32,.95); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
-  .tabs::-webkit-scrollbar{ display:none; }
+  /* The menu. It was a row of eleven peer tabs; it is now a sidebar in
+     groups, one short screen per question, and a number beside a name only
+     ever means "this is waiting for you". On a phone it is a row again. */
+  .shell{ display:grid; grid-template-columns:216px minmax(0,1fr); align-items:start; }
+  .tabs{ position:sticky; top:49px; z-index:19; display:flex; flex-direction:column; gap:2px;
+         padding:14px 10px 24px; max-height:calc(100vh - 49px); overflow-y:auto; border-right:1px solid var(--line); }
+  .tabs .grp{ font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--dim); padding:14px 12px 5px; }
   .tab{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 14px; border-radius:999px;
         border:1px solid transparent; background:transparent; color:var(--mut); font-size:13px; font-weight:600;
         cursor:pointer; white-space:nowrap; min-height:34px; }
+  .tabs .tab{ width:100%; justify-content:space-between; border-radius:8px; padding:7px 12px; text-align:left; }
   .tab:hover{ background:var(--bg3); color:var(--tx); border-color:var(--line); }
   .tab[aria-current="true"]{ background:var(--bg3); color:var(--tx); border-color:var(--line2); }
+  .tab:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible{ outline:2px solid var(--blue); outline-offset:2px; }
   .tab .pill{ font-size:11px; font-weight:600; padding:1px 7px; border-radius:999px; background:var(--line); color:var(--mut); }
   .tab[aria-current="true"] .pill{ background:var(--blue); color:#04203f; }
+  @media (max-width: 860px){
+    .shell{ display:block; }
+    .tabs{ flex-direction:row; gap:4px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; max-height:none;
+           padding:8px 13px; background:rgba(11,17,32,.95); backdrop-filter:blur(10px); border-right:none; border-bottom:1px solid var(--line); }
+    .tabs::-webkit-scrollbar{ display:none; }
+    .tabs .grp{ display:none; }
+    .tabs .tab{ width:auto; border-radius:999px; padding:7px 14px; min-height:44px; }
+  }
+  /* A figure with its unit, its period and how it is counted. */
+  .k-val .k-unit{ font-size:12.5px; font-weight:500; letter-spacing:0; color:var(--mut); margin-left:5px; }
+  .k-how{ margin-top:7px; font-size:11.5px; color:var(--mut); line-height:1.55; }
+  .k-how summary{ cursor:pointer; color:var(--blue); list-style:none; }
+  .k-how summary::-webkit-details-marker{ display:none; }
+  /* Steps people move through, each a share of the first. */
+  .steps{ display:grid; gap:7px; }
+  .step{ display:grid; grid-template-columns:minmax(120px,230px) minmax(0,1fr) minmax(64px,auto); gap:12px; align-items:center; font-size:13px; }
+  .step .sbar{ height:11px; border-radius:6px; background:var(--bg3); overflow:hidden; }
+  .step .sbar i{ display:block; height:100%; border-radius:6px; background:var(--blue); }
+  .step .sbar i.unk{ background:repeating-linear-gradient(90deg, var(--line2) 0 6px, transparent 6px 12px); }
+  .step .sn{ text-align:right; font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+  .step .sn span{ font-weight:400; color:var(--dim); font-size:11.5px; margin-left:5px; }
+  @media (max-width: 640px){ .step{ grid-template-columns:1fr auto; } .step .sbar{ grid-column:1 / -1; order:3; } }
+  /* The list of what is waiting, on Today. */
+  .todo{ background:var(--bg2); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .todo a{ display:flex; align-items:center; gap:12px; padding:11px 15px; border-bottom:1px solid var(--line); color:inherit; text-decoration:none; min-height:44px; }
+  .todo a:last-child{ border-bottom:none; }
+  .todo a:hover{ background:var(--bg3); }
+  .todo .tn{ font-size:17px; font-weight:700; min-width:30px; font-variant-numeric:tabular-nums; }
+  .todo a.clear .tn{ color:var(--dim); font-weight:600; }
+  .todo .tl{ flex:1; min-width:0; }
+  .todo .tg{ font-size:12px; color:var(--blue); white-space:nowrap; }
   .tab .pill.warn{ background:var(--gold); color:#2a1d00; }
   .lede{ color:var(--mut); font-size:13px; margin:14px 0 0; max-width:74ch; }
 
-  main{ max-width:1240px; margin:0 auto; padding:16px 20px 64px; }
+  main{ max-width:1180px; margin:0; padding:16px 24px 64px; min-width:0; }
   h2.sec{ font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--mut); margin:30px 0 11px; font-weight:600; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
   h2.sec:first-child{ margin-top:14px; }
   h2.sec .hint{ text-transform:none; letter-spacing:0; font-weight:400; color:var(--dim); font-size:11.5px; }
@@ -273,12 +307,14 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   </form>
 </div>
 
+<div class="shell">
 <nav id="tabs" class="tabs" style="display:none" aria-label="Dashboard sections"></nav>
 
 <main id="dash" style="display:none">
   <div id="dash-body"></div>
   <p class="note" id="generated"></p>
 </main>
+</div>
 
 `;
 
@@ -451,7 +487,7 @@ async function loadAll(){
     api('/api/admin/traffic?days=' + currentDays),
     api('/api/funnel?days=' + currentDays),
     api('/api/admin/shares?days=' + currentDays),
-    api('/api/admin/feedback?limit=50'),
+    api('/api/admin/feedback?limit=200'),
     api('/api/admin/ai?days=' + currentDays),
     api('/api/admin/email'),
     api('/api/admin/soc'),
@@ -480,6 +516,7 @@ async function loadAll(){
   }
   render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null, (ai.ok && ai.data) ? ai.data : null, (em.ok && em.data) ? em.data : null, (sc.ok && sc.data) ? sc.data : null);
   setStatus('Updated ' + new Date().toLocaleTimeString());
+  loadProFunnel();
 }
 
 /* ---------- honest windows ---------- */
@@ -553,6 +590,46 @@ function kpi(label, value, sub, subDim){
     + (sub ? '<div class="k-sub' + (subDim ? ' n' : '') + '">' + esc(sub) + '</div>' : '') + '</div>';
 }
 
+/* A figure that says what it is: the number, its unit, a name, the period or
+   split under it, and (folded) how it is counted. Every headline number on
+   this page goes through here, so none is a bare number any more. */
+function stat(value, unit, label, sub, how){
+  return '<div class="card"><div class="k-val">' + (typeof value === 'string' ? esc(value) : fmt(value))
+    + (unit ? '<span class="k-unit">' + esc(unit) + '</span>' : '') + '</div>'
+    + '<div class="k-lab">' + esc(label) + '</div>'
+    + (sub ? '<div class="k-sub n">' + esc(sub) + '</div>' : '')
+    + (how ? '<details class="k-how"><summary>How this is counted</summary>' + esc(how) + '</details>' : '') + '</div>';
+}
+function plural(n, one, many){ return Number(n) === 1 ? one : many; }
+
+/* One step of a path, as a share of the first. "unknown" draws a hatched bar
+   and says so, for a step nobody recorded: a guess would look like a number. */
+function stepRow(label, n, top, sub, unknown){
+  var w = unknown ? 100 : (top ? Math.max(1.5, Math.min(100, n / top * 100)) : 0);
+  return '<div class="step"><span>' + esc(label) + (sub ? '<br><span class="dim" style="font-size:11.5px">' + esc(sub) + '</span>' : '') + '</span>'
+    + '<span class="sbar"><i' + (unknown ? ' class="unk"' : '') + ' style="width:' + w.toFixed(1) + '%"></i></span>'
+    + '<span class="sn">' + (unknown ? '<span>not recorded</span>' : fmt(n) + (top && n !== top ? '<span>' + pct(n, top) + '</span>' : '')) + '</span></div>';
+}
+
+/* Today's date in Riyadh, as YYYY-MM-DD: the day the growth charts end on. */
+function riyadhDay(ms){
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms)); }
+  catch(e){ return new Date(ms).toISOString().slice(0, 10); }
+}
+/* A per-day series with every day in it. The queries only return days that had
+   something, and the chart drew them side by side: a quiet week vanished and
+   "latest day" was the last busy one. Days with nothing are zeros here. */
+function fillDays(points, days){
+  var by = {}, i;
+  for (i = 0; i < (points || []).length; i++) by[points[i].day] = Number(points[i].count) || 0;
+  var out = [], now = Date.now();
+  for (i = days - 1; i >= 0; i--){
+    var d = riyadhDay(now - i * 86400000);
+    out.push({ day: d, count: by[d] || 0 });
+  }
+  return out;
+}
+
 var SOURCE_LABEL = {
   search:'Search engines', social:'Social media', ai:'AI assistants',
   referral:'Other websites', campaign:'Your tagged links', shared:'Shared by visitors', direct:'Direct / QR / app', internal:'Internal'
@@ -577,7 +654,7 @@ function barList(title, caption, items, color, mapLabel){
     html += '<div class="row">'
       + '<div class="bg" style="width:' + w.toFixed(1) + '%;background:' + c + '"></div>'
       + '<div class="nm" title="' + esc(name) + '">' + esc(name) + '</div>'
-      + '<div class="vv"><b>' + fmt(it.visits) + '</b> <span class="dim">/ ' + fmt(it.visitors) + '</span></div>'
+      + '<div class="vv"><b>' + fmt(it.visits) + '</b></div>'
       + '</div>';
   }
   return html + '</div>';
@@ -587,7 +664,7 @@ function barList(title, caption, items, color, mapLabel){
 function trafficChart(daily){
   var W=560, H=140, padX=6, padY=10;
   if (!daily || !daily.length){
-    return '<div class="card"><p class="lt">Visits per day</p><p class="empty">No traffic recorded yet.</p></div>';
+    return '<div class="card"><p class="lt">Per day</p><p class="empty">No traffic recorded yet.</p></div>';
   }
   // One point is not a line. Drawing it produced a triangle sloping up from
   // zero, which reads as growth that has not been measured.
@@ -620,8 +697,8 @@ function trafficChart(daily){
     + '<polyline fill="none" stroke="#58a6ff" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" points="' + series('visitors', false) + '"></polyline>'
     + '</svg>';
   var first = daily[0].day, last = daily[n-1].day;
-  return '<div class="card"><p class="lt">Visits per day <span class="dim" style="font-weight:400">: ' + fmt(totalV) + ' total, peak ' + fmt(max) + '</span></p>'
-    + '<p class="lc"><span style="color:#3fb950">&#9632;</span> visits &nbsp; <span style="color:#58a6ff">&#9632;</span> unique visitors</p>'
+  return '<div class="card"><p class="lt">Per day <span class="dim" style="font-weight:400">: ' + fmt(totalV) + ' page views, busiest day ' + fmt(max) + '</span></p>'
+    + '<p class="lc"><span style="color:#3fb950">&#9632;</span> page views &nbsp; <span style="color:#58a6ff">&#9632;</span> visitors &nbsp;&middot;&nbsp; days are UTC days (03:00 to 03:00 in Riyadh); the first and last are part days</p>'
     + svg
     + '<p class="lc" style="margin:5px 0 0;display:flex;justify-content:space-between">' + esc(first) + '<span>' + esc(last) + '</span></p></div>';
 }
@@ -643,11 +720,11 @@ function lineChart(points, color){
     + '<polyline fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="' + pts + '"></polyline>'
     + '</svg>';
 }
-function chartCard(title, points, color){
+function chartCard(title, points, color, lastName){
   var total = sum(points||[]);
   var last = (points && points.length) ? (Number(points[points.length-1].count)||0) : 0;
   return '<div class="card"><p class="lt">' + esc(title) + '</p>'
-    + '<p class="lc">' + fmt(total) + ' total · ' + fmt(last) + ' latest day</p>'
+    + '<p class="lc">' + fmt(total) + ' in the period · ' + fmt(last) + ' ' + esc(lastName || 'on the last day with any') + '</p>'
     + lineChart(points, color) + '</div>';
 }
 
@@ -677,20 +754,43 @@ var FUNNEL_STEP = {
   ai_cta:         ['Pressed Generate with AI','on the Projects page'],
   ai_bar:         ['Asked the AI from the canvas bar','in the editor'],
   template_cta:   ['Pressed Use as template','on the home page'],
-  pro_viewed:     ['Opened the Pro page','coming soon, with the price question'],
+  pro_viewed:     ['Opened the Pro page','/pro'],
   event_view:     ['Opened a tifo event','its page'],
   event_enter:    ['Entered a tifo event','one tifo per account'],
   event_vote:     ['Voted in a tifo event','for an entry'],
   pro_limit:      ['Met a Pro limit card','an allowance used up'],
-  pro_notify:     ['Asked to hear when Pro opens','one per account'],
+  pro_notify:     ['Pressed Tell me when Pro opens','from before Pro was on sale'],
   pro_ask_seen:   ['Asked in the editor','the founding-fans card, once'],
-  pro_price:      ['Said what Pro is worth','on /pro or in the editor card'],
+  pro_price:      ['Answered the price question','on /pro or the card in the editor, before Pro was on sale'],
   pro_checkout:   ['Pressed Get Pro','sent to Moyasar to pay'],
   pro_paid:       ['Came back with Pro on','paid'],
   gift_accepted:  ['Accepted the 7-day gift','Pro for 7 days'],
   cutout_used:    ['Got a smart cut-out','a picture lifted out'],
   export_sheet:   ['Saw the export sheet','their tifo had Pro items'],
   export_free:    ['Exported without Pro items','the free version'],
+  pro_offer_post:    ['Saw Pro on Post it','the Pro versions row'],
+  pro_offer_share:   ['Saw Pro on the share dialog','the row to the Pro versions'],
+  pro_offer_export:  ['Saw a Pro offer on the export sheet','their tifo had Pro items'],
+  pro_offer_page:    ['Saw the Pro page on sale','with the price'],
+  pro_offer_giftend: ['Saw the offer after the gift','the gift-end card'],
+  pro_offer_limit:   ['Saw a Pro offer at a limit','what Pro adds'],
+  pro_offer_account: ['Saw a Pro offer on the account page',''],
+  pro_get_post:      ['Pressed Get Pro on Post it',''],
+  pro_get_share:     ['Pressed Get Pro from the share dialog',''],
+  pro_get_export:    ['Pressed Get Pro on the export sheet',''],
+  pro_get_page:      ['Pressed Get Pro on the Pro page',''],
+  pro_get_giftend:   ['Pressed Keep Pro after the gift',''],
+  pro_get_limit:     ['Pressed Get Pro at a limit',''],
+  pro_get_account:   ['Pressed Get Pro on the account page',''],
+  pro_preview_post:  ['Previewed Pro on Post it','their own tifo as the vertical video'],
+  monthly_bought:    ['Bought 30 days of Pro','came back from paying'],
+  match_bought:      ['Bought a match pass','came back from paying'],
+  gift_auto:         ['The gift started by itself','7 days of Pro'],
+  gift_welcome:      ['Saw the gift welcome','Pro is on for 7 days'],
+  gift_end_seen:     ['Saw the gift-end card','what they made, and the price'],
+  bought_after_gift: ['Paid after their gift',''],
+  signup_offer_post: ['Offered an account on Post it','one line, Google or email'],
+  signup_post:       ['Made an account from Post it',''],
 };
 
 /* Only these are a sequence everyone passes through in order, so only these get
@@ -699,14 +799,21 @@ var FUNNEL_STEP = {
    loss that never happened. */
 var MAIN_PATH = ['landed', 'paint_first', 'view_3d', 'save_clicked', 'signed_up', 'published'];
 
-function funnelRow(s, lost){
-  var p = Number(s.pctOfTop)||0;
+/* One step: how many sessions did it. On the main path the bar and the percent
+   are that step against "Opened the editor". Off it there is no percent: those
+   things can happen in a session that never opened the editor (the Pro page,
+   an event page), so a share of editor sessions means nothing and could pass
+   100%. The old "lost since the step above" figure is gone: each step is
+   counted on its own, nobody is made to do them in this order, and a step
+   could be larger than the one above it. */
+function funnelRow(s, top){
+  var n = Number(s.sessions)||0;
   var meta = FUNNEL_STEP[s.name] || [labelize(s.name), ''];
+  var w = top ? Math.max(1.5, Math.min(100, n / top * 100)) : 0;
   return '<div class="frow"><div class="flab">' + esc(meta[0])
     + (meta[1] ? '<span class="fsub">' + esc(meta[1]) + '</span>' : '') + '</div>'
-    + '<div class="fbar"><div class="ffill" style="width:' + Math.max(1.5, p) + '%"></div></div>'
-    + '<div class="fnum">' + fmt(s.sessions) + ' <span class="dim">' + p + '%</span>'
-    + (lost > 0 ? '<span class="flost" title="lost since the step above">&minus;' + fmt(lost) + '</span>' : '')
+    + '<div class="fbar"><div class="ffill" style="width:' + w.toFixed(1) + '%"></div></div>'
+    + '<div class="fnum">' + fmt(n) + (top ? ' <span class="dim">' + pct(n, top) + '</span>' : '')
     + '</div></div>';
 }
 
@@ -715,24 +822,30 @@ function funnelHtml(funnel){
   if (!steps.length) return '<div class="card"><p class="empty">No funnel data captured yet.</p></div>';
   var byName = {}, i;
   for (i=0;i<steps.length;i++) byName[steps[i].name] = steps[i];
+  var top = byName.landed ? (Number(byName.landed.sessions)||0) : 0;
 
-  var html = '<div class="card">';
-  var prev = 0;
+  var html = '<div class="card"><p class="lt">In the editor</p>'
+    + '<p class="lc">sessions that did each thing, and that as a share of the sessions that opened the editor</p>';
   for (i=0;i<MAIN_PATH.length;i++){
     var s = byName[MAIN_PATH[i]];
     if (!s) continue;
-    var lost = prev > 0 ? prev - (Number(s.sessions)||0) : 0;
-    html += funnelRow(s, lost);
-    prev = Number(s.sessions)||0;
+    html += funnelRow(s, top);
   }
   html += '</div>';
 
   var side = steps.filter(function(x){ return MAIN_PATH.indexOf(x.name) === -1; });
+  var max = 0;
+  for (i=0;i<side.length;i++) if ((Number(side[i].sessions)||0) > max) max = Number(side[i].sessions)||0;
   if (side.length){
     html += '<div class="card" style="margin-top:10px">'
-      + '<p class="lt">Along the way</p>'
-      + '<p class="lc">things that happen off the main path, so no drop-off is implied</p>';
-    for (i=0;i<side.length;i++) html += funnelRow(side[i], 0);
+      + '<p class="lt">Everything else that is counted</p>'
+      + '<p class="lc">sessions that did each thing; bars compare them with each other, not with the editor</p>';
+    for (i=0;i<side.length;i++){
+      var x = side[i], n = Number(x.sessions)||0, meta = FUNNEL_STEP[x.name] || [labelize(x.name), ''];
+      html += '<div class="frow"><div class="flab">' + esc(meta[0]) + (meta[1] ? '<span class="fsub">' + esc(meta[1]) + '</span>' : '') + '</div>'
+        + '<div class="fbar"><div class="ffill" style="width:' + (max ? Math.max(n ? 1.5 : 0, n / max * 100) : 0).toFixed(1) + '%"></div></div>'
+        + '<div class="fnum">' + fmt(n) + '</div></div>';
+    }
     html += '</div>';
   }
   return html;
@@ -829,10 +942,12 @@ function sharesSection(sh, days){
   var inb = sh.inbound || null;
 
   var html = '<div class="grid">';
-  html += kpi('Shared', shares, 'platform buttons pressed', true);
-  html += kpi('Links opened', opens, 'arrived on a shared link', true);
-  html += kpi('Tifos shared', sh.designsShared, 'distinct designs', true);
-  html += kpi('Opens per share', shares ? (Math.round((opens/shares)*100)/100) : 0, 'reach per press', true);
+  html += stat(shares, plural(shares, 'press', 'presses'), 'Share buttons pressed', 'on published tifos',
+    'A press on a share button, counted once a day for each person, tifo and platform. Presses on a private tifo are not recorded.');
+  html += stat(opens, plural(opens, 'page view', 'page views'), 'Opened from a shared link', 'reloads and repeat opens count again',
+    'Page views that arrived on a link made by the share buttons (the link carries a tag). It counts views, not people.');
+  html += stat(sh.designsShared, plural(sh.designsShared, 'tifo', 'tifos'), 'Tifos shared', 'different tifos with a press', '');
+  html += stat(shares ? (Math.round((opens/shares)*100)/100) : 0, '', 'Page views per press', 'opens divided by presses', 'A rough ratio: presses are counted once a day per person, opens every time.');
   html += '</div>';
 
   html += '<div class="grid two">';
@@ -844,21 +959,22 @@ function sharesSection(sh, days){
   html += tableCard(['Most-shared tifos','Shares'], sh.topDesigns,
     [function(d){ return (d.title || 'Untitled') + (d.owner ? ' · @' + d.owner : ''); }, function(d){ return d.shares; }]);
   html += inb
-    ? barList('Landing pages of shared links', 'visits / unique visitors', inb.pages, '#3fb950')
-    : '<div class="card"><p class="lt">Landing pages of shared links</p><p class="empty">Traffic measurement is off.</p></div>';
+    ? barList('Most-viewed tifo pages', 'page views, the top 10, however people got there', inb.pages, '#3fb950')
+    : '<div class="card"><p class="lt">Most-viewed tifo pages</p><p class="empty">Traffic measurement is off.</p></div>';
   html += '</div>';
 
   if (inb){
     html += '<div class="grid">';
-    html += kpi('Visits to shared pages', inb.visits, 'server-side, counts everyone', true);
-    html += kpi('Tifos opened', inb.tifosOpened, 'distinct shared pages visited', true);
+    html += stat(inb.visits, plural(inb.visits, 'page view', 'page views'), 'Views of tifo pages', 'every tifo page, counts everyone',
+      'Page views of any published tifo page (/t/ and /d/ links, English and Arabic), however the visitor got there: a shared link, the community, or the owner looking at their own.');
+    html += stat(inb.tifosOpened, plural(inb.tifosOpened, 'tifo', 'tifos'), 'Different tifos viewed', 'with at least one page view', '');
     html += '</div>';
     if (inb.social && inb.social.length){
-      html += barList('Arrived from a social or messaging site', 'visits / unique visitors', inb.social, 'social');
+      html += barList('Page views sent by social and messaging sites', 'to any page of the site, among the 15 biggest referrers', inb.social, 'social');
     }
   }
 
-  html += '<div class="callout"><b>A share is a button press, not a delivered message.</b> Once the platform takes over, nothing on this site can see whether it was sent, so treat <em>Shared</em> as intent and <em>Links opened</em> as the result. The two do not have to match, and opens can exceed shares when one link is passed on repeatedly.<br><br><b>Links opened is counted from the link itself.</b> Every share button tags its link with the platform (utm_medium=share), so an opened link is counted even from WhatsApp, Telegram and Discord, which send no referrer. Links shared before 30 Sep 2026 carried no tag and are not in it. The social row below is referrer-based and remains a floor.</div>';
+  html += '<div class="callout"><b>A share is a button press, not a delivered message.</b> Once the platform takes over, nothing on this site can see whether it was sent, so treat <em>Shared</em> as intent and <em>Links opened</em> as the result. The two do not have to match, and opens can exceed shares when one link is passed on repeatedly.<br><br><b>Links opened is counted from the link itself.</b> Every share button tags its link with the platform (utm_medium=share), so an opened link is counted even from WhatsApp, Telegram and Discord, which send no referrer. Links shared before 30 Sep 2026 carried no tag and are not in it. The list of social and messaging sites above goes by the referrer instead, so it is a floor: most messaging apps send none.</div>';
   return html;
 }
 
@@ -874,46 +990,89 @@ function timeAgo(iso){
   var d = Math.round(h/24); return d === 1 ? 'yesterday' : d + 'd ago';
 }
 
+var FB_SHOW = 'open';
+var FB_MSG = '';
 function feedbackSection(fb){
   var counts = (fb && fb.counts) || { total:0, open:0, bugs:0, ideas:0 };
   var items = (fb && fb.items) || [];
   var html = '<h2 class="sec">What people told me'
-    + (counts.bugs ? ' <span class="badge warn">' + fmt(counts.bugs) + ' broken</span>' : '')
-    + ' <span class="hint">sent from inside the site</span></h2>';
+    + (counts.open ? ' <span class="badge warn">' + fmt(counts.open) + ' not handled</span>' : ' <span class="badge good">all handled</span>')
+    + ' <span class="hint">sent from inside the site &middot; all time</span></h2>';
 
-  if (!items.length){
+  if (!counts.total && !items.length){
     return html + '<div class="card"><p class="empty">Nothing reported yet. '
       + 'The form is in the account menu in the editor, and in the footer of every public page.</p></div>';
   }
 
-  html += '<div class="grid">';
-  html += kpi('Reports', counts.total);
-  html += kpi('Bugs', counts.bugs);
-  html += kpi('Feature ideas', counts.ideas);
+  var notes = Math.max(0, counts.total - counts.bugs - counts.ideas);
+  html += '<div class="grid three">';
+  html += stat(counts.open, plural(counts.open, 'report', 'reports'), 'Not handled yet', 'of ' + fmt(counts.total) + ' ever sent',
+    'A report stays here until you press Mark handled on it. The number beside Feedback in the menu is this one.');
+  html += stat(counts.bugs, plural(counts.bugs, 'report', 'reports'), 'Said something is broken', 'handled or not', '');
+  html += stat(counts.ideas, plural(counts.ideas, 'report', 'reports'), 'Ideas', fmt(notes) + ' more are plain notes', 'Broken, ideas and notes add up to everything ever sent.');
   html += '</div>';
 
-  html += '<div class="card" style="margin-top:10px">';
-  for (var i=0;i<items.length;i++){
-    var it = items[i];
-    var meta = FB_KIND[it.kind] || FB_KIND.other;
-    var c = it.context;
-    var ctxLine = c
-      ? [c.path, c.browser && c.os ? c.browser + ' on ' + c.os : (c.browser || c.os), c.device, c.viewport]
-          .filter(Boolean).join(' · ')
-      : 'no diagnostics attached';
-    html += '<div class="fbrow">'
-      + '<div class="fbtop">'
-      +   '<span class="fbkind" style="background:' + meta[1] + '22;color:' + meta[1] + '">' + esc(meta[0]) + '</span>'
-      +   '<span class="fbwhen">' + esc(timeAgo(it.createdAt)) + '</span>'
-      +   (it.email ? '<a class="fbmail" href="' + esc(mailtoHref(it.email)) + '">' + esc(it.email) + '</a>'
-                    : '<span class="fbmail dim">no reply address</span>')
-      + '</div>'
-      + '<p class="fbmsg">' + esc(it.message) + '</p>'
-      + (it.steps ? '<p class="fbsteps"><b>Doing:</b> ' + esc(it.steps) + '</p>' : '')
-      + '<p class="fbctx">' + esc(ctxLine) + '</p>'
-      + '</div>';
+  html += '<p class="note" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+    + '<button type="button" class="tab fb-filter" data-fb="open" aria-current="' + (FB_SHOW === 'open') + '">Not handled</button>'
+    + '<button type="button" class="tab fb-filter" data-fb="all" aria-current="' + (FB_SHOW === 'all') + '">Everything</button></p>';
+  html += '<p id="fb-out" class="note" role="status" aria-live="polite">' + esc(FB_MSG) + '</p>';
+
+  var shown = [];
+  for (var k = 0; k < items.length; k++) if (FB_SHOW === 'all' || !items[k].handled) shown.push(items[k]);
+  if (!shown.length){
+    html += '<div class="card"><p class="empty">' + (FB_SHOW === 'open' ? 'Nothing is waiting among the newest ' + fmt(items.length) + '.' : 'Nothing here.') + '</p></div>';
+  } else {
+    html += '<div class="card" style="margin-top:10px">';
+    for (var i=0;i<shown.length;i++){
+      var it = shown[i];
+      var meta = FB_KIND[it.kind] || FB_KIND.other;
+      var c = it.context;
+      var ctxLine = c
+        ? [c.path, c.browser && c.os ? c.browser + ' on ' + c.os : (c.browser || c.os), c.device, c.viewport]
+            .filter(Boolean).join(' · ')
+        : 'no diagnostics attached';
+      html += '<div class="fbrow">'
+        + '<div class="fbtop">'
+        +   '<span class="fbkind" style="background:' + meta[1] + '22;color:' + meta[1] + '">' + esc(meta[0]) + '</span>'
+        +   '<span class="fbwhen">' + esc(timeAgo(it.createdAt)) + (it.handled ? ' &middot; handled' : '') + '</span>'
+        +   (it.email ? '<a class="fbmail" href="' + esc(mailtoHref(it.email)) + '">' + esc(it.email) + '</a>'
+                      : '<span class="fbmail dim">no reply address</span>')
+        +   '<button type="button" class="fb-handle" data-id="' + esc(it.id) + '" data-to="' + (it.handled ? '0' : '1') + '">' + (it.handled ? 'Reopen' : 'Mark handled') + '</button>'
+        + '</div>'
+        + '<p class="fbmsg">' + esc(it.message) + '</p>'
+        + (it.steps ? '<p class="fbsteps"><b>Doing:</b> ' + esc(it.steps) + '</p>' : '')
+        + '<p class="fbctx">' + esc(ctxLine) + '</p>'
+        + '</div>';
+    }
+    html += '</div>';
   }
-  return html + '</div>';
+  if (counts.total > items.length) html += '<p class="note">The newest ' + fmt(items.length) + ' reports are listed; ' + fmt(counts.total - items.length) + ' older ones are counted above but not shown.</p>';
+  return html;
+}
+function wireFeedback(){
+  var filters = document.querySelectorAll('.fb-filter');
+  for (var i = 0; i < filters.length; i++){
+    filters[i].addEventListener('click', function(e){ FB_SHOW = e.currentTarget.getAttribute('data-fb'); FB_MSG = ''; paintSection(); });
+  }
+  var btns = document.querySelectorAll('.fb-handle');
+  for (var j = 0; j < btns.length; j++){
+    btns[j].addEventListener('click', async function(e){
+      var b = e.currentTarget, id = b.getAttribute('data-id'), to = b.getAttribute('data-to') === '1';
+      b.disabled = true;
+      var r = await post('/api/admin/feedback/' + encodeURIComponent(id) + '/handled', { handled: to });
+      if (!r.ok){ b.disabled = false; el('fb-out').textContent = 'Not saved (' + ((r.data && r.data.error) || ('HTTP ' + r.status)) + '). Try again.'; return; }
+      var fb = DATA.fb || {}, items = fb.items || [];
+      for (var k = 0; k < items.length; k++) if (items[k].id === id && !!items[k].handled !== to){
+        items[k].handled = to;
+        if (fb.counts) fb.counts.open = Math.max(0, (Number(fb.counts.open) || 0) + (to ? -1 : 1));
+      }
+      FB_MSG = to ? 'Marked handled.' : 'Reopened.';
+      var y = window.scrollY;
+      renderTabs();
+      paintSection();
+      window.scrollTo(0, y);
+    });
+  }
 }
 
 /* ---------- the header strip ---------- */
@@ -950,33 +1109,25 @@ function headerStrip(ov, tr, sh){
   var html = '<div class="strip">';
 
   html += '<div class="strip-cell"><div class="strip-val">' + fmt(visitors) + '</div>'
-    + '<div class="strip-lab">people <span class="dim" title="Visitors cannot be followed from one day to the next, so a person who comes back tomorrow counts again.">(per day, added up)</span></div>'
+    + '<div class="strip-lab">visitors <span class="dim" title="Visitors cannot be followed from one day to the next, so a person who comes back tomorrow counts again. A restart of the server in the middle of a day can count the same person twice that day.">(each counted once a day, added up)</span></div>'
     + '<div class="strip-sub">' + (span
         ? esc(span.count === 1 ? 'on ' + niceDay(span.first) : niceDay(span.first) + ' to ' + niceDay(span.last))
         : 'nothing recorded yet') + '</div></div>';
 
   html += '<div class="strip-cell"><div class="strip-val">' + (cmp ? fmt(cmp.now) : '&mdash;') + '</div>'
-    + '<div class="strip-lab">' + (cmp ? 'last ' + cmp.days + (cmp.days === 1 ? ' day' : ' days') : 'trend') + '</div>'
+    + '<div class="strip-lab">' + (cmp ? 'visitors, last ' + cmp.days + (cmp.days === 1 ? ' day' : ' days') : 'trend') + '</div>'
     + '<div class="strip-sub">' + (cmp ? deltaChip(cmp) : 'needs a few more days before a trend means anything') + '</div></div>';
 
   html += '<div class="strip-cell"><div class="strip-val">' + (topSource ? fmt(topSource.visits) : '&mdash;') + '</div>'
-    + '<div class="strip-lab">' + (topSource ? esc(SOURCE_LABEL[topSource.key] || labelize(topSource.key)) : 'top channel') + '</div>'
+    + '<div class="strip-lab">page views from ' + (topSource ? esc(SOURCE_LABEL[topSource.key] || labelize(topSource.key)) : 'the top channel') + '</div>'
     + '<div class="strip-sub">' + (topSource && externalVisits
-        ? pct(topSource.visits, externalVisits) + ' of arrivals'
-        : 'no external arrivals yet') + '</div></div>';
+        ? 'the biggest source: ' + pct(topSource.visits, externalVisits) + ' of page views, moving around the site left out'
+        : 'no page views from outside yet') + '</div></div>';
 
   var r7 = (ov && ov.recent7d) || {};
   html += '<div class="strip-cell"><div class="strip-val">' + fmt(r7.signups) + '</div>'
     + '<div class="strip-lab">new accounts</div>'
     + '<div class="strip-sub dim">last 7 days</div></div>';
-
-  var qc = queueCounts();
-  var queue = qc.reports + qc.photos + qc.stadiums;
-  html += '<div class="strip-cell"><div class="strip-val">' + fmt(queue) + '</div>'
-    + '<div class="strip-lab">needs review</div>'
-    + '<div class="strip-sub">' + (queue
-        ? '<span class="badge warn">waiting on you</span>'
-        : '<span class="badge good">all clear</span>') + '</div></div>';
 
   return html + '</div>';
 }
@@ -1087,19 +1238,21 @@ function trafficSection(tr, days){
   // "people arrive and leave" from "people arrive and look around".
   var perVisitor = t.visitors ? Math.round((t.visits / t.visitors) * 10) / 10 : 0;
   html += '<div class="grid">';
-  html += kpi('Page views', t.visits, fmt(t.visitors) + ' people (each counted once a day)', true);
-  html += kpi('Pages per person', perVisitor, 'per person per day; higher means they looked around', true);
-  html += kpi('Bot requests filtered', t.botVisits, 'excluded from every number here', true);
+  html += stat(t.visitors, plural(t.visitors, 'visitor', 'visitors'), 'Visitors', 'each counted once a day, the days added up',
+    'A visitor is one device on one day. Nobody is followed from day to day, so someone who comes on three days counts three times. If the server restarts during a day, the same person can count twice that day.');
+  html += stat(t.visits, plural(t.visits, 'page view', 'page views'), 'Page views', 'every page opened, moving around the site included', 'Bots are left out.');
+  html += stat(perVisitor, 'pages', 'Pages per visitor', 'page views divided by visitors', '');
+  html += stat(t.botVisits, plural(t.botVisits, 'request', 'requests'), 'From bots', 'left out of every number on this screen', 'The numbers on What they do come from the browser instead and have no bot filter.');
   html += '</div>';
 
   html += '<div class="grid two" style="margin-top:10px">';
   html += trafficChart(tr.daily);
-  html += barList('Traffic sources', 'visits / unique visitors', tr.sources, 'source', SOURCE_LABEL);
+  html += barList('Where page views came from', 'page views; Internal is someone moving from one page of the site to another', tr.sources, 'source', SOURCE_LABEL);
   html += '</div>';
 
   html += '<div class="grid two" style="margin-top:10px">';
-  html += barList('Referrers', 'which site or search engine sent them', tr.referrers, '#58a6ff');
-  html += barList('Pages viewed', 'every page view, by page', tr.pages, '#3fb950');
+  html += barList('Referrers', 'page views by the site or search engine that sent them, the top 15', tr.referrers, '#58a6ff');
+  html += barList('Pages viewed', 'page views by page, the top 15', tr.pages, '#3fb950');
   html += '</div>';
 
   // Countries only fills in behind an edge that sets CF-IPCountry. Rather than
@@ -1125,7 +1278,7 @@ function trafficSection(tr, days){
   html += linkBuilderCard();
   html += '</div>';
 
-  html += '<div class="callout ok"><b>How this is measured.</b> Recorded on the server, after each page is sent, so it counts every visitor rather than only those who accept analytics. No cookie is set. Your IP address is never stored: it is hashed once in memory with a secret that is regenerated every day and never written to disk, so visitors cannot be identified or followed from one day to the next. Referring URLs are reduced to a hostname before storage.</div>';
+  html += '<div class="callout ok"><b>How this is measured.</b> Recorded on the server, after each page is sent, so it counts every visitor rather than only those who accept analytics. No cookie is set. Your IP address is never stored: it is hashed once in memory with a secret that is regenerated every day and never written to disk, so visitors cannot be identified or followed from one day to the next. The price of that: the secret is also new after a restart, so a deploy in the middle of a day can count that day\\'s earlier visitors a second time. Lists by source, page or country show page views only, because visitors cannot be counted per list beyond the last two days. Referring URLs are reduced to a hostname before storage.</div>';
   return html;
 }
 
@@ -1136,71 +1289,69 @@ function trafficSection(tr, days){
    picker and Refresh reload.                                              */
 
 var TABS = [
-  { id:'board',    label:'Board' },
-  { id:'traffic',  label:'Where from' },
-  { id:'funnel',   label:'What they do' },
-  { id:'ai',       label:'AI' },
-  { id:'pro',      label:'Pro' },
+  { id:'board',    label:'Today' },
+  { group:'Money' },
+  { id:'pro',      label:'Pro and launch' },
+  { id:'orders',   label:'Orders and refunds' },
   { id:'members',  label:'Members' },
+  { id:'prices',   label:'Price research' },
+  { group:'Audience' },
+  { id:'traffic',  label:'Visitors' },
+  { id:'funnel',   label:'What they do' },
+  { group:'Product' },
+  { id:'ai',       label:'AI' },
   { id:'events',   label:'Events' },
   { id:'library',  label:'Library' },
+  { group:'Needs you' },
+  { id:'review',   label:'Review' },
   { id:'feedback', label:'Feedback' },
+  { group:'Under the hood' },
   { id:'email',    label:'Email' },
   { id:'security', label:'Security' }
 ];
 var DATA = null;
 var currentTab = 'board';
 
+function isTab(id){
+  for (var i = 0; i < TABS.length; i++) if (TABS[i].id && TABS[i].id === id) return true;
+  return false;
+}
 function tabFromUrl(){
   var h = (location.hash || '').replace('#', '');
-  for (var i = 0; i < TABS.length; i++) if (TABS[i].id === h) return h;
-  try { var saved = localStorage.getItem('tifo_admin_tab'); if (saved) {
-    for (var j = 0; j < TABS.length; j++) if (TABS[j].id === saved) return saved;
-  } } catch(e){}
+  if (isTab(h)) return h;
+  try { var saved = localStorage.getItem('tifo_admin_tab'); if (saved && isTab(saved)) return saved; } catch(e){}
   return 'board';
 }
 
+/* What is waiting for the owner, by screen. These are the only numbers the
+   menu shows: a count beside a name used to be page views on one tab, every AI
+   request on another and "everything ever sent" on a third. */
+function waitingCounts(){
+  var qc = queueCounts();
+  var reqs = (REQS && REQS.requests) || [], pending = 0;
+  for (var i = 0; i < reqs.length; i++) if (reqs[i].status === 'pending') pending++;
+  var look = (ORDERS && ORDERS.stats && Number(ORDERS.stats.review)) || 0;
+  var fb = (DATA && DATA.fb && DATA.fb.counts) || {};
+  return {
+    review: qc.reports + qc.photos + qc.stadiums,
+    orders: pending + look, refunds: pending, look: look,
+    feedback: Number(fb.open) || 0,
+    security: DATA ? socFiring().length : 0
+  };
+}
 function tabBadge(id){
   if (!DATA) return '';
-  var t = (DATA.ov && DATA.ov.totals) || {};
-  var mod = (DATA.ov && DATA.ov.moderation) || {};
-  if (id === 'ai'){
-    var a = DATA.ai;
-    if (a && a.window) return '<span class="pill">' + fmt(a.window.all) + '</span>';
-    return '';
-  }
-  if (id === 'feedback'){
-    var n = (DATA.fb && DATA.fb.items) ? DATA.fb.items.length : 0;
-    return n ? '<span class="pill">' + fmt(n) + '</span>' : '';
-  }
-  if (id === 'library'){
-    var qc = queueCounts();
-    var queue = qc.reports + qc.photos + qc.stadiums;
-    return queue ? '<span class="pill warn">' + fmt(queue) + '</span>' : '';
-  }
-  if (id === 'traffic'){
-    var v = DATA.tr && DATA.tr.totals ? DATA.tr.totals.visits : null;
-    return v ? '<span class="pill">' + fmt(v) + '</span>' : '';
-  }
-  if (id === 'members'){
-    if (!MEMBERS || MEMBERS.error) return '';
-    var held = memCounts(memAccounts()).now;
-    return held ? '<span class="pill">' + fmt(held) + '</span>' : '';
-  }
-  if (id === 'security'){
-    var firing = socFiring();
-    return firing.length ? '<span class="pill warn">' + fmt(firing.length) + '</span>' : '';
-  }
-  void t;
-  return '';
+  var n = waitingCounts()[id];
+  return n ? '<span class="pill warn">' + fmt(n) + '</span>' : '';
 }
 
 function renderTabs(){
   var html = '';
   for (var i = 0; i < TABS.length; i++){
     var tb = TABS[i];
+    if (tb.group){ html += '<span class="grp">' + esc(tb.group) + '</span>'; continue; }
     html += '<button class="tab" type="button" data-tab="' + tb.id + '" aria-current="' + (tb.id === currentTab) + '">'
-          + esc(tb.label) + tabBadge(tb.id) + '</button>';
+          + '<span>' + esc(tb.label) + '</span>' + tabBadge(tb.id) + '</button>';
   }
   el('tabs').innerHTML = html;
   var btns = el('tabs').querySelectorAll('.tab');
@@ -1218,36 +1369,65 @@ function selectTab(id){
   window.scrollTo(0, 0);
 }
 
-/* ---- board: the strip, then the handful of numbers worth a glance ---- */
+/* ---- today: what is waiting, the business in one row, then growth ---- */
+function todoRow(n, label, where, href){
+  n = Number(n) || 0;
+  return '<a class="' + (n ? '' : 'clear') + '" href="' + esc(href) + '"><span class="tn">' + fmt(n) + '</span>'
+    + '<span class="tl">' + esc(label) + '</span><span class="tg">' + esc(where) + ' &rarr;</span></a>';
+}
+/* Who holds Pro and what it has earned: the same three figures on Today and
+   on Pro and launch, from the same lists the Members and Orders screens show. */
+function proHeadline(){
+  var html = '';
+  if (MEMBERS && !MEMBERS.error){
+    var c = memCounts(memAccounts());
+    html += stat(c.now, plural(c.now, 'account', 'accounts'), 'Hold Pro now',
+      fmt(c.paid) + ' bought, ' + fmt(c.hand) + ' given by you, ' + fmt(c.gift) + ' on the 7-day gift',
+      'Accounts with a pass that has started and has not ended or been revoked. An account with two passes counts once, under the one that makes it Pro now. A purchase made with test keys counts as bought, and is marked TEST on Members.');
+  } else {
+    html += stat('?', '', 'Hold Pro now', 'the member list did not load', '');
+  }
+  if (ORDERS && !ORDERS.error){
+    var n = ORDERS.stats || {};
+    html += stat('SAR ' + fmt((n.revenue || 0) / 100), '', 'Kept, all time',
+      fmt(n.paid || 0) + plural(n.paid || 0, ' paid order', ' paid orders') + ', before Moyasar fees',
+      'Real-money orders that are paid and have not been refunded. Refunded orders and test orders are left out, so this is what stayed with you.');
+    html += stat(n.refunded || 0, plural(n.refunded || 0, 'order', 'orders'), 'Refunded, all time', 'the whole amount went back', '');
+  }
+  return html;
+}
 function boardSection(){
   var ov = DATA.ov, t = ov.totals || {}, r7 = ov.recent7d || {}, series = ov.series || {};
-  var html = headerStrip(ov, DATA.tr, DATA.sh);
-  html += '<p class="lede">Every other tab is one question in detail. This one is the glance: is it growing, and is anything waiting for you.</p>';
-
-  html += '<h2 class="sec">The numbers</h2><div class="grid">';
-  html += kpi('Accounts', t.users, fmt(r7.signups) + ' in the last 7 days', true);
-  html += kpi('Designs', t.designs, fmt(r7.designs) + ' in the last 7 days', true);
-  html += kpi('Published', t.publicDesigns, 'visible in the community', true);
-  html += kpi('Templates', t.templates);
-  html += aiBoardKpi();
-  html += kpi('B2B leads', t.leads, fmt(r7.leads) + ' in the last 7 days', true);
+  var w = waitingCounts(), qc = queueCounts();
+  var html = '<h2 class="sec">Waiting for you ' + (w.orders + w.review + w.feedback + w.security
+    ? '' : '<span class="badge good">nothing</span>') + '</h2><div class="todo">';
+  html += todoRow(w.refunds, 'Refund requests to answer', 'Orders and refunds', '#orders');
+  if (w.look) html += todoRow(w.look, 'Orders paid at the wrong amount', 'Orders and refunds', '#orders');
+  html += todoRow(qc.stadiums, 'Stadium submissions to review', 'Review', '#review');
+  html += todoRow(qc.photos, 'Match photos to verify', 'Review', '#review');
+  html += todoRow(qc.reports, 'Reported designs', 'Review', '#review');
+  html += todoRow(w.feedback, 'Feedback not marked handled', 'Feedback', '#feedback');
+  html += todoRow(w.security, 'Security alerts firing', 'Security', '#security');
   html += '</div>';
 
-  var qc = queueCounts();
-  var queue = qc.reports + qc.photos + qc.stadiums;
-  var firingNow = socFiring().length;
-  if (queue || firingNow){
-    html += '<h2 class="sec">Waiting for you</h2><div class="grid">';
-    if (firingNow) html += queueKpi('Security alerts firing', firingNow, 'Security tab', '#security');
-    html += queueKpi('Open reports', qc.reports, 'Review in Library', '#library');
-    html += queueKpi('Unverified photos', qc.photos, 'Review in Library', '#library');
-    html += queueKpi('Pending stadiums', qc.stadiums, 'Review in Library', '#library');
-    html += '</div>';
-  }
+  html += '<h2 class="sec">Pro and money</h2><div class="grid three">' + proHeadline() + '</div>';
 
-  html += '<h2 class="sec">Growth</h2><div class="grid two">';
-  html += chartCard('New accounts per day', series.signups, '#58a6ff');
-  html += chartCard('New designs per day', series.designs, '#d29922');
+  html += '<h2 class="sec">Visitors <span class="hint">the period picked at the top</span></h2>';
+  html += headerStrip(ov, DATA.tr, DATA.sh);
+
+  var drafts = Math.max(0, (t.designs || 0) - (t.publicDesigns || 0) - (t.trashedDesigns || 0));
+  html += '<h2 class="sec">The site <span class="hint">all time</span></h2><div class="grid three">';
+  html += stat(t.users, 'accounts', 'Signed up', fmt(r7.signups) + ' in the last 7 days', 'Every account that exists now. A deleted account leaves this number.');
+  html += stat(t.designs, 'designs', 'Saved', fmt(t.publicDesigns) + ' published, ' + fmt(drafts) + ' private, ' + fmt(t.trashedDesigns) + ' in the Trash',
+    'Every design row: private drafts, published ones and ones in the Trash (kept 30 days, then removed for good). ' + fmt(r7.designs) + ' were made in the last 7 days.');
+  html += stat(t.publicDesigns, 'designs', 'Published', 'of which ' + fmt(t.templates) + plural(t.templates, ' is a template', ' are templates'), 'Designs marked public. Templates are published designs too, so they are inside this number, not beside it.');
+  html += aiBoardKpi();
+  html += stat(t.leads, 'leads', 'Club enquiries', fmt(r7.leads) + ' in the last 7 days', 'Messages sent from the For clubs page.');
+  html += '</div>';
+
+  html += '<h2 class="sec">Growth <span class="hint">last 30 days &middot; Riyadh days &middot; every day drawn, empty ones as zero</span></h2><div class="grid two">';
+  html += chartCard('New accounts per day', fillDays(series.signups, 30), '#58a6ff', 'today');
+  html += chartCard('New designs per day', fillDays(series.designs, 30), '#d29922', 'today');
   html += '</div>';
   return html;
 }
@@ -1259,48 +1439,50 @@ function boardSection(){
 function aiBoardKpi(){
   var a = DATA.ai;
   if (!a || a.unavailable || !a.totals) {
-    return kpi('AI generations', '\u2014', 'history not recorded yet', true);
+    return stat('?', '', 'AI designs delivered', 'history is not recorded on this server', '');
   }
-  return kpi('AI generations', a.totals.model, fmt(a.totals.all) + ' requests in total', true);
+  return stat(a.totals.model, 'designs', 'AI designs delivered', 'of ' + fmt(a.totals.all) + ' AI requests of every kind',
+    'Requests to the AI designer that came back with a design, all time. The larger number is every AI request: refusals, the quick designer, Polish, photo reading and chat included.');
 }
 
 function trafficTab(){ return trafficSection(DATA.tr, DATA.days); }
 
 function funnelTab(){
   var t = (DATA.ov && DATA.ov.totals) || {};
-  var html = '<h2 class="sec">Editor funnel <span class="hint">last ' + DATA.days + ' days &middot; consent-gated</span></h2>';
+  var html = '<h2 class="sec">What people do <span class="hint">last ' + DATA.days + ' days &middot; sessions &middot; only visitors who accepted analytics</span></h2>';
   html += funnelHtml(DATA.funnel);
-  html += '<p class="note">These steps only fire after a visitor accepts analytics, so they will never reconcile with the traffic numbers. Read the drop-off <em>between</em> steps, not the totals.</p>';
+  html += '<p class="note">A session is one browser tab, so one person with two tabs is two sessions. These are only recorded for visitors who accept analytics, so they are lower than the visitor numbers and will never match them. Each row is counted by itself: it is not one group of people followed from step to step, so compare the sizes, and do not read a difference between two rows as people lost.</p>';
   html += '<h2 class="sec">Sharing <span class="hint">' + esc(spanLabel(DATA.sh && DATA.sh.daily, DATA.days)) + ' &middot; counts everyone</span></h2>';
   html += sharesSection(DATA.sh, DATA.days);
   html += '<h2 class="sec">Engagement <span class="hint">all time</span></h2><div class="grid">';
-  html += kpi('Likes / votes', t.votes);
-  html += kpi('Comments', t.comments);
-  html += kpi('Follows', t.follows);
-  html += kpi('Match photos', t.photos, fmt(t.verifiedPhotos) + ' verified', true);
+  html += stat(t.votes, plural(t.votes, 'like', 'likes'), 'Likes', fmt(t.dislikes) + plural(t.dislikes, ' dislike', ' dislikes') + ', counted apart', '');
+  html += stat(t.comments, plural(t.comments, 'comment', 'comments'), 'Comments', '', '');
+  html += stat(t.follows, plural(t.follows, 'follow', 'follows'), 'Follows', '', '');
+  html += stat(t.photos, plural(t.photos, 'photo', 'photos'), 'Match photos', fmt(t.verifiedPhotos) + ' verified', '');
   html += '</div>';
   return html;
 }
 
 function libraryTab(){
   var ov = DATA.ov, t = ov.totals || {}, mod = ov.moderation || {};
-  var html = '<h2 class="sec">The library</h2><div class="grid">';
-  html += kpi('Designs', t.designs);
-  html += kpi('Published', t.publicDesigns, 'visible in the community', true);
-  html += kpi('Templates', t.templates);
-  html += kpi('Approved stadiums', mod.approvedStadiums, 'live in the picker', true);
+  var drafts = Math.max(0, (t.designs || 0) - (t.publicDesigns || 0) - (t.trashedDesigns || 0));
+  var html = '<h2 class="sec">The library <span class="hint">all time</span></h2><div class="grid three">';
+  html += stat(t.designs, 'designs', 'Saved', fmt(drafts) + ' private, ' + fmt(t.trashedDesigns) + ' in the Trash', 'Every design row, whatever its state. Designs in the Trash are removed for good after 30 days.');
+  html += stat(t.publicDesigns, 'designs', 'Published', 'of which ' + fmt(t.templates) + plural(t.templates, ' is a template', ' are templates'), 'Designs marked public. Templates are inside this number.');
+  html += stat(mod.approvedStadiums, 'stadiums', 'Approved from the community', 'live in the stadium picker', '');
   html += '</div>';
 
-  html += reviewQueues();
-
-  html += '<h2 class="sec">Leaderboards</h2><div class="grid two">';
-  html += tableCard(['Most-viewed designs','Views','Likes'], ov.topDesigns,
+  html += '<h2 class="sec">Leaderboards <span class="hint">all time</span></h2><div class="grid two">';
+  html += tableCard(['Most-viewed published designs (top 6)','Views','Likes minus dislikes'], ov.topDesigns,
     [function(d){ return d.title || 'Untitled'; }, function(d){ return d.views; }, function(d){ return d.likeScore; }]);
-  html += tableCard(['Stadium','Designs'], ov.topStadiums,
+  html += tableCard(['Stadium (top 8, by its code name)','Designs saved on it'], ov.topStadiums,
     [function(d){ return d.templateId; }, function(d){ return d.count; }]);
   html += '</div>';
+  html += '<p class="note">The designs, photos and stadiums waiting for a decision are on <a href="#review">Review</a>.</p>';
   return html;
 }
+
+function reviewTab(){ return reviewQueues(); }
 
 
 /* ---- review queues (Library tab) ----
@@ -1319,7 +1501,10 @@ var IMG_CACHE = {};
 function queueCounts(){
   var mod = (DATA && DATA.ov && DATA.ov.moderation) || {};
   if (QUEUE && !QUEUE.error){
-    return { reports: (QUEUE.reports || []).length, photos: (QUEUE.photos || []).length, stadiums: (QUEUE.stadiums || []).length };
+    /* Each list holds 100 at most. A full list means there may be more, and the
+       overview's own count (no ceiling) is then the one to believe. */
+    var full = function(list, total){ list = list || []; return list.length >= 100 ? Math.max(list.length, Number(total) || 0) : list.length; };
+    return { reports: full(QUEUE.reports, mod.openReports), photos: full(QUEUE.photos, mod.unverifiedPhotos), stadiums: full(QUEUE.stadiums, mod.pendingStadiums) };
   }
   return { reports: Number(mod.openReports)||0, photos: Number(mod.unverifiedPhotos)||0, stadiums: Number(mod.pendingStadiums)||0 };
 }
@@ -1458,7 +1643,7 @@ function wireLibrary(){
   body.__queueWired = true;
   body.addEventListener('click', async function(e){
     var btn = e.target && e.target.closest ? e.target.closest('button[data-act]') : null;
-    if (!btn || currentTab !== 'library') return;
+    if (!btn || currentTab !== 'review') return;
     var item = btn.closest('.qitem');
     var act = QUEUE_ACTIONS[btn.getAttribute('data-act')];
     if (!item || !act) return;
@@ -1501,17 +1686,19 @@ function aiTab(){
   var since = a.since ? new Date(a.since) : null;
   var sinceLabel = since ? 'since ' + since.toLocaleDateString() : 'nothing recorded yet';
 
-  var html = '<h2 class="sec">AI <span class="hint">last ' + a.days + ' days &middot; totals ' + esc(sinceLabel) + '</span></h2>';
-  html += '<p class="lede">Only <b>premium</b> generations cost money and spend a credit. A cache hit, the offline Quick Designer, a cap, a busy model and a blocked prompt are all free \u2014 and all of them used to be invisible.</p>';
+  var html = '<h2 class="sec">AI <span class="hint">last ' + a.days + ' days &middot; requests, not people &middot; days are UTC days &middot; totals ' + esc(sinceLabel) + '</span></h2>';
+  html += '<p class="lede">Every number here is a count of requests. One person asking five times is five. What each request cost is further down.</p>';
 
-  html += '<div class="grid">';
-  html += kpi('Premium generations', W.model, fmt(T.model) + ' all time', true);
-  html += kpi('Quick Designer', W.quick, 'free offline engine', true);
-  html += kpi('Served from cache', W.cache, 'free, no model call', true);
-  html += kpi('Hit the hourly cap', W.quota, fmt(T.quota) + ' all time', true);
-  var fails = a.failures || [];
-  html += kpi('Model busy or failed', W.busy, fails.length ? 'mostly: ' + reasonLabel(fails[0].reason) : 'fell back to the choice', true);
-  html += kpi('Blocked by safety', W.blocked, fmt(T.blocked) + ' all time', true);
+  html += '<div class="grid three">';
+  html += stat(W.model, plural(W.model, 'design', 'designs'), 'Designs delivered', fmt(T.model) + ' all time',
+    'Requests to the AI designer that came back with a design. It includes designs that arrived without their picture, and runs made with the admin password, which spend nobody\\'s allowance.');
+  html += stat(W.quick, plural(W.quick, 'design', 'designs'), 'Made by the quick designer', 'the free engine on the site, no model call', '');
+  html += stat(W.cache, plural(W.cache, 'request', 'requests'), 'Answered from the cache', 'free, no model call', '');
+  html += stat(W.quota, plural(W.quota, 'request', 'requests'), 'Refused by a limit', fmt(T.quota) + ' all time',
+    'Any request turned away because an allowance was used up: the designs of a day or a month, Polish, photo reading, cut-out, review or chat. Each try counts, so one person pressing three times is three.');
+  html += stat(W.busy, plural(W.busy, 'request', 'requests'), 'Model busy or failed', 'the reasons are under Why it failed',
+    'The model did not answer, or answered with something unusable. A refusal by the provider\\'s own safety filter is counted here too.');
+  html += stat(W.blocked, plural(W.blocked, 'request', 'requests'), 'Stopped by our prompt check', fmt(T.blocked) + ' all time', 'Our own screen of the prompt, before any model is called.');
   html += '</div>';
 
   html += textModelsSection(a.text);
@@ -1520,12 +1707,12 @@ function aiTab(){
   html += picturesSection(a.pictures);
 
   /* The question that started this: has anyone actually been turned away? */
-  html += '<h2 class="sec">Has anyone hit the limit? <span class="hint">all time, not the window</span></h2>';
+  html += '<h2 class="sec">Who has been refused by a limit <span class="hint">all time, not the period &middot; the 20 refused most</span></h2>';
   if (!a.hitCap || !a.hitCap.length){
-    html += '<div class="card"><p class="empty">Nobody has ever reached the hourly cap.</p>'
-         +  '<p class="note">The free ceiling is per <b>hour</b> (see aiPeriod), so it takes ' + fmt(AI_LIMIT_HINT) + ' premium designs within 60 minutes to meet it. If AI is going to be the reason people subscribe, this is the number to change.</p></div>';
+    html += '<div class="card"><p class="empty">Nobody has been refused by a limit yet.</p>'
+         +  '<p class="note">With Pro on, a free account has a daily and a monthly allowance of AI designs, and Pro has its own month. A refusal by any of them would be listed here.</p></div>';
   } else {
-    html += tableCard(['Account','Times capped','Last time'], a.hitCap,
+    html += tableCard(['Account','Times refused','Last time'], a.hitCap,
       [function(d){ return d.username; }, function(d){ return d.times; }, function(d){ return new Date(d.last).toLocaleString(); }]);
   }
 
@@ -1533,21 +1720,21 @@ function aiTab(){
 
   html += '<h2 class="sec">Per day <span class="hint">last ' + a.days + ' days</span></h2>';
   html += '<div class="grid two">';
-  html += chartCard('Premium generations', seriesOf(a.perDay, 'model'), '#a371f7');
-  html += chartCard('Quick Designer', seriesOf(a.perDay, 'quick'), '#39c5cf');
+  html += chartCard('Designs delivered', seriesOf(a.perDay, 'model'), '#a371f7');
+  html += chartCard('Made by the quick designer', seriesOf(a.perDay, 'quick'), '#39c5cf');
   html += '</div>';
 
-  html += '<h2 class="sec">Who uses it <span class="hint">last ' + a.days + ' days</span></h2>';
-  html += tableCard(['Account','Premium','Quick','Capped','Last used'], a.topUsers,
+  html += '<h2 class="sec">Who uses it <span class="hint">last ' + a.days + ' days &middot; the 20 with the most designs</span></h2>';
+  html += tableCard(['Account','Designs delivered','Quick designer','Refused by a limit','Last request of any kind'], a.topUsers,
     [function(d){ return d.username; }, function(d){ return d.model; }, function(d){ return d.quick; },
      function(d){ return d.quota; }, function(d){ return new Date(d.last).toLocaleDateString(); }]);
 
   var modes = a.modes || { std:0, super:0, polish:0, photo:0, cutout:0, critique:0, chat:0 };
   html += '<h2 class="sec">Reference</h2><div class="grid">';
-  html += kpi('Whole-bowl (Super)', modes.super, 'director prompt', true);
-  html += kpi('Single design', modes.std, 'standard mode', true);
-  html += kpi('Accounts metered', a.meteredAccounts, 'have an ai_usage row', true);
-  html += kpi('All requests', W.all, fmt(T.all) + ' all time', true);
+  html += stat(modes.super, plural(modes.super, 'request', 'requests'), 'Asked for the whole stadium', 'any outcome, in the period', 'Requests marked Super. Since 29 Oct 2026 both marks go through the same designer; the mark only says what was asked for.');
+  html += stat(modes.std, plural(modes.std, 'request', 'requests'), 'Asked for one design', 'any outcome, in the period', 'Requests marked Standard.');
+  html += stat(a.meteredAccounts, plural(a.meteredAccounts, 'account', 'accounts'), 'On the old hourly meter', 'all time; not growing while Pro is on', 'Accounts that used the hourly meter from before Pro. Accounts on the new daily and monthly allowances never get counted here.');
+  html += stat(W.all, plural(W.all, 'request', 'requests'), 'All AI requests', fmt(T.all) + ' all time', 'Every recorded request of every kind and outcome. The six figures at the top do not add up to this: Polish, photo reading, cut-out, review and chat are only in this one.');
   html += '</div>';
   html += '<p class="note">Prompt text is deliberately not stored \u2014 only what happened to each request. The outcome is what pricing and capacity need; the text is the part that would put this table at odds with the privacy page.</p>';
   return html;
@@ -1799,19 +1986,25 @@ function paintSection(){
   else if (currentTab === 'funnel') html = funnelTab();
   else if (currentTab === 'ai') html = aiTab();
   else if (currentTab === 'pro') html = proTab();
+  else if (currentTab === 'orders') html = ordersTab();
+  else if (currentTab === 'prices') html = pricesTab();
   else if (currentTab === 'members') html = membersTab();
   else if (currentTab === 'events') html = eventsTab();
   else if (currentTab === 'library') html = libraryTab();
+  else if (currentTab === 'review') html = reviewTab();
   else if (currentTab === 'feedback') html = feedbackTab();
   else if (currentTab === 'email') html = emailTab();
   else if (currentTab === 'security') html = securityTab();
   el('dash-body').innerHTML = html;
   if (currentTab === 'email') wireEmailTest();
   if (currentTab === 'security') wireSecurity();
-  if (currentTab === 'library') wireLibrary();
+  if (currentTab === 'review') wireLibrary();
+  if (currentTab === 'feedback') wireFeedback();
   if (currentTab === 'traffic') wireLinkBuilder();
-  if (currentTab === 'pro') wirePro();
-  if (currentTab === 'members') wireMembers();
+  if (currentTab === 'pro') wireLaunch();
+  if (currentTab === 'orders'){ wireOrders(); wireRequests(); wireSubs(); }
+  if (currentTab === 'prices') wirePrices();
+  if (currentTab === 'members'){ wireMembers(); wireLookup(); }
   if (currentTab === 'events') wireEvents();
 }
 
@@ -1827,7 +2020,7 @@ var PRO_MODE_TEXT = {
   on: 'On: everyone has the new free limits, the gift and the Pro page.'
 };
 function proTab(){
-  var html = '<h2 class="sec">Pro</h2>';
+  var html = '<h2 class="sec">Pro and launch</h2>';
   if (!PRO || PRO.error){
     return html + '<div class="callout bad"><b>Could not load Pro.</b> HTTP ' + esc(String((PRO && PRO.error) || '?')) + '</div>';
   }
@@ -1836,35 +2029,88 @@ function proTab(){
   if (PRO.mode === 'preview' && !PRO.previewUsers) html += '<div class="callout warn"><b>Preview with nobody in it.</b> Set PRO_PREVIEW_USERS to your username (comma-separated for more) and redeploy.</div>';
   if (!PRO.throwawayList || !PRO.throwawayList.loaded) html += '<div class="callout bad"><b>The throwaway email list did not load</b>, so no gifts are offered. ' + esc((PRO.throwawayList && PRO.throwawayList.error) || '') + '</div>';
   if (!PRO.cutoutConfigured) html += '<div class="callout warn"><b>Smart cut-out has no provider.</b> It uses AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN (the picture backup\\'s). Until both are set, the cut-out button says it is not available.</div>';
-  if (!PRO.paymentsOpen && !(ORDERS && ORDERS.status && ORDERS.status.on)) html += '<div class="callout"><b>Payments are not open.</b> /pro is a coming-soon page: it shows no price, asks what a month is worth, and offers "Tell me when Pro opens". The answers and the count are below.</div>';
-  html += '<div class="grid">';
-  html += kpi('Gifts offered', st.gifts.offered || 0, fmt(st.gifts.accepted || 0) + ' accepted, ' + fmt(st.gifts.active || 0) + ' running now', true);
-  html += kpi('Pro monthly now', (st.passes && st.passes.monthly) || 0, 'bought or given by hand', true);
-  html += kpi('Asked to hear when Pro opens', st.notify || 0, 'one per account', true);
-  html += kpi('Said what Pro is worth', (PRICES && PRICES.total) || 0, 'on the coming-soon page', true);
-  html += '</div>';
-  html += launchHtml();
-  html += ordersHtml();
-  html += subsHtml();
-  html += pricesHtml();
+  if (!PRO.paymentsOpen && !(ORDERS && ORDERS.status && ORDERS.status.on)) html += '<div class="callout"><b>Payments are not open.</b> /pro is a coming-soon page: it shows no price, asks what a month is worth, and offers "Tell me when Pro opens". The answers are on <a href="#prices">Price research</a>.</div>';
 
-  html += '<h2 class="sec">An account</h2>';
+  html += '<div class="grid three">' + proHeadline() + '</div>';
+  html += '<p class="note">The people are on <a href="#members">Members</a>; the orders, refunds and how payments are set up are on <a href="#orders">Orders and refunds</a>.</p>';
+
+  html += giftHtml(st.gifts || {});
+  html += launchHtml();
+  html += turnaroundHtml();
+  html += tellMeHtml(st);
+  return html;
+}
+
+/* ---- the 7-day gift: eligible, shown, started, running ----
+   "Gifts offered" used to be the first number here. It counted the accounts
+   the server had found eligible, and a row is written the moment an eligible
+   account's browser asks for its Pro state, on any page. The offer itself is a
+   card on My projects that hides for three days after "Later". So it is named
+   for what it is, and the showing is its own step (recorded from 22 Nov 2026). */
+function giftHtml(g){
+  var top = g.offered || 0;
+  var html = '<h2 class="sec">The 7-day gift <span class="hint">all time</span></h2><div class="card"><div class="steps">';
+  html += stepRow('Eligible for the gift', top, top, 'verified email, one saved design, never had Pro');
+  if (g.seenSince) html += stepRow('Were shown the offer', g.seen || 0, top, 'the card on My projects, or the gift sheet');
+  else html += stepRow('Were shown the offer', 0, top, 'the card on My projects, or the gift sheet', true);
+  html += stepRow('Started the gift', g.accepted || 0, top, '');
+  html += stepRow('On the gift now', g.active || 0, top, 'the 7 days have not run out');
+  html += '</div></div>';
+  html += '<p class="note">An account becomes eligible when its browser asks for its Pro state, on any page; that is not the same as seeing the offer. '
+    + (g.seenSince
+      ? 'Showings are recorded since ' + esc(riyadh(g.seenSince)) + '. An offer shown before then counts as shown only if the gift was started, so the second step reads low until the older offers have been seen again.'
+      : 'Whether the offer was shown has not been recorded yet: it starts with the first fan who sees the card after this version is live. Until then the share who took the gift cannot be worked out, only that it is at least ' + pct(g.accepted || 0, top) + ' of the eligible.')
+    + '</p>';
+  return html;
+}
+
+/* ---- the "tell me" list and the price question, from before the launch ----
+   Answering the price question while signed in adds the account to the "tell
+   me" list (the thank-you the question promises). The count used to read
+   "Asked to hear when Pro opens", as if each had pressed the button. */
+function tellMeHtml(st){
+  var via = st.notifyVia || { price: 0, wontPay: 0 }, n = st.notify || 0;
+  var pressed = Math.max(0, n - (via.price || 0));
+  var html = '<h2 class="sec">Before the launch <span class="hint">all time</span></h2><div class="grid three">';
+  html += stat(n, plural(n, 'account', 'accounts'), 'On the tell-me list',
+    fmt(via.price) + ' put there by answering the price question, ' + fmt(pressed) + ' by pressing Tell me only',
+    'One row per account. Answering the price question while signed in adds the account, so this is not a count of people who asked to be told. ' + fmt(via.wontPay) + ' of them answered "Not for me". The founders were taken from this list at the launch.');
+  html += stat((PRICES && PRICES.total) || 0, plural((PRICES && PRICES.total) || 0, 'answer', 'answers'), 'Price answers',
+    'from /pro and the card in the editor',
+    'One answer per account, or per browser for someone signed out. The medians and every answer are on Price research.');
+  html += '</div>';
+  return html;
+}
+
+function ordersTab(){
+  return ordersHtml() + subsHtml();
+}
+function pricesTab(){
+  return pricesHtml();
+}
+
+/* ---- one account: its plan, its gift, every pass (bottom of Members) ---- */
+function lookupHtml(){
+  var html = '<h2 class="sec">Look up one account</h2>';
   html += '<p class="note"><label>Username <input id="pro-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(PRO_LOOKUP || '') + '"></label> '
         + '<button id="pro-find" type="button">Look up</button></p>';
-  var a = PRO.account;
+  var a = PRO && PRO.account;
   if (a){
     html += '<table class="tbl"><tbody>'
       + '<tr><th>Account</th><td>@' + esc(a.username) + (a.emailVerified ? '' : ' <b class="warn">(email not verified)</b>') + '</td></tr>'
       + '<tr><th>Pro on for them</th><td>' + (a.live ? 'yes' : 'no (PRO_MODE)') + '</td></tr>'
       + '<tr><th>Plan now</th><td>' + esc(a.plan === 'free' ? 'Free' : (PRO_PLAN_LABEL[a.plan] || a.plan)) + '</td></tr>'
-      + '<tr><th>Gift</th><td>' + (a.gift ? (a.gift.acceptedAt ? 'accepted ' + esc(a.gift.acceptedAt.slice(0, 16).replace('T', ' ')) + ' UTC' : 'offered, not accepted') : 'none') + '</td></tr>'
+      + '<tr><th>Gift</th><td>' + (a.gift
+          ? (a.gift.acceptedAt ? 'started ' + esc(riyadh(a.gift.acceptedAt))
+            : 'eligible since ' + esc(riyadh(a.gift.offeredAt)) + ', not started' + (a.gift.seenAt ? '; shown the offer ' + esc(riyadh(a.gift.seenAt)) : '; not recorded as shown'))
+          : 'not eligible, or has not opened the site since Pro was on') + '</td></tr>'
       + '</tbody></table>';
     if (a.passes && a.passes.length){
-      html += '<table class="tbl"><thead><tr><th>Pass</th><th>How</th><th>From</th><th>Until (UTC)</th><th></th></tr></thead><tbody>';
+      html += '<table class="tbl"><thead><tr><th>Pass</th><th>How</th><th>From</th><th>Until</th><th></th></tr></thead><tbody>';
       for (var i = 0; i < a.passes.length; i++){
         var p = a.passes[i];
         var over = p.revokedAt || Date.parse(p.endsAt) <= Date.now();
-        html += '<tr><td>' + esc(PRO_PLAN_LABEL[p.plan] || p.plan) + '</td><td>' + esc(p.source) + '</td><td>' + esc(p.startsAt.slice(0, 16).replace('T', ' ')) + '</td><td>' + esc(p.endsAt.slice(0, 16).replace('T', ' ')) + '</td><td>'
+        html += '<tr><td>' + esc(PRO_PLAN_LABEL[p.plan] || p.plan) + '</td><td>' + esc(p.source) + '</td><td>' + esc(riyadh(p.startsAt)) + '</td><td>' + esc(riyadh(p.endsAt)) + '</td><td>'
           + (p.revokedAt ? 'revoked' : over ? 'ended' : '<button type="button" class="pro-revoke" data-pass="' + esc(p.id) + '">Revoke</button>') + '</td></tr>';
       }
       html += '</tbody></table>';
@@ -1872,13 +2118,6 @@ function proTab(){
   } else if (PRO_LOOKUP){
     html += '<p class="note">No account called @' + esc(PRO_LOOKUP) + '.</p>';
   }
-
-  html += '<h2 class="sec">Give Pro</h2>';
-  html += '<p class="note">For a prize, a supporters\\' group or trying Pro on yourself. One plan, Pro monthly: 30 days unless you type other days; its month of allowances is counted from today. Written to the audit trail.</p>';
-  html += '<p class="note"><label>Username <input id="pro-g-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(PRO_LOOKUP || '') + '"></label> '
-        + '<label>Plan <select id="pro-g-plan"><option value="monthly">Pro monthly</option></select></label> '
-        + '<label>Days <input id="pro-g-days" type="number" min="1" max="400" step="1" placeholder="30" style="width:110px"></label> '
-        + '<button id="pro-grant" type="button">Give</button></p>';
   html += '<p id="pro-out" class="note" role="status" aria-live="polite"></p>';
   return html;
 }
@@ -1902,6 +2141,73 @@ async function proReload(){
   ORDERS = both[2].ok && both[2].data ? both[2].data : { error: both[2].status };
   renderTabs();
   paintSection();
+  loadProFunnel();
+}
+
+
+/* ---- the turnaround (22 Nov 2026): the settings, the automatic gift, the Pro funnel ----
+   Everything here is read-only. The settings are Railway variables; this only
+   says how the server reads them. The funnel's "saw" and "pressed" are the
+   consent-gated events (only visitors who allowed counting); "paid" is the
+   orders themselves, under the place each checkout named. */
+var PROFUNNEL = null;
+var PLACE_LABEL = { post: 'Post it', share: 'Share dialog', 'export': 'Export sheet', page: 'The Pro page', giftend: 'After the gift', limit: 'A limit card', account: 'Account page' };
+function loadProFunnel(){
+  api('/api/admin/pro/funnel?days=' + currentDays).then(function(r){
+    PROFUNNEL = r.ok && r.data ? r.data : { error: r.status };
+    if (typeof paintSection === 'function') paintSection();
+  });
+}
+function onOff(v){ return v ? '<b>on</b>' : 'off'; }
+function turnaroundHtml(){
+  if (!PRO || PRO.error) return '';
+  var s = PRO.settings || {}, m = s.match || {}, g = PRO.giftsStarted || null;
+  var html = '<h2 class="sec">Switches <span class="hint">Railway variables, as the server reads them now</span></h2><div class="card"><table class="tbl"><tbody>';
+  html += '<tr><td>PRO_MONTHLY_PRICE</td><td>' + (s.monthlyPriceInvalid ? '<b>not a price from SAR 1 to SAR 100: ignored</b>' : s.monthlyPrice == null ? 'unset: the launch and regular prices decide' : '<b>SAR ' + esc(String(s.monthlyPrice)) + '</b> for 30 days, with no launch price beside it') + '</td></tr>';
+  html += '<tr><td>PRO_MATCH_PASS</td><td>' + onOff(m.asked) + ': SAR ' + esc(String(m.price)) + ' for ' + esc(String((m.days || 0) * 24)) + ' hours' + (m.asked && !PRO.paymentsOpen ? ' (not sold until Pro is on sale)' : '') + '</td></tr>';
+  html += '<tr><td>PRO_AUTO_GIFT</td><td>' + onOff(s.autoGift) + ': the 7 days start by themselves for a verified email that never held Pro</td></tr>';
+  html += '<tr><td>PRO_GIFT_MAILS</td><td>' + onOff(s.giftMails) + (s.giftMails ? '' : (s.autoGift ? '' : ' (needs PRO_AUTO_GIFT too)')) + ': the three emails about the 7 days. '
+    + 'See one as it would go now: '
+    + '<button type="button" class="gift-mail" data-kind="start">started</button> '
+    + '<button type="button" class="gift-mail" data-kind="soon">ends soon</button> '
+    + '<button type="button" class="gift-mail" data-kind="end">ended</button> '
+    + '<button type="button" class="gift-mail" data-kind="end" data-offer="1">ended, with the price (only for a fan who ticked the box)</button></td></tr>';
+  html += '<tr><td>PRO_POST_OFFERS</td><td>' + onOff(s.postOffers) + ': Pro versions and the account offer on Post it and share</td></tr>';
+  html += '</tbody></table></div>';
+  html += '<p id="gift-mail-subject" class="note" role="status" aria-live="polite"></p>'
+    + '<iframe id="gift-mail-frame" title="An email about the 7 days" sandbox="" hidden style="width:100%;height:760px;border:1px solid #8884;border-radius:8px;background:#f3f4f6"></iframe>';
+  if (g){
+    var a = g.auto || {}, o = g.accept || {};
+    html += '<h2 class="sec">Gifts started <span class="hint">all time</span></h2><div class="card"><table class="tbl"><thead><tr><th>How it started</th><th>Started</th><th>Running now</th><th>Ended</th><th>Bought while it ran</th><th>Bought within ' + esc(String(g.afterDays)) + ' days of its end</th></tr></thead><tbody>';
+    html += '<tr><td>By itself (automatic)</td><td>' + fmt(a.started || 0) + '</td><td>' + fmt(a.running || 0) + '</td><td>' + fmt(a.ended || 0) + '</td><td>' + fmt(a.boughtDuring || 0) + '</td><td>' + fmt(a.boughtAfter || 0) + (a.ended ? ' <span class="dim">' + pct(a.boughtAfter || 0, a.ended) + ' of ended</span>' : '') + '</td></tr>';
+    html += '<tr><td>The old Accept button</td><td>' + fmt(o.started || 0) + '</td><td>' + fmt(o.running || 0) + '</td><td>' + fmt(o.ended || 0) + '</td><td>' + fmt(o.boughtDuring || 0) + '</td><td>' + fmt(o.boughtAfter || 0) + (o.ended ? ' <span class="dim">' + pct(o.boughtAfter || 0, o.ended) + ' of ended</span>' : '') + '</td></tr>';
+    html += '</tbody></table></div><p class="note">Bought means a real, paid order that was not refunded. A fan who bought while the gift ran is counted there and not again after it.</p>';
+  }
+  html += '<h2 class="sec">Pro funnel <span class="hint">last ' + esc(String(currentDays)) + ' days</span></h2>';
+  if (!PROFUNNEL) html += '<p class="note">Loading.</p>';
+  else if (PROFUNNEL.error) html += '<p class="note">The Pro funnel could not be loaded (' + esc(String(PROFUNNEL.error)) + ').</p>';
+  else {
+    var F = PROFUNNEL, rows = F.places || [];
+    html += '<div class="card"><table class="tbl"><thead><tr><th>Where the offer was seen</th><th>Saw a Pro offer</th><th>Pressed Get Pro</th><th>Paid: monthly</th><th>Paid: match pass</th></tr></thead><tbody>';
+    for (var i = 0; i < rows.length; i++){
+      var r = rows[i];
+      html += '<tr><td>' + esc(PLACE_LABEL[r.place] || r.place) + '</td><td>' + fmt(r.saw) + '</td><td>' + fmt(r.pressed) + (r.saw ? ' <span class="dim">' + pct(r.pressed, r.saw) + '</span>' : '') + '</td><td>' + fmt(r.monthly) + '</td><td>' + fmt(r.match) + '</td></tr>';
+    }
+    html += '<tr><td>Place not said</td><td class="dim">n/a</td><td class="dim">n/a</td><td>' + fmt((F.notSaid || {}).monthly || 0) + '</td><td>' + fmt((F.notSaid || {}).match || 0) + '</td></tr>';
+    html += '<tr><td><b>All</b></td><td></td><td></td><td><b>' + fmt((F.paid || {}).monthly || 0) + '</b></td><td><b>' + fmt((F.paid || {}).match || 0) + '</b></td></tr>';
+    html += '</tbody></table></div>';
+    var st = F.steps || {};
+    html += '<div class="grid three">';
+    html += stat(st.gift_welcome || 0, plural(st.gift_welcome || 0, 'session', 'sessions'), 'Saw the gift welcome', 'the 7 days started by themselves', 'Counted only for visitors who allowed counting.');
+    html += stat(st.pro_preview_post || 0, plural(st.pro_preview_post || 0, 'session', 'sessions'), 'Previewed Pro on Post it', 'their own tifo as the vertical video', '');
+    html += stat(st.signup_offer_post || 0, plural(st.signup_offer_post || 0, 'session', 'sessions'), 'Offered an account on Post it', (st.signup_post || 0) + ' made one from it', '');
+    html += stat(st.gift_end_seen || 0, plural(st.gift_end_seen || 0, 'session', 'sessions'), 'Saw the gift-end card', (st.bought_after_gift || 0) + ' paid after their gift', '');
+    html += stat(st.monthly_bought || 0, plural(st.monthly_bought || 0, 'session', 'sessions'), 'Came back from paying: monthly', '', '');
+    html += stat(st.match_bought || 0, plural(st.match_bought || 0, 'session', 'sessions'), 'Came back from paying: match pass', '', '');
+    html += '</div>';
+    html += '<p class="note">Saw and pressed are sessions that allowed counting, so they read lower than what happened. Paid is every real order in the period that was not refunded (SAR ' + esc(String((F.paid || {}).revenue || 0)) + ' in all); an order names its place only when its buyer allowed counting.' + (F.counted ? '' : ' Event counting is not enabled on this server.') + '</p>';
+  }
+  return html;
 }
 
 /* ---- the launch: the price, the founders, their one email (server/src/proLaunch.ts) ----
@@ -1911,7 +2217,7 @@ async function proReload(){
    account. Usernames are the only thing listed: never an address. */
 var LAUNCH = null;
 var LAUNCH_MSG = '';
-var LAUNCH_SRC = { notify: 'asked to be told', price: 'answered the price question', both: 'both' };
+var LAUNCH_SRC = { notify: 'pressed Tell me', price: 'answered the price question', both: 'answered the price question (which also put them on the tell-me list)' };
 function riyadh(iso){
   if (!iso) return '';
   try { return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Riyadh', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) + ' Riyadh'; }
@@ -1936,11 +2242,15 @@ function launchHtml(){
   else if (!L.launchedAt) html += '<p class="note">The founders offer starts by itself the moment Pro is on sale to everyone: ' + fmt(w.hours) + ' hours from then, ' + fmt(w.bonusDays) + ' extra days on a founder\\'s first purchase, once per account.</p>';
   if (!L.mailLive) html += '<div class="callout warn"><b>Email is not being delivered</b> (no mail key), so no founder email goes out. They wait; none is marked sent.</div>';
   html += '<div class="grid">';
-  html += kpi('Founders', f.total || 0, fmt(f.notify || 0) + ' asked to be told, ' + fmt(f.price || 0) + ' answered the price question, ' + fmt(f.both || 0) + ' both', true);
+  var answered = (f.price || 0) + (f.both || 0);
+  html += stat(f.total || 0, plural(f.total || 0, 'account', 'accounts'), 'Founders',
+    fmt(answered) + ' answered the price question, ' + fmt(f.notify || 0) + ' only pressed Tell me',
+    'Accounts with a verified email that were on the tell-me list, or had answered the price question signed in, when Pro went on sale. Answering the question puts an account on the list, so nearly all founders come from the question, whatever they answered.');
   if (L.mail){
-    html += kpi('Emails sent', L.mail.sent, fmt(L.mail.waiting) + ' waiting', true);
-    html += kpi('Not sent', L.mail.failed + L.mail.unknown + L.mail.skipped, fmt(L.mail.failed) + ' failed, ' + fmt(L.mail.unknown) + ' not known, ' + fmt(L.mail.skipped) + ' skipped', true);
-    html += kpi('Founders who bought in time', L.bought.inTime, fmt(L.bought.refunded) + ' refunded since', true);
+    html += stat(L.mail.sent, plural(L.mail.sent, 'email', 'emails'), 'Founders email sent', fmt(L.mail.waiting) + ' waiting', 'Handed to the mail service, once per founder.');
+    html += stat(L.mail.failed + L.mail.unknown + L.mail.skipped, plural(L.mail.failed + L.mail.unknown + L.mail.skipped, 'founder', 'founders'), 'Not emailed', fmt(L.mail.failed) + ' failed, ' + fmt(L.mail.unknown) + ' not known, ' + fmt(L.mail.skipped) + ' skipped', '');
+    html += stat(L.bought.inTime, plural(L.bought.inTime, 'founder', 'founders'), 'Bought with the offer', fmt(L.bought.refunded) + ' more bought and no longer hold it',
+      'Founders whose first purchase got the extra days and is still paid. The smaller figure is founders whose bonus order was refunded or did not complete.');
   }
   html += '</div>';
   if (!L.launchedAt) html += '<p class="note">This is the list as it would be taken if Pro went on sale now: signed-in accounts with a verified email. Guests who answered signed out have no address and are not on it.</p>';
@@ -1963,6 +2273,15 @@ function launchHtml(){
   return html;
 }
 function wireLaunch(){
+  /* The gift's emails, each as it would go out now, in a frame that can run nothing. */
+  var gm = document.querySelectorAll('.gift-mail');
+  for (var gi = 0; gi < gm.length; gi++) gm[gi].addEventListener('click', async function(e){
+    var b = e.currentTarget, out = el('gift-mail-subject'), fr = el('gift-mail-frame');
+    var r = await api('/api/admin/pro/gift/email?json=1&kind=' + encodeURIComponent(b.getAttribute('data-kind')) + (b.getAttribute('data-offer') ? '&offer=1' : ''));
+    if (!r.ok || !r.data){ if (out) out.textContent = 'The email could not be loaded (' + r.status + ').'; return; }
+    if (out) out.textContent = 'Subject: ' + (r.data.subject || '');
+    if (fr){ fr.hidden = false; fr.srcdoc = r.data.html || ''; }
+  });
   var frame = el('launch-frame');
   /* The email's own HTML, in a frame that can run nothing. */
   if (frame && LAUNCH && LAUNCH.email) frame.srcdoc = LAUNCH.email.html || '';
@@ -2025,10 +2344,10 @@ function ordersHtml(){
   }
   if (n.review) html += '<div class="callout bad"><b>' + fmt(n.review) + ' order' + (n.review === 1 ? '' : 's') + ' need' + (n.review === 1 ? 's' : '') + ' a look.</b> Paid at an amount that does not match: nobody got Pro for ' + (n.review === 1 ? 'it' : 'them') + '. Check in Moyasar\\'s dashboard, then refund or give Pro by hand.</div>';
   html += '<div class="grid">';
-  html += kpi('Sold', n.paid || 0, 'months of Pro, real money', true);
-  html += kpi('Taken', 'SAR ' + fmt((n.revenue || 0) / 100), 'before Moyasar\\'s fees', true);
-  html += kpi('Refunded', n.refunded || 0, 'within ' + fmt(ORDERS.refundDays || 7) + ' days, unused', true);
-  html += kpi('Test orders', n.test || 0, 'test keys, no money', true);
+  html += stat(n.paid || 0, plural(n.paid || 0, 'order', 'orders'), 'Paid and kept', 'real money, all time', 'Real-money orders that are paid now. An order that was paid and then refunded is under Refunded, not here.');
+  html += stat('SAR ' + fmt((n.revenue || 0) / 100), '', 'Kept', 'those orders added up, before Moyasar fees', 'Refunded orders are already left out.');
+  html += stat(n.refunded || 0, plural(n.refunded || 0, 'order', 'orders'), 'Refunded', 'real money, sent back in full', 'The promise on /legal is a refund within ' + fmt(ORDERS.refundDays || 7) + ' days of paying, with Pro unused. A refund you chose to make later counts here too.');
+  html += stat(n.test || 0, plural(n.test || 0, 'order', 'orders'), 'Test orders', 'test keys, no money moved, any status', '');
   html += '</div>';
   html += requestsHtml();
   var rows = ORDERS.orders || [];
@@ -2257,7 +2576,7 @@ function pricesHtml(){
   if (!PRICES || PRICES.error){
     return html + '<div class="callout bad"><b>Could not load the answers.</b> HTTP ' + esc(String((PRICES && PRICES.error) || '?')) + '</div>';
   }
-  html += '<p class="note">Asked on /pro while Pro is not on sale, in riyals or US dollars (the page starts in riyals in Arabic, dollars in English). One answer per account, or per browser for a visitor who is signed out; answering again replaces the first. '
+  html += '<p class="note">Asked on /pro and on a card in the editor, while Pro is not on sale, in riyals or US dollars (the page starts in riyals in Arabic, dollars in English). One answer per account, or per browser for a visitor who is signed out; answering again replaces the first. '
         + fmt(PRICES.total) + ' answer' + (PRICES.total === 1 ? '' : 's') + ' so far (at most ' + fmt(PRICES.max) + ' are kept).</p>';
   if (!PRICES.total) return html + '<p class="empty">No answers yet.</p>';
   var wont = PRICES.wontPay || { n: 0, accounts: 0 }, src = PRICES.sources || { page: 0, editor: 0 };
@@ -2337,31 +2656,13 @@ async function downloadPricesCsv(){
   setTimeout(function(){ URL.revokeObjectURL(a.href); }, 10000);
   out.textContent = 'Downloaded ' + fmt(rows.length) + ' answer' + (rows.length === 1 ? '' : 's') + '.';
 }
-function wirePro(){
-  wireLaunch();
-  wireOrders();
-  wireRequests();
-  wireSubs();
+function wirePrices(){
   var csv = el('price-csv');
   if (csv) csv.addEventListener('click', function(){ void downloadPricesCsv(); });
+}
+function wireLookup(){
   var find = el('pro-find');
   if (find) find.addEventListener('click', function(){ PRO_LOOKUP = (el('pro-user').value || '').trim().replace(/^@/, ''); proReload(); });
-  var grant = el('pro-grant');
-  if (grant) grant.addEventListener('click', async function(){
-    var out = el('pro-out');
-    var user = (el('pro-g-user').value || '').trim().replace(/^@/, '');
-    var plan = el('pro-g-plan').value;
-    var days = (el('pro-g-days').value || '').trim();
-    if (!user){ out.textContent = 'Type a username first.'; return; }
-    grant.disabled = true;
-    out.textContent = 'Giving...';
-    var body = { username: user, plan: plan };
-    if (days) body.days = Number(days);
-    var r = await post('/api/admin/pro/grant', body);
-    grant.disabled = false;
-    if (r.ok && r.data && r.data.ok){ PRO_LOOKUP = user; out.textContent = 'Given until ' + r.data.pass.endsAt.slice(0, 16).replace('T', ' ') + ' UTC.'; proReload(); }
-    else out.innerHTML = '<b class="warn">Refused.</b> ' + esc((r.data && r.data.error) || ('HTTP ' + r.status));
-  });
   var btns = document.querySelectorAll('.pro-revoke');
   for (var i = 0; i < btns.length; i++){
     btns[i].addEventListener('click', async function(e){
@@ -2523,8 +2824,9 @@ function membersTab(){
     }
     html += '</tbody></table></div>';
   }
-  html += '<p class="note">"Revoke" ends Pro for that account now: every pass it still holds. It does not give any money back. To refund someone who bought, use Refund under Pro, Payments: that returns the money and ends the pass in one step. "Pro used" counts the AI designs, reviews and messages taken on the pass.</p>';
+  html += '<p class="note">"Revoke" ends Pro for that account now: every pass it still holds. It does not give any money back. To refund someone who bought, use Refund on <a href="#orders">Orders and refunds</a>: that returns the money and ends the pass in one step. "Pro used" counts the AI designs, reviews and messages taken on the pass.</p>';
   if ((MEMBERS.passes || []).length >= (MEMBERS.max || 0)) html += '<p class="note">Showing the newest ' + fmt(MEMBERS.max) + ' passes.</p>';
+  html += lookupHtml();
   return html;
 }
 function wireMembers(){
@@ -2907,7 +3209,7 @@ function socHourlyChart(sc){
   }
   svg += '</svg>';
   return '<div class="card"><p class="lt">The last 48 hours <span class="dim" style="font-weight:400">: peak ' + fmt(max) + ' in an hour</span></p>'
-    + '<p class="lc"><span style="color:' + SOC_COLOR.signin + '">&#9632;</span> sign-in attacks &nbsp; <span style="color:' + SOC_COLOR.admin + '">&#9632;</span> admin &nbsp; <span style="color:' + SOC_COLOR.abuse + '">&#9632;</span> blocked and abusive &nbsp; <span style="color:' + SOC_COLOR.errors + '">&#9632;</span> server errors</p>'
+    + '<p class="lc"><span style="color:' + SOC_COLOR.signin + '">&#9632;</span> sign-in activity (failed sign-ins, wrong codes, password resets) &nbsp; <span style="color:' + SOC_COLOR.admin + '">&#9632;</span> admin &nbsp; <span style="color:' + SOC_COLOR.abuse + '">&#9632;</span> blocked and abusive &nbsp; <span style="color:' + SOC_COLOR.errors + '">&#9632;</span> server errors</p>'
     + svg
     + '<p class="lc" style="margin:5px 0 0;display:flex;justify-content:space-between">' + esc(clockTime(slots[0].key)) + '<span>now</span></p></div>';
 }
@@ -2926,7 +3228,7 @@ function securityTab(){
   var sc = DATA.sc;
   if (!sc) return '<h2 class="sec">Security</h2><p class="note">Could not read the security log. The server may be running without the monitor.</p>';
   var firing = socFiring();
-  var html = '<h2 class="sec">Security <span class="hint">counts are for the last 24 hours unless a column says otherwise</span></h2>';
+  var html = '<h2 class="sec">Security <span class="hint">the last 24 hours unless a column says otherwise &middot; the alert rules count since the last deploy</span></h2>';
 
   if (firing.length){
     html += '<div class="callout bad"><b>' + fmt(firing.length) + (firing.length === 1 ? ' alert is' : ' alerts are') + ' over threshold right now.</b><br>';
@@ -2936,7 +3238,7 @@ function securityTab(){
     }
     html += '</div>';
   } else {
-    html += '<div class="callout ok"><b>All quiet.</b> No alert rule is over its threshold in its window.</div>';
+    html += '<div class="callout ok"><b>All quiet.</b> No alert rule is over its threshold in its window. The rules count in memory, so they start again from zero at each deploy; the tables below are kept and do not.</div>';
   }
 
   html += '<div class="grid" style="margin-top:12px">';
@@ -2951,7 +3253,7 @@ function securityTab(){
 
   /* ---- attacks on sign-in ---- */
   var summary = sc.summary || {};
-  html += '<h2 class="sec">Attacks on sign-in</h2>';
+  html += '<h2 class="sec">Sign-in activity <span class="hint">attacks and ordinary use together: a password reset is in here too</span></h2>';
   html += socKindTable(SOC_SIGNIN);
   html += '<div class="grid two" style="margin-top:10px">';
   var subj = summary.topSubjects || [];
@@ -2986,14 +3288,22 @@ function securityTab(){
   html += sc.alertsTo
     ? '<p class="lede">Alerts go to <b>' + esc(sc.alertsTo) + '</b>.</p>'
     : '<div class="callout"><b>Nobody is emailed.</b> Set <code>SECURITY_ALERT_TO</code> in Railway to the address that should hear about an attack while it is happening. Everything is still recorded here.</div>';
+  /* When a rule last alerted comes from the kept history. The rule's own memory
+     is empty after a deploy, and said "never" above a table listing its alerts. */
+  var lastOf = {}, hist = sc.alerts || [];
+  for (var h = 0; h < hist.length; h++){
+    var hr = hist[h];
+    if (hr && hr.rule && (!lastOf[hr.rule] || hr.at > lastOf[hr.rule])) lastOf[hr.rule] = hr.at;
+  }
   var rules = sc.rules || [], rb = '';
   for (var d = 0; d < rules.length; d++){
     var ru = rules[d];
+    var lastAt = ru.lastAlertAt && (!lastOf[ru.id] || ru.lastAlertAt > lastOf[ru.id]) ? ru.lastAlertAt : (lastOf[ru.id] || null);
     rb += '<tr><td class="name" title="' + esc(ru.title) + '">' + esc(ru.title) + '</td>'
       + '<td>' + (ru.firing ? '<span class="st bad">firing</span>' : '<span class="st good">quiet</span>') + '</td>'
       + '<td>' + fmt(ru.count) + ' / ' + fmt(ru.threshold) + '</td>'
       + '<td>' + fmt(ru.windowMin) + ' min' + (ru.perSource ? ', one address' : '') + '</td>'
-      + '<td>' + (ru.lastAlertAt ? esc(clockTime(ru.lastAlertAt)) : '<span class="dim">never</span>') + '</td></tr>';
+      + '<td>' + (lastAt ? esc(timeAgo(lastAt)) : '<span class="dim">not among the last ' + fmt(hist.length || 30) + ' alerts</span>') + '</td></tr>';
   }
   html += '<div class="card scroll" style="margin-top:10px"><table><thead><tr><th class="name">Rule</th><th>Now</th><th>Count / threshold</th><th>Window</th><th>Last alert</th></tr></thead><tbody>' + rb + '</tbody></table></div>';
   var al = sc.alerts || [];
@@ -3081,15 +3391,17 @@ function emailTab(){
   var html = '<h2 class="sec">Email</h2>';
   html += '<p class="lede">' + (bad ? '<b class="warn">' : '') + esc(em.summary) + (bad ? '</b>' : '') + '</p>';
   html += '<div class="grid">';
-  html += kpi('Provider', em.provider === 'resend' ? 'Resend' : 'console (log only)');
-  html += kpi('Sent', em.sent, 'since this process started', true);
-  html += kpi('Refused', em.failed, 'since this process started', true);
+  var real = em.provider === 'resend';
+  html += stat(real ? 'Resend' : 'Log only', '', 'Mail service', real ? 'messages go out' : 'nothing is delivered to anyone', '');
+  html += stat(em.sent, plural(em.sent, 'message', 'messages'), real ? 'Accepted by the mail service' : 'Written to the log, not sent', 'since the last deploy',
+    'Counted in memory, so it starts again from zero at each deploy. Accepted means the mail service took it, not that it reached an inbox.');
+  html += stat(em.failed, plural(em.failed, 'message', 'messages'), 'Did not go', 'since the last deploy', 'Refused by the mail service, or it could not be reached (a timeout counts).');
   html += '</div>';
   html += '<table class="tbl"><tbody>';
   html += '<tr><th>From</th><td>' + esc(em.from || '-') + (/(^|[<\\s"])(no[-_.]?reply|do[-_.]?not[-_.]?reply)@/i.test(em.from || '') ? ' <b>(no-reply: a spam signal)</b>' : '') + '</td></tr>';
   html += '<tr><th>Replies go to</th><td>' + esc(em.replyTo || em.from || '-') + '</td></tr>';
-  html += '<tr><th>Last delivered</th><td>' + esc(em.lastSentAt || 'never') + '</td></tr>';
-  html += '<tr><th>Last refusal</th><td>' + esc(em.lastErrorAt || 'none') + '</td></tr>';
+  html += '<tr><th>Last accepted</th><td>' + (em.lastSentAt ? esc(new Date(em.lastSentAt).toLocaleString()) : 'not since the last deploy') + '</td></tr>';
+  html += '<tr><th>Last one that did not go</th><td>' + (em.lastErrorAt ? esc(new Date(em.lastErrorAt).toLocaleString()) : 'none since the last deploy') + '</td></tr>';
   if (em.lastError) html += '<tr><th>What the provider said</th><td><code>' + esc(em.lastError) + '</code></td></tr>';
   html += '</tbody></table>';
   html += '<h2 class="sec">Send a test</h2>';

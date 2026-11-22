@@ -909,6 +909,7 @@ async function main(): Promise<void> {
     capture: capturePreview,
     title: () => tb.postTarget().title,
     publicDesignId: () => tb.postTarget().publicId,
+    account: (how: 'google' | 'email') => tb.accountFromPost(how),
     // A tifo the app drew gets "Paint it" beside "Post it"; one they painted
     // themselves, or the AI drew to their words, does not.
     get paint(): (() => void) | undefined {

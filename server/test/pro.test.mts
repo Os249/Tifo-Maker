@@ -225,6 +225,13 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   const offeredAgain = await repo.offerGift(userA, new Date(Date.now() + 9 * 86_400_000));
   assert.equal(offeredAgain.offeredAt, offered.offeredAt, `${label}: a second offer changes nothing`);
   assert.equal('claimBy' in offered, false, `${label}: an offer has no claim-by date`);
+  // Being eligible is not being shown the offer: the showing is marked apart, once.
+  assert.equal(offered.seenAt, null, `${label}: an offer starts unseen`);
+  assert.equal(await repo.giftSeen('00000000-0000-4000-8000-00000000dead', new Date()), false, `${label}: no offer, nothing to mark`);
+  assert.equal(await repo.giftSeen(userA, new Date(Date.now() - 5000)), true, `${label}: the offer was shown`);
+  const seenFirst = (await repo.gift(userA))?.seenAt;
+  assert.equal(await repo.giftSeen(userA, new Date()), false, `${label}: shown again changes nothing`);
+  assert.equal((await repo.gift(userA))?.seenAt, seenFirst, `${label}: the first showing is the one kept`);
   const accepts = await Promise.all(Array.from({ length: 6 }, () => repo.acceptGift(userA, new Date(), 7)));
   assert.equal(accepts.filter((a) => a.ok).length, 1, `${label}: six Accepts at once make one pass`);
   assert.equal((await repo.activePasses(userA, new Date())).filter((p) => p.plan === 'gift').length, 1, `${label}: one gift pass`);
@@ -260,6 +267,10 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   const st = await repo.stats(new Date());
   assert.equal(st.notify, 1);
   assert.equal(st.gifts.accepted, 2);
+  assert.equal(st.gifts.offered, 2, `${label}: two accounts were found eligible`);
+  assert.equal(st.gifts.seen, 2, `${label}: one marked as shown, and one that started it (so it was shown)`);
+  assert.equal(st.gifts.seenSince, seenFirst, `${label}: since when showings are recorded`);
+  assert.deepEqual(st.notifyVia, { price: 0, wontPay: 0 }, `${label}: nobody on the list has answered the price question yet`);
 
   // The price question: one answer per voter, replaced when they answer again;
   // a browser's answer becomes the account's; past the ceiling, nobody new.
@@ -292,6 +303,11 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   await repo.putPriceAnswer({ voter: mine, userId: userA, amount: 25, currency: 'USD', lang: 'en', comment: null, wontPay: false, source: 'editor', absorb: null, max: total });
   const listed = await repo.priceAnswers(5);
   assert.equal(listed.newest[0].amount, 25, `${label}: newest first`);
+  // The "tell me" list says how many are on it through the price question, and how many of those said no.
+  assert.deepEqual((await repo.stats(new Date())).notifyVia, { price: 1, wontPay: 0 }, `${label}: one account on the list has a price answer`);
+  await repo.putPriceAnswer({ voter: mine, userId: userA, amount: 0, currency: 'USD', lang: 'en', comment: null, wontPay: true, source: 'page', absorb: null, max: total });
+  assert.deepEqual((await repo.stats(new Date())).notifyVia, { price: 1, wontPay: 1 }, `${label}: and it is counted when that answer is "not for me"`);
+  await repo.putPriceAnswer({ voter: mine, userId: userA, amount: 25, currency: 'USD', lang: 'en', comment: null, wontPay: false, source: 'editor', absorb: null, max: total });
   assert.ok(listed.all.some((a) => a.amount === 25 && a.currency === 'USD' && a.account && !a.wontPay && a.source === 'editor'), `${label}: every answer is counted, with whether an account gave it and where`);
 }
 

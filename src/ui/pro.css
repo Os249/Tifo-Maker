@@ -338,3 +338,21 @@
 @media (pointer: coarse) { .pro-card-refund .pro-card-link { display: inline-flex; align-items: center; min-height: 44px; } }
 /* The same news on the account page: its title on a line of its own. */
 .pro-refunded b { display: block; margin-bottom: var(--sp-1); }
+
+/* ---- the gift's welcome: the one thing to try, and the email box (never ticked for anyone) ---- */
+.pro-try { margin: 0 0 var(--sp-4); padding: var(--sp-3); border-radius: var(--r-md); background: var(--pro-tint); border: 1px solid var(--pro-line); text-align: start; }
+.pro-try > b { display: block; font-size: var(--fs-sm); color: var(--pro-ink); }
+.pro-try > p { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--pro-text); }
+.pro-mail-ok { margin: 0 0 var(--sp-4); font-size: var(--fs-sm); line-height: 1.45; text-align: start; color: var(--pro-text); }
+.pro-mail-ok > input:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+@media (pointer: coarse) { .pro-mail-ok { min-height: 44px; } }
+/* The save offer's Google button: beside "Create a free account", quiet. */
+.account-offer .ao-google {
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-2); width: 100%; min-height: 40px;
+  margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-pill);
+  border: 1px solid var(--pro-hairline); background: transparent; color: var(--pro-text);
+  font: inherit; font-size: var(--fs-xs); font-weight: 700; cursor: pointer;
+}
+.account-offer .ao-google:hover { background: var(--pro-surface-2); }
+.account-offer .ao-google:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+.account-offer .ao-google[hidden] { display: none; }

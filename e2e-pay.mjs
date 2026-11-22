@@ -301,7 +301,7 @@ console.log('\n— /admin —');
   await p.fill('#p', ADMIN_PW);
   await p.click('#login-form button');
   await p.waitForSelector('#tabs .tab', { timeout: 30000 });
-  await p.click('.tab[data-tab="pro"]');
+  await p.click('.tab[data-tab="orders"]');
   const shown = await waitFor(p, () => /On, with TEST keys/.test(document.body.textContent) && !!document.querySelector('.order-refund'), null, 15000);
   check('/admin Pro tab: the switches and the order with a refund button', shown);
   if (shown) {

@@ -47,7 +47,10 @@ import { registerKitRoutes } from './kitRoutes';
 import type { EventRepository } from './eventRepo';
 import { registerEventRoutes } from './eventRoutes';
 import { cutoutConfigured } from './cutout';
-import { liveFor, proMode } from './proPlan';
+import { OFFER, autoGiftOn, giftMailsOn, liveFor, proMode } from './proPlan';
+import { GIFT_MAILS_PER_DAY, GiftMailService } from './proGift';
+import { giftEmail } from './proGiftMail';
+import type { GiftMailKind } from './proRepo';
 import { stadiumPlan } from './stadiumPlan';
 import { emailHealth, type EmailSender } from './email';
 import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
@@ -1280,6 +1283,19 @@ export async function buildApp(
     'cutout_used',     // a smart cut-out came back
     'export_sheet',    // the export sheet listed Pro items
     'export_free',     // ...and they exported without them
+    // The Pro funnel (22 Nov 2026): a Pro offer was seen, and Get Pro pressed, by where
+    // (src/ui/proWhere.ts; proRoutes.ts OFFER_PLACES keeps the same list).
+    'pro_offer_post', 'pro_offer_share', 'pro_offer_export', 'pro_offer_page', 'pro_offer_giftend', 'pro_offer_limit', 'pro_offer_account',
+    'pro_get_post', 'pro_get_share', 'pro_get_export', 'pro_get_page', 'pro_get_giftend', 'pro_get_limit', 'pro_get_account',
+    'pro_preview_post',   // saw their own tifo as the Pro version, on Post it
+    'monthly_bought',     // came back from paying for 30 days of Pro
+    'match_bought',       // came back from paying for a match pass
+    'gift_auto',          // the 7-day gift started by itself for them
+    'gift_welcome',       // ...and they saw the welcome
+    'gift_end_seen',      // saw the card that says the gift ended
+    'bought_after_gift',  // paid for Pro after their gift
+    'signup_offer_post',  // the account offer was shown on Post it or share
+    'signup_post',        // ...and they made an account from it
   ];
   const FUNNEL_SET = new Set(FUNNEL_STEPS);
 
@@ -1406,14 +1422,16 @@ export async function buildApp(
         social: { key: string; visits: number; visitors: number }[];
       } | null = null;
       let opened: { key: string; visits: number; visitors: number }[] = [];
+      let openedDaily: { day: string; visits: number }[] = [];
       if (options.traffic) {
         const t = await options.traffic.summary(days);
         // Their Arabic twins (/ar/t/:id, /ar/d/:id) are the same links (performance plan P3.3).
-        const shared = t.pages.filter((p) => /^(?:\/ar)?\/(d|t)\//.test(p.key));
+        // Counted over every tifo page. This used to be summed out of the site's
+        // 15 busiest paths, so it left out most tifos and could never pass 15.
         inbound = {
-          visits: shared.reduce((n, p) => n + p.visits, 0),
-          tifosOpened: new Set(shared.map((p) => p.key.replace(/^\/ar(?=\/)/, ''))).size,
-          pages: shared.slice(0, 10),
+          visits: t.tifoPages.visits,
+          tifosOpened: t.tifoPages.pages,
+          pages: t.tifoPages.top,
           // A floor, not a count: most messaging apps send no referrer at all,
           // so links passed round WhatsApp or Discord arrive looking direct.
           // Stored referrers are labels ("X / Twitter"), so they are matched as
@@ -1421,6 +1439,7 @@ export async function buildApp(
           social: t.referrers.filter((r) => isSocialReferrer(r.key)).slice(0, 10),
         };
         opened = t.shared;
+        openedDaily = t.sharedDaily;
       }
       // "Links opened" used to count design_shares rows of kind 'open', which
       // nothing ever wrote, so it read 0 forever. The share buttons now tag
@@ -1435,6 +1454,15 @@ export async function buildApp(
         }
         summary.platforms = [...byKey.values()].sort((a, b) => b.shares - a.shares || b.opens - a.opens);
         summary.opens = opened.reduce((n, o) => n + o.visits, 0);
+        // The per-day line too: it still read the 'open' rows nothing writes, so the
+        // chart showed no opens beside a card that counted them.
+        const byDay = new Map(summary.daily.map((d) => [d.day, { ...d, opens: 0 }]));
+        for (const d of openedDaily) {
+          const row = byDay.get(d.day) ?? { day: d.day, shares: 0, opens: 0 };
+          row.opens = d.visits;
+          byDay.set(d.day, row);
+        }
+        summary.daily = [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
       }
       return reply.send({ ...summary, inbound });
     });
@@ -1541,6 +1569,17 @@ export async function buildApp(
       const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
       const [items, counts] = await Promise.all([feedback.list(limit), feedback.counts()]);
       return reply.send({ items, counts });
+    });
+
+    // Dealt with, or not after all: the Feedback count on /admin is the reports still open.
+    app.post('/api/admin/feedback/:id/handled', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const { id } = req.params as { id: string };
+      if (!/^[0-9a-f-]{8,64}$/i.test(id)) return reply.code(404).send({ error: 'report not found' });
+      const handled = (req.body as { handled?: unknown } | null)?.handled !== false;
+      const ok = await feedback.setHandled(id, handled).catch(() => false);
+      if (!ok) return reply.code(404).send({ error: 'report not found' });
+      return reply.send({ ok: true, handled });
     });
   }
 
@@ -1689,6 +1728,48 @@ export async function buildApp(
     )
     : null;
   payRef = payService;
+  // The automatic gift's emails (proGift.ts). Nothing is sent unless PRO_GIFT_MAILS and PRO_AUTO_GIFT are both on.
+  const giftMail = (kind: GiftMailKind, to: string, stopToken: string, endsAt: string, offersOk: boolean, now: Date) => {
+    const m = payService?.match() ?? null;
+    // A price only for a fan who asked for Pro's offers by email, and only where Pro can really be bought.
+    const selling = !!payService?.on() && paymentsPublic();
+    return giftEmail({
+      kind, to, base: payBase, contact: PAY_CONTACT, days: OFFER.gift.days, endsAt,
+      stopUrl: `${payBase}/pro?nomail=${encodeURIComponent(stopToken)}`,
+      stopPost: `${payBase}/api/pro/mail/stop?t=${encodeURIComponent(stopToken)}`,
+      offer: kind === 'end' && offersOk && selling
+        ? { monthly: priceAt(now).halalas, monthlyDays: OFFER.monthly.days, match: m?.on ? { price: m.halalas, hours: m.days * 24 } : null, autoRenew: payService?.renewOn() ?? false }
+        : null,
+    });
+  };
+  const giftMails = proService
+    ? new GiftMailService(proService.repo, {
+      now: () => proService.now(),
+      canSend: options.launchMailLive,
+      takeBudget: () => launchBudget.take('gift', { cooldownMs: 0, perDay: GIFT_MAILS_PER_DAY }) === 0,
+      giveBudget: () => launchBudget.refund('gift'),
+      gapMs: options.launchGapMs,
+      send: options.emailSender ? (msg) => options.emailSender!.send(msg) : undefined,
+      accountOf: async (userId) => {
+        const u = await auth.getUserById(userId);
+        return u ? { email: u.email, emailVerified: !!u.emailVerifiedAt } : null;
+      },
+      holdsPro: async (userId) => (await proService.plan(userId)).plan === 'monthly',
+      compose: (kind, g, to) => giftMail(kind, to, g.stopToken, g.endsAt, g.offersOk, proService.now()),
+    })
+    : null;
+  if (giftMails && options.renewalsTimer && options.launchTimer !== false) {
+    // A little after boot, then every ten minutes. Switched off it returns at once without touching the database.
+    const run = (): void => void giftMails.tick().catch((e) => console.error(`[tifo] gift: the email job failed (${(e as Error).message})`));
+    const first = setTimeout(run, 40_000);
+    const every = setInterval(run, 10 * 60_000);
+    first.unref();
+    every.unref();
+    app.addHook('onClose', async () => {
+      clearTimeout(first);
+      clearInterval(every);
+    });
+  }
   if (launchService && options.renewalsTimer && options.launchTimer !== false) {
     // The launch job: a little after boot, then every minute. Until Pro is on sale for real it returns at
     // once without touching the database; after the founders have their email it has nothing to do.
@@ -1734,6 +1815,10 @@ export async function buildApp(
           refundNotice: notice ? { order: notice.id, amount: (notice.refunded || notice.amount) / 100, at: notice.refundedAt ?? notice.createdAt, test: notice.testMode } : null,
         };
       },
+      match: () => payService?.match() ?? { on: false, halalas: 0, days: 0 },
+      paidOrders: async (since) => (options.payments ? options.payments.paidOrders(since, 5000) : []),
+      funnel: options.events ? (steps, days) => options.events!.funnel(steps, days) : undefined,
+      useConfig: options.rateLimit ? { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } } : undefined,
       pro: proService,
       userOf,
       requireUser,
@@ -1769,8 +1854,42 @@ export async function buildApp(
           return founderMail('founder@example.com', 'preview-preview-preview-preview', withOffer ? founderDeadline(now).toISOString() : null, now);
         },
         stopConfig: options.rateLimit ? { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } } : undefined,
+        // The same link in a gift email stops the same kind of email.
+        alsoStop: (t) => giftMails?.stopMail(t) ?? Promise.resolve(false),
+      });
+    } else if (giftMails) {
+      // No launch service (no payments store): the gift emails' stop link still has somewhere to go.
+      app.post('/api/pro/mail/stop', options.rateLimit ? { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } } : {}, async (req, reply) => {
+        void reply.header('cache-control', 'no-store');
+        const b = req.body as { t?: unknown } | null;
+        const q = req.query as { t?: unknown };
+        const t = typeof b?.t === 'string' ? b.t : typeof q.t === 'string' ? q.t : '';
+        if (!(await giftMails.stopMail(t))) return reply.code(404).send({ error: 'not found' });
+        return { ok: true };
       });
     }
+    // /admin: each of the gift's emails as it would go out now, alone on a page that can run nothing.
+    app.get('/api/admin/pro/gift/email', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const q = req.query as { kind?: string; offer?: string };
+      const kind: GiftMailKind = q.kind === 'soon' || q.kind === 'end' ? q.kind : 'start';
+      const now = proService.now();
+      const ends = new Date(now.getTime() + (kind === 'start' ? OFFER.gift.days * 24 : kind === 'soon' ? 24 : 0) * 3600_000).toISOString();
+      const mail = giftMail(kind, 'fan@example.com', 'preview-preview-preview-preview', ends, q.offer === '1', now);
+      // /admin asks for it as data (it signs its requests with a header a plain link cannot carry) and frames the HTML itself.
+      if ((q as { json?: string }).json === '1') return reply.header('cache-control', 'no-store').send({ subject: mail.subject, html: mail.html, text: mail.text ?? '' });
+      return reply
+        .header('cache-control', 'no-store')
+        .header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'")
+        .header('x-robots-tag', 'noindex')
+        .type('text/html; charset=utf-8')
+        .send(mail.html);
+    });
+    app.get('/api/admin/pro/gift/mails', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      void reply.header('cache-control', 'no-store');
+      return { on: giftMailsOn(), autoGift: autoGiftOn(), mailLive: options.launchMailLive?.() ?? !!options.emailSender, perDay: GIFT_MAILS_PER_DAY };
+    });
     if (options.kits) {
       registerKitRoutes(app, {
         kits: options.kits,
@@ -5621,7 +5740,12 @@ export async function buildApp(
       const legalRaw = readFileSync(join(staticDir, 'legal.html'), 'utf8');
       const made = (raw: string, launching: boolean): string => {
         const p = priceAt(launching && until ? new Date(until.getTime() - 1) : new Date(8.64e15));
-        return payLegal(raw, onSale, renewTerms, { launch: launching && p.launch && p.until ? { price: p.halalas, regular: p.regular, until: p.until } : null, founders: founderTerms });
+        const mp = payService?.match() ?? null;
+        return payLegal(raw, onSale, renewTerms, {
+          launch: launching && p.launch && p.until ? { price: p.halalas, regular: p.regular, until: p.until } : null, founders: founderTerms,
+          match: mp?.on ? { price: mp.halalas, hours: mp.days * 24 } : null,
+          gift: proMode() === 'on' && autoGiftOn() ? { days: OFFER.gift.days, mails: giftMailsOn() } : null,
+        });
       };
       for (const [lang, raw] of pagesOf('legal.html', legalRaw, '/legal')) {
         const shell = (launching: boolean) => htmlShell(routeIn('/legal', lang), made(raw, launching), {

@@ -2013,8 +2013,10 @@ export interface Allowance {
 export type GiftState =
   | { state: 'none' }
   | { state: 'offered'; days: number }
-  | { state: 'active'; endsAt: string; days: number }
-  | { state: 'used'; endedAt: string | null };
+  /** `auto`: it started by itself; `welcome`: its holder has not been shown that Pro is on; `offersOk`: they asked for Pro's offers by email. */
+  | { state: 'active'; endsAt: string; days: number; auto?: true; welcome?: true; offersOk?: boolean }
+  /** `endCard`: the card that says it ended has not been shown; `made`: what they did with Pro while it ran. */
+  | { state: 'used'; endedAt: string | null; auto?: true; endCard?: true; made?: { items: Record<string, number>; ai: number } };
 
 export type PlanLimits = Record<AllowanceKind, { period: 'day' | 'week' | 'month'; limit: number }[]>;
 
@@ -2041,6 +2043,12 @@ export interface ProOffer {
    * licence number to print; 'plain' never shows a crossed-out price.
    */
   launch?: { regular: number; until: string; display: 'plain' | 'strike'; licence?: string };
+  /** The match pass, while it is sold to this visitor: its price, and its length in days and in hours. */
+  match?: { price: number; days: number; hours: number };
+  /** Pro's versions and the account offer show on Post it and share (server: PRO_POST_OFFERS). */
+  post?: boolean;
+  /** A new account with a verified email gets the 7 days by itself (server: PRO_AUTO_GIFT). */
+  autoGift?: boolean;
 }
 
 /**
@@ -2114,6 +2122,53 @@ export function forgetPro(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('tifo:pro'));
 }
 
+/**
+ * The gift offer was shown on this page (the card on My projects, the gift
+ * sheet). Sent once per page load; the server keeps the first time only. It
+ * changes nothing for the fan: it is how /admin knows who saw the offer.
+ */
+let giftSeenSent = false;
+export function markGiftSeen(): void {
+  if (giftSeenSent) return;
+  giftSeenSent = true;
+  // The answer is read to its end: a response left unread keeps the request open.
+  void fetch(`${API}/pro/gift/seen`, { method: 'POST', headers: authHeaders(true), body: '{}' })
+    .then((res) => res.text())
+    .catch(() => {
+      giftSeenSent = false;
+    });
+}
+
+/** A small POST to one of the gift's routes; the answer is read to its end and thrown away. Never throws. */
+function giftPost(path: string, body: unknown): Promise<boolean> {
+  return fetch(`${API}/pro/gift/${path}`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) })
+    .then(async (res) => {
+      await res.text().catch(() => '');
+      return res.ok;
+    })
+    .catch(() => false);
+}
+
+/**
+ * The welcome ("Pro is on for 7 days") was shown. `offers` is the box on it:
+ * whether the fan wants Pro's news and offers by email (only ever their own tick).
+ */
+export async function giftWelcomed(offers: boolean): Promise<void> {
+  await giftPost('welcomed', { offers });
+  proMemo = null;
+}
+
+/** The card that says the gift ended was shown: once per gift. */
+export async function giftEndSeen(): Promise<void> {
+  await giftPost('end-seen', {});
+  proMemo = null;
+}
+
+/** An export carrying these Pro items left the site while the gift ran (ui/proUse.ts): kept for the end card. */
+export function giftUsed(items: string[]): void {
+  if (items.length) void giftPost('used', { items });
+}
+
 export async function acceptProGift(): Promise<{ ok: true; endsAt: string } | { ok: false; reason: string; status: number }> {
   try {
     const res = await fetch(`${API}/pro/gift/accept`, { method: 'POST', headers: authHeaders(true), body: '{}' });
@@ -2155,6 +2210,9 @@ export interface CheckoutForm {
   renew: { price: number; days: number; nextAt: string; methods: string[]; mada: boolean } | null;
   /** The founders offer on this order: paid by `until`, it buys `total` days. */
   founder?: { until: string; bonusDays: number; total: number } | null;
+  /** What the order buys (30 days of Pro, or the match pass) and for how many days. */
+  product?: 'monthly' | 'match';
+  days?: number;
 }
 
 export type CheckoutStart =
@@ -2162,9 +2220,11 @@ export type CheckoutStart =
   | { ok: true; form: CheckoutForm; order: string }
   | { ok: false; reason: CheckoutRefusal; endsAt?: string };
 
-export async function startCheckout(lang: 'en' | 'ar'): Promise<CheckoutStart> {
+export async function startCheckout(lang: 'en' | 'ar', what: { product?: 'monthly' | 'match'; src?: string | null } = {}): Promise<CheckoutStart> {
   try {
-    const res = await fetch(`${API}/pro/pay/checkout`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ lang }) });
+    // The product is named here; its price and its length are the server's. `src` is where the offer was seen, for /admin's counts.
+    const body = { lang, ...(what.product === 'match' ? { product: 'match' } : {}), ...(what.src ? { src: what.src } : {}) };
+    const res = await fetch(`${API}/pro/pay/checkout`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) });
     const data = (await res.json().catch(() => null)) as { url?: string; form?: CheckoutForm; order?: string; reason?: CheckoutRefusal; endsAt?: string } | null;
     // The address is Moyasar's page as our server got it from Moyasar's API; never anything but https.
     if (res.ok && data?.url && data.order && /^https:\/\//i.test(data.url)) return { ok: true, url: data.url, order: data.order };
@@ -2199,6 +2259,8 @@ export interface OrderView {
   /** The founders bonus this order's pass was given, with the days it bought. */
   bonusDays?: number;
   days?: number;
+  /** What it bought: 30 days of Pro, or the match pass. */
+  product?: 'monthly' | 'match';
 }
 
 /** "Stop these emails", from the founders email's link. True when it worked. */
@@ -2222,7 +2284,13 @@ export async function fetchOrder(id: string): Promise<OrderView | null> {
       return null;
     }
     const data = (await res.json()) as Partial<OrderView>;
-    return data.status ? { status: data.status, endsAt: data.endsAt ?? null, why: data.why ?? null, kept: data.kept === true, renews: data.renews === true } : null;
+    if (!data.status) return null;
+    return {
+      status: data.status, endsAt: data.endsAt ?? null, why: data.why ?? null, kept: data.kept === true, renews: data.renews === true,
+      // The founders bonus and the product ride along when the server says them: the page's "paid" words follow them.
+      ...(typeof data.bonusDays === 'number' && typeof data.days === 'number' ? { bonusDays: data.bonusDays, days: data.days } : {}),
+      product: data.product === 'match' ? 'match' : 'monthly',
+    };
   } catch {
     return null;
   }
@@ -2315,6 +2383,8 @@ export interface PurchaseView {
   status: 'paid' | 'refunded' | 'failed' | 'checking' | 'pending' | 'expired';
   amount: number;
   days: number;
+  /** What it bought: 30 days of Pro, or the match pass. */
+  product?: 'monthly' | 'match';
   /** Extra days the order's pass was given: the founders bonus. */
   bonusDays?: number;
   /** 'creditcard', 'applepay', 'stcpay', ... and the card's scheme ('mada', 'visa', 'master') when known. */

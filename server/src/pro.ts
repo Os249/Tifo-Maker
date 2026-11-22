@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PAID_PLANS, PLAN_RANK, PLAN_WINDOWS, cycleOf, liveFor, periodEnd, periodKey,
+  ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PAID_PLANS, PLAN_RANK, PLAN_WINDOWS, autoGiftOn, cycleOf, liveFor, periodEnd, periodKey,
   type AllowanceKind, type PassPlan, type PlanKind, type Window,
 } from './proPlan';
 import type { ProGift, ProPass, ProRepository } from './proRepo';
@@ -95,12 +95,34 @@ export interface Ticket {
   n: number;
 }
 
-/** The gift never expires unclaimed: offered stays offered until its holder starts it. */
+/**
+ * The gift never expires unclaimed: offered stays offered until its holder starts it.
+ *
+ * The automatic gift (22 Nov 2026, PRO_AUTO_GIFT) adds, for a gift that
+ * started by itself: `auto`; `welcome` while its holder has not been shown
+ * that it is on; and once it has ended, `endCard` until its holder has been
+ * shown the end card, with `made`: what they did with Pro during it.
+ */
 export type GiftState =
   | { state: 'none' }
   | { state: 'offered'; days: number }
-  | { state: 'active'; endsAt: string; days: number }
-  | { state: 'used'; endedAt: string | null };
+  | { state: 'active'; endsAt: string; days: number; auto?: true; welcome?: true; offersOk?: boolean }
+  | { state: 'used'; endedAt: string | null; auto?: true; endCard?: true; made?: GiftMade };
+
+/** What a gift's holder did with Pro while it ran: the Pro items their exports carried, and the allowances they used. */
+export interface GiftMade {
+  /** Pro items that left the site in an export, by the item's own key (src/ui/proUse.ts), with how many times. */
+  items: Record<string, number>;
+  /** How many AI results (designs, reviews, cut-outs) the gift's own allowance gave. */
+  ai: number;
+}
+
+/** The end card is offered for this long after an automatic gift ends. */
+export const GIFT_END_CARD_DAYS = 14;
+/** Pro items a gift remembers at most (they are a handful: this only bounds what a browser can send). */
+export const GIFT_USE_KEYS = 12;
+/** An item's key as the browser names it: one of the interface's own string keys. */
+const USE_KEY = /^[a-z][A-Za-z0-9.]{1,39}$/;
 
 export interface ProServiceOptions {
   env?: NodeJS.ProcessEnv;
@@ -213,6 +235,10 @@ export class ProService {
    * an account that has never held a paid or granted pass, and at least one
    * saved design. Refused when the throwaway list could not be read: one
    * person collecting a gift per throwaway address is the abuse this guards.
+   *
+   * With the automatic gift on (PRO_AUTO_GIFT), the saved design is not asked
+   * for: that rule shut out all but 16 of 496 accounts (22 Nov 2026). The
+   * verified email, the throwaway list and "never held Pro" all stay.
    */
   async giftEligible(acct: ProAccount): Promise<boolean> {
     if (!acct.emailVerified || !acct.email) return false;
@@ -220,7 +246,13 @@ export class ProService {
     if (throwaway !== false) return false;
     const passes = await this.repo.allPasses(acct.id);
     if (passes.some((p) => p.source !== 'gift')) return false;
+    if (this.autoGift()) return true;
     return (await this.opts.savedDesigns(acct.id).catch(() => 0)) > 0;
+  }
+
+  /** The 7-day gift starts by itself (PRO_AUTO_GIFT=on). */
+  autoGift(): boolean {
+    return autoGiftOn(this.env);
   }
 
   /**
@@ -228,7 +260,7 @@ export class ProService {
    * Only for accounts the new rules apply to. An offer never lapses: it waits
    * until its holder starts it, however long that is.
    */
-  async giftFor(acct: ProAccount): Promise<GiftState> {
+  async giftFor(acct: ProAccount, lang: 'en' | 'ar' | null = null): Promise<GiftState> {
     if (!this.live(acct.username)) return { state: 'none' };
     const now = this.now();
     let g: ProGift | null = await this.repo.gift(acct.id);
@@ -236,12 +268,76 @@ export class ProService {
       if (!(await this.giftEligible(acct))) return { state: 'none' };
       g = await this.repo.offerGift(acct.id, now);
     }
-    if (!g.acceptedAt) return { state: 'offered', days: OFFER.gift.days };
+    if (!g.acceptedAt) {
+      // The automatic gift: it starts here, the first time its holder is on the site with a verified email
+      // (a new account: as soon as the email is verified; an old one: its next visit, never unseen). An
+      // offer made before the switch (the old Accept card) starts the same way, if its holder still qualifies.
+      if (!this.autoGift() || !(await this.giftEligible(acct))) return { state: 'offered', days: OFFER.gift.days };
+      const r = await this.repo.acceptGift(acct.id, now, OFFER.gift.days, { auto: true, lang });
+      if (r.ok) console.log('[tifo] pro: a 7-day gift started by itself');
+      g = (await this.repo.gift(acct.id)) ?? g;
+      if (!g.acceptedAt) return { state: 'offered', days: OFFER.gift.days };
+    }
     const pass = g.passId ? (await this.repo.allPasses(acct.id)).find((p) => p.id === g!.passId) ?? null : null;
     if (pass && !pass.revokedAt && Date.parse(pass.endsAt) > now.getTime()) {
-      return { state: 'active', endsAt: pass.endsAt, days: OFFER.gift.days };
+      return {
+        state: 'active', endsAt: pass.endsAt, days: OFFER.gift.days,
+        ...(g.auto ? { auto: true as const, offersOk: !!g.offersOkAt } : {}), ...(g.auto && !g.welcomeAt ? { welcome: true as const } : {}),
+      };
     }
-    return { state: 'used', endedAt: pass ? (pass.revokedAt ?? pass.endsAt) : null };
+    const endedAt = pass ? (pass.revokedAt ?? pass.endsAt) : null;
+    const out: GiftState = { state: 'used', endedAt, ...(g.auto ? { auto: true as const } : {}) };
+    // The end card: once, for a gift that started by itself and ran to its end in the last fortnight.
+    if (g.auto && !g.endSeenAt && pass && !pass.revokedAt && endedAt && now.getTime() - Date.parse(endedAt) < GIFT_END_CARD_DAYS * 24 * 3600_000) {
+      out.endCard = true;
+      out.made = { items: g.uses, ai: await this.repo.passUse(acct.id, pass.id).catch(() => 0) };
+    }
+    return out;
+  }
+
+  /** The welcome ("Pro is on for 7 days") was shown: it is not shown again, on this device or another. */
+  async giftWelcomed(acct: ProAccount): Promise<boolean> {
+    if (!this.live(acct.username)) return false;
+    return this.repo.giftMark(acct.id, 'welcome', this.now());
+  }
+
+  /** "Email me Pro's news and offers", ticked or unticked on the welcome or the account page. Never set for anyone. */
+  async giftOffersOk(acct: ProAccount, ok: boolean): Promise<boolean> {
+    if (!this.live(acct.username)) return false;
+    return this.repo.giftOffersOk(acct.id, ok, this.now());
+  }
+
+  /** The end card was shown: once per gift. */
+  async giftEndSeen(acct: ProAccount): Promise<boolean> {
+    if (!this.live(acct.username)) return false;
+    return this.repo.giftMark(acct.id, 'end', this.now());
+  }
+
+  /**
+   * An export carrying these Pro items left the site while the gift ran: kept
+   * for the end card ("what you made with Pro"). The browser's word, and it
+   * gives nothing: it is only ever shown back to the same account. Counted
+   * only while that account's gift is the Pro it holds.
+   */
+  async giftUsed(acct: ProAccount, keys: unknown): Promise<boolean> {
+    if (!this.live(acct.username) || !Array.isArray(keys)) return false;
+    const clean = [...new Set(keys.filter((k): k is string => typeof k === 'string' && USE_KEY.test(k)))].slice(0, GIFT_USE_KEYS);
+    if (!clean.length) return false;
+    const { plan, pass } = await this.plan(acct.id);
+    if (plan !== 'gift' || !pass) return false;
+    return this.repo.giftUse(acct.id, clean, GIFT_USE_KEYS);
+  }
+
+  /**
+   * The offer was put in front of its holder (the card on My projects, or the
+   * gift sheet). Only an offer that exists and is waiting is marked; it makes
+   * no offer and changes nothing the account can do.
+   */
+  async giftShown(acct: ProAccount): Promise<boolean> {
+    if (!this.live(acct.username)) return false;
+    const g = await this.repo.gift(acct.id);
+    if (!g || g.acceptedAt || g.seenAt) return false;
+    return this.repo.giftSeen(acct.id, this.now());
   }
 
   /** Accept the gift. Every rule is checked again here; the browser decides nothing. */

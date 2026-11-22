@@ -638,6 +638,10 @@ const ADMIN_ACTIONS: Record<string, (req: FastifyRequest) => { action: string; t
   'POST /api/auth/register': (req) => ({ action: 'claimed an admin name at sign-up', target: bodyName(req), detail: null }),
   'POST /api/account/username': (req) => ({ action: 'claimed an admin name', target: bodyName(req), detail: null }),
   'POST /api/admin/reports/:id/dismiss': (req) => ({ action: 'dismissed a report', target: param(req, 'id'), detail: null }),
+  'POST /api/admin/feedback/:id/handled': (req) => ({
+    action: (req.body as { handled?: unknown } | null)?.handled === false ? 'reopened a feedback report' : 'marked a feedback report handled',
+    target: param(req, 'id'), detail: null,
+  }),
   'POST /api/admin/designs/:id/takedown': (req) => ({ action: 'took down a design', target: param(req, 'id'), detail: null }),
   'POST /api/admin/photos/:photoId/verify': (req) => ({
     action: (req.body as { verified?: unknown } | null)?.verified === false ? 'marked a photo unverified' : 'verified a photo',

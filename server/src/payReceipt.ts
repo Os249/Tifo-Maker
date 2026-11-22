@@ -62,12 +62,18 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
   const bonus = order.bonusDays > 0 ? order.bonusDays : 0;
   const bonusAr = bonus ? ` + ${bonus} يوم هدية المؤسسين (المجموع ${order.days + bonus} يوم)` : '';
   const bonusEn = bonus ? ` + ${bonus} founder days free (${order.days + bonus} days in all)` : '';
-  const itemAr = rn
-    ? `المنتج: تيفو ميكر برو، ${order.days} يوم${bonusAr}${renewal ? ' (تجديد تلقائي)' : ''}`
-    : `المنتج: تيفو ميكر برو، ${order.days} يوم${bonusAr} (دفعة وحدة، بدون تجديد تلقائي)`;
-  const itemEn = rn
-    ? `Item: TifoMaker Pro, ${order.days} days${bonusEn}${renewal ? ' (automatic renewal)' : ''}`
-    : `Item: TifoMaker Pro, ${order.days} days${bonusEn} (one payment, no auto-renewal)`;
+  // The match pass (22 Nov 2026): the same Pro for a few days, said in hours as the page said it. It never renews.
+  const match = order.product === 'match';
+  const itemAr = match
+    ? `المنتج: تيفو ميكر برو، باقة المباراة ${order.days * 24} ساعة (دفعة وحدة، وما تتجدد)`
+    : rn
+      ? `المنتج: تيفو ميكر برو، ${order.days} يوم${bonusAr}${renewal ? ' (تجديد تلقائي)' : ''}`
+      : `المنتج: تيفو ميكر برو، ${order.days} يوم${bonusAr} (دفعة وحدة، بدون تجديد تلقائي)`;
+  const itemEn = match
+    ? `Item: TifoMaker Pro match pass, ${order.days * 24} hours (one payment, never renewed)`
+    : rn
+      ? `Item: TifoMaker Pro, ${order.days} days${bonusEn}${renewal ? ' (automatic renewal)' : ''}`
+      : `Item: TifoMaker Pro, ${order.days} days${bonusEn} (one payment, no auto-renewal)`;
   // What each renewal charges: the regular price the fan agreed to, which is not always what this order cost.
   const next = sar(rn?.amount ?? order.amount);
   const renewAr = rn
@@ -86,7 +92,7 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
     para(`تاريخ الدفع: ${when(paidAt, 'ar')} (بتوقيت الرياض)`) +
     (r.endsAt ? para(`برو شغّال لين: ${when(r.endsAt, 'ar')}`) : '') +
     para(`رقم المرجع: ${ref}`) +
-    (refunded ? para(`هذا الطلب تم استرداده يوم ${dayOf(order.refundedAt ?? paidAt, 'ar')}، وشهر برو حقه انتهى.`) : renewAr) +
+    (refunded ? para(`هذا الطلب تم استرداده يوم ${dayOf(order.refundedAt ?? paidAt, 'ar')}، وبرو حقه انتهى.`) : renewAr) +
     (refunded ? '' : smallPrint(`تقدر تطلب استرداد كامل المبلغ خلال ${REFUND_DAYS} أيام من الدفع إذا ما استخدمت برو: من صفحة حسابك، تحت «برو ومشترياتك»، اضغط «اطلب استرداد» (${account})، أو رد على هذي الرسالة أو راسلنا على ${r.contact}.`));
   const en =
     (test ? para('This is a test receipt: no real money was taken.') : '') +
@@ -96,7 +102,7 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
     para(`Paid: ${when(paidAt, 'en')} (Riyadh time)`) +
     (r.endsAt ? para(`Pro runs until: ${when(r.endsAt, 'en')}`) : '') +
     para(`Reference: ${ref}`) +
-    (refunded ? para(`This order was refunded on ${dayOf(order.refundedAt ?? paidAt, 'en')}, and its month of Pro has ended.`) : renewEn) +
+    (refunded ? para(`This order was refunded on ${dayOf(order.refundedAt ?? paidAt, 'en')}, and its Pro has ended.`) : renewEn) +
     (refunded ? '' : smallPrint(`You can ask for a full refund within ${REFUND_DAYS} days of paying if you haven't used Pro: on your account page, under "Pro and purchases", press "Request a refund" (${account}), or reply to this email or write to ${r.contact}.`));
   return {
     to: r.to,
@@ -104,8 +110,9 @@ export function receiptEmail(r: ReceiptInput): EmailMessage {
     html: layoutEmail({ title: subject, siteUrl: r.base, blocks: [{ lang: 'ar', html: ar }, { lang: 'en', html: en }] }),
     text:
       (test ? 'TEST: no real money was taken.\n\n' : '') +
-      `تيفو ميكر برو، ${order.days} يوم: ${sar(order.amount)} ريال\nالمرجع: ${ref}\n${account}\n\n` +
-      `TifoMaker Pro, ${order.days} days${bonusEn}: SAR ${sar(order.amount)}\nPaid: ${when(paidAt, 'en')} (Riyadh time)\n` +
+      // The month's lines are as they always were; a match pass is named as one, in hours.
+      `${match ? `تيفو ميكر برو، باقة المباراة ${order.days * 24} ساعة` : `تيفو ميكر برو، ${order.days} يوم`}: ${sar(order.amount)} ريال\nالمرجع: ${ref}\n${account}\n\n` +
+      `${match ? `TifoMaker Pro match pass, ${order.days * 24} hours (one payment, never renewed)` : `TifoMaker Pro, ${order.days} days${bonusEn}`}: SAR ${sar(order.amount)}\nPaid: ${when(paidAt, 'en')} (Riyadh time)\n` +
       (r.endsAt ? `Pro runs until: ${when(r.endsAt, 'en')}\n` : '') +
       `Reference: ${ref}\n` +
       (refunded ? `Refunded on ${dayOf(order.refundedAt ?? paidAt, 'en')}.\n` : `Refund within ${REFUND_DAYS} days if unused: ask on your account page (${account}) or write to ${r.contact}\n`) +

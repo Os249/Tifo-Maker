@@ -433,7 +433,7 @@ console.log('\n— someone outside the preview, and /admin —');
   await p.fill('#p', ADMIN_PW);
   await p.click('#login-form button');
   await p.waitForSelector('#tabs .tab', { timeout: 30000 });
-  await p.click('.tab[data-tab="pro"]');
+  await p.click('.tab[data-tab="orders"]');
   check('/admin Pro tab: how payments are set up, and the auto-renew table', await waitFor(p, () => /the payment form on \/pro \(creditcard, applepay\)/.test(document.body.textContent) && /auto-renew is ON \(mada excluded\)/.test(document.body.textContent) && /Auto-renew/.test(document.body.textContent) && /@pay_keep/.test(document.querySelector('.sub-off')?.closest('table')?.textContent ?? document.body.textContent), null, 15000));
   await p.evaluate(() => [...document.querySelectorAll('h2.sec')].find((h) => /Auto-renew/.test(h.textContent))?.scrollIntoView());
   await shot(p, 'admin-renew');

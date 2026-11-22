@@ -9,10 +9,11 @@
  * and which plan.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, UNLISTED, proMode, previewUsers, type AllowanceKind, type Window } from './proPlan';
+import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, UNLISTED, autoGiftOn, giftMailsOn, matchPass, monthlyPriceInvalid, monthlyPriceSetting, postOffersOn, proMode, previewUsers, type AllowanceKind, type MatchPass, type Window } from './proPlan';
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
 import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarizeAll } from './proPrice';
 import type { PriceAnswer } from './proRepo';
+import type { PaidOrder } from './payRepo';
 import { priceAt, type FounderView, type PriceNow } from './proLaunch';
 import type { UserRow } from './repo';
 
@@ -28,6 +29,8 @@ export interface ProRouteDeps {
   routeConfig?: object;
   /** The price question's own pace (POST /api/pro/price), tighter than the other routes'. */
   priceConfig?: object;
+  /** The pace of "an export used these Pro items" (POST /api/pro/gift/used): one per export. */
+  useConfig?: object;
   /**
    * Whether this account can buy Pro now (payments.ts paymentsOpenFor, and a
    * payment service to take the order). Absent: nobody can, as before.
@@ -55,7 +58,16 @@ export interface ProRouteDeps {
    * that a refund ended Pro. Null, or nothing in it, for everyone else.
    */
   payInfo?: (userId: string) => Promise<{ purchases: boolean; refundNotice: { order: string; amount: number; at: string; test: boolean } | null } | null>;
+  /** The match pass as it is sold now (payments.ts match()). Absent: it is not sold. */
+  match?: () => MatchPass;
+  /** Real purchases paid since a day, for /admin's gift and funnel counts (payRepo.paidOrders). Absent: none. */
+  paidOrders?: (since: Date) => Promise<PaidOrder[]>;
+  /** How many sessions reached each of these funnel steps in the last `days` (the consent-gated events). Absent: none. */
+  funnel?: (steps: string[], days: number) => Promise<{ name: string; sessions: number }[]>;
 }
+
+/** Where a Pro offer can be seen: the funnel's events and an order's `src` use these names (src/ui/proWhere.ts). */
+export const OFFER_PLACES = ['post', 'share', 'export', 'page', 'giftend', 'limit', 'account'] as const;
 
 const acctOf = (u: UserRow): ProAccount => ({ id: u.id, username: u.username, email: u.email, emailVerified: !!u.emailVerifiedAt });
 
@@ -94,8 +106,14 @@ const ADMIN_PRICE_ROWS = 300;
 const ADMIN_MEMBER_ROWS = 2000;
 
 /** The parts of the offer the Pro page shows: Free against Pro, one price, and whether this visitor can buy it. */
-function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false) {
+function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false, match: MatchPass | null = null) {
   return {
+    // The match pass, where it is sold and can be bought: its price, its length, and that length in hours as the page says it.
+    ...(paymentsOpen && match?.on ? { match: { price: match.halalas / 100, days: match.days, hours: match.days * 24 } } : {}),
+    // Pro's versions and the account offer show on Post it and share (PRO_POST_OFFERS).
+    ...(postOffersOn() ? { post: true } : {}),
+    // The gift starts by itself for a new account with a verified email (PRO_AUTO_GIFT): the account offer may say so.
+    ...(autoGiftOn() ? { autoGift: true } : {}),
     // Only said where Pro can be bought: the page's words follow them.
     ...(paymentsOpen && checkout === 'form' ? { checkout } : {}),
     // What every renewal costs: the regular price, whatever the first month costs.
@@ -120,6 +138,12 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
   const cfg = deps.routeConfig ?? {};
   const canBuy = (username: string | null): boolean => deps.paymentsOpenFor?.(username) ?? false;
   const priceNow = (): PriceNow => deps.price?.() ?? priceAt(pro.now());
+  const matchNow = (): MatchPass | null => deps.match?.() ?? null;
+  /** The language the caller's browser asks for first, for the gift's record (its emails are in both anyway). */
+  const langOf = (req: FastifyRequest): 'en' | 'ar' | null => {
+    const h = String(req.headers['accept-language'] ?? '').trim().toLowerCase();
+    return h.startsWith('ar') ? 'ar' : h.startsWith('en') ? 'en' : null;
+  };
 
   /**
    * Pro as the caller sees it. Signed out, whether Pro is open to everyone
@@ -133,7 +157,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId) {
       const open = proMode() === 'on';
-      return open ? { live: true, signedIn: false, offer: publicOffer(priceNow(), deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
+      return open ? { live: true, signedIn: false, offer: publicOffer(priceNow(), deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.(), matchNow()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
     }
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user) return { live: false, signedIn: true, soon: soonOffer() };
@@ -143,9 +167,11 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     if (!pro.live(user.username)) return { live: false, signedIn: true, soon: soonOffer(), notified: await pro.repo.notified(user.id), ...bought };
     const acct = acctOf(user);
     const buys = canBuy(user.username);
-    const [holding, gift, notified, renewal, founder] = await Promise.all([
+    // The gift first: it may start on this very request (the automatic gift), and the plan read after it must
+    // already say so, or the page would be told "Pro is on" and "you are on Free" in one answer.
+    const gift = await pro.giftFor(acct, langOf(req));
+    const [holding, notified, renewal, founder] = await Promise.all([
       pro.plan(user.id),
-      pro.giftFor(acct),
       pro.repo.notified(user.id),
       deps.hasRenewal ? deps.hasRenewal(user.id).catch(() => false) : Promise.resolve(false),
       deps.founderFor ? deps.founderFor(user.id, buys).catch(() => null) : Promise.resolve(null),
@@ -162,7 +188,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       allowances,
       gift,
       notified,
-      offer: publicOffer(priceNow(), buys, deps.checkoutKind?.(), deps.autoRenew?.()),
+      offer: publicOffer(priceNow(), buys, deps.checkoutKind?.(), deps.autoRenew?.(), matchNow()),
       // Only said to an account that has it: nobody else's answer changes.
       ...(renewal ? { renewal: true } : {}),
       ...(founder ? { founder } : {}),
@@ -170,6 +196,17 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       soon: soonOffer(),
       now: pro.now().toISOString(),
     };
+  });
+
+  // The gift offer was shown (the card or the sheet). Counted once per account,
+  // for /admin: "eligible" and "saw the offer" are different numbers.
+  app.post('/api/pro/gift/seen', cfg, async (req, reply) => {
+    const userId = await deps.requireUser(req, reply);
+    if (!userId) return;
+    const user = await deps.accountOf(req, userId).catch(() => null);
+    if (!user) return reply.code(401).send({ error: 'authentication required' });
+    await pro.giftShown(acctOf(user)).catch(() => false);
+    return { ok: true };
   });
 
   app.post('/api/pro/gift/accept', cfg, async (req, reply) => {
@@ -185,6 +222,59 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       return reply.code(status).send({ error: 'the gift cannot be accepted', reason: r.reason });
     }
     return { ok: true, endsAt: r.endsAt };
+  });
+
+  // ------------------------------------------------- the automatic gift ---
+  //
+  // (22 Nov 2026.) The gift that starts by itself tells its holder once that
+  // Pro is on (the welcome), once that it ended (the end card), and remembers
+  // which Pro items their exports carried in between, to show them back on
+  // that card. None of these gives or changes anything an account can do.
+
+  /** The signed-in account for one of the gift's small routes, or null after answering. */
+  const giftAccount = async (req: FastifyRequest, reply: FastifyReply): Promise<ProAccount | null> => {
+    const userId = await deps.requireUser(req, reply);
+    if (!userId) return null;
+    const user = await deps.accountOf(req, userId).catch(() => null);
+    if (!user) {
+      void reply.code(401).send({ error: 'authentication required' });
+      return null;
+    }
+    return acctOf(user);
+  };
+
+  // The welcome was shown. With `offers` (the unticked box on it, or the account page), whether the
+  // fan wants Pro's news and offers by email: only their own tick ever says yes.
+  app.post('/api/pro/gift/welcomed', cfg, async (req, reply) => {
+    const acct = await giftAccount(req, reply);
+    if (!acct) return;
+    const b = (req.body ?? {}) as { offers?: unknown };
+    await pro.giftWelcomed(acct).catch(() => false);
+    if (typeof b.offers === 'boolean') await pro.giftOffersOk(acct, b.offers).catch(() => false);
+    return { ok: true };
+  });
+
+  app.post('/api/pro/gift/offers', cfg, async (req, reply) => {
+    const acct = await giftAccount(req, reply);
+    if (!acct) return;
+    const ok = (req.body as { ok?: unknown } | null)?.ok;
+    if (typeof ok !== 'boolean') return reply.code(400).send({ error: 'ok must be true or false' });
+    return { ok: await pro.giftOffersOk(acct, ok).catch(() => false), offers: ok };
+  });
+
+  app.post('/api/pro/gift/end-seen', cfg, async (req, reply) => {
+    const acct = await giftAccount(req, reply);
+    if (!acct) return;
+    await pro.giftEndSeen(acct).catch(() => false);
+    return { ok: true };
+  });
+
+  // An export with Pro items left the site while the gift ran: remembered for the end card.
+  app.post('/api/pro/gift/used', deps.useConfig ?? cfg, async (req, reply) => {
+    const acct = await giftAccount(req, reply);
+    if (!acct) return;
+    await pro.giftUsed(acct, (req.body as { items?: unknown } | null)?.items).catch(() => false);
+    return { ok: true };
   });
 
   // "Tell me when Pro opens": any account, now that /pro is open to everyone
@@ -247,6 +337,69 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
 
   // ---------------------------------------------------------------- admin ---
 
+  const DAY_MS = 24 * 3600_000;
+  /** A purchase counts as "after the gift" when it is paid within this long of the gift's end. */
+  const AFTER_GIFT_DAYS = 7;
+
+  /**
+   * Gifts that were started, for /admin: by themselves or from the old Accept
+   * button, how many are running and how many have ended, and of each kind how
+   * many of their holders bought Pro while it ran or within 7 days of its end
+   * (real, paid orders; a refunded one is not counted).
+   */
+  const giftCounts = async () => {
+    const zero = () => ({ started: 0, running: 0, ended: 0, boughtDuring: 0, boughtAfter: 0 });
+    const out = { auto: zero(), accept: zero(), afterDays: AFTER_GIFT_DAYS };
+    const rows = await pro.repo.giftRows(5000).catch(() => []);
+    if (!rows.length) return out;
+    const paid = deps.paidOrders ? await deps.paidOrders(new Date(0)).catch(() => []) : [];
+    const firstPaid = new Map<string, number[]>();
+    for (const o of paid) {
+      if (!o.userId || o.refunded) continue;
+      firstPaid.set(o.userId, [...(firstPaid.get(o.userId) ?? []), Date.parse(o.paidAt)]);
+    }
+    const now = pro.now().getTime();
+    for (const g of rows) {
+      const c = g.auto ? out.auto : out.accept;
+      const start = Date.parse(g.startedAt);
+      const end = g.endsAt ? Date.parse(g.endsAt) : start;
+      c.started++;
+      if (end > now) c.running++; else c.ended++;
+      const times = firstPaid.get(g.userId) ?? [];
+      if (times.some((t) => t >= start && t < end)) c.boughtDuring++;
+      else if (times.some((t) => t >= end && t <= end + AFTER_GIFT_DAYS * DAY_MS)) c.boughtAfter++;
+    }
+    return out;
+  };
+
+  /**
+   * The Pro funnel: saw a Pro offer, pressed Get Pro, paid; by where the offer
+   * was seen and by what was bought. "Saw" and "pressed" are the consent-gated
+   * funnel events (sessions that allowed counting); "paid" is the orders
+   * themselves, each under the place its checkout named, or "not said" when
+   * the browser did not say (no consent, or an order made before this).
+   */
+  app.get('/api/admin/pro/funnel', async (req, reply) => {
+    if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+    void reply.header('cache-control', 'no-store');
+    const days = Math.max(1, Math.min(365, Number((req.query as { days?: string }).days) || 30));
+    const names = OFFER_PLACES.flatMap((p) => [`pro_offer_${p}`, `pro_get_${p}`]);
+    const extra = ['pro_checkout', 'pro_paid', 'monthly_bought', 'match_bought', 'gift_auto', 'gift_welcome', 'gift_end_seen', 'bought_after_gift', 'pro_preview_post', 'signup_offer_post', 'signup_post'];
+    const steps = deps.funnel ? await deps.funnel([...names, ...extra], days).catch(() => []) : [];
+    const n = (name: string): number => steps.find((s) => s.name === name)?.sessions ?? 0;
+    const since = new Date(pro.now().getTime() - days * DAY_MS);
+    const paid = (deps.paidOrders ? await deps.paidOrders(since).catch(() => []) : []).filter((o) => !o.refunded);
+    const paidAt = (place: string | null, product: 'monthly' | 'match'): number => paid.filter((o) => (o.src ?? null) === place && o.product === product).length;
+    return {
+      days,
+      places: OFFER_PLACES.map((p) => ({ place: p, saw: n(`pro_offer_${p}`), pressed: n(`pro_get_${p}`), monthly: paidAt(p, 'monthly'), match: paidAt(p, 'match') })),
+      notSaid: { monthly: paidAt(null, 'monthly'), match: paidAt(null, 'match') },
+      paid: { monthly: paid.filter((o) => o.product === 'monthly').length, match: paid.filter((o) => o.product === 'match').length, revenue: paid.reduce((s, o) => s + o.amount, 0) / 100 },
+      steps: Object.fromEntries(extra.map((e) => [e, n(e)])),
+      counted: !!deps.funnel,
+    };
+  });
+
   app.get('/api/admin/pro', async (req, reply) => {
     if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
     const q = req.query as { username?: string };
@@ -270,6 +423,13 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       previewUsers: previewUsers().size,
       stats: await pro.repo.stats(pro.now()),
       throwawayList: disposableListStatus(),
+      // The settings of 22 Nov 2026, as the server reads them: nothing secret is among them.
+      settings: {
+        autoGift: autoGiftOn(), giftMails: giftMailsOn(), postOffers: postOffersOn(),
+        monthlyPrice: monthlyPriceSetting() === null ? null : monthlyPriceSetting()! / 100, monthlyPriceInvalid: monthlyPriceInvalid(),
+        match: ((m) => ({ asked: m.on, price: m.halalas / 100, days: m.days }))(matchPass()),
+      },
+      giftsStarted: await giftCounts(),
       cutoutConfigured: deps.cutoutConfigured(),
       paymentsOpen: deps.paymentsPublic?.() ?? false,
       account,

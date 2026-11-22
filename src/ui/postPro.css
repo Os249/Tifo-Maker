@@ -1,0 +1,41 @@
+/* Pro on the Post it sheet (ui/postPro.ts): under the sheet's own buttons, quiet until it is opened. */
+.pp2 { margin-top: var(--sp-3); display: grid; gap: var(--sp-3); }
+
+/* The account offer: one line and its two ways. */
+.pa-line { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--pro-hairline); }
+.pa-text { margin: 0; font-size: var(--fs-sm); font-weight: 700; line-height: 1.45; color: var(--pro-text); }
+.pa-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.pa-acts > .pro-alt { flex: 1 1 140px; font-size: var(--fs-sm); }
+.pa-acts > .pro-alt[hidden] { display: none; }
+.pa-note { margin: 0; font-size: var(--fs-xs); line-height: 1.45; color: var(--pro-muted); }
+.pa-note:empty { display: none; }
+
+/* The Pro versions: a closed row, opened by its own button. */
+.pp2-pro { border: 1px solid var(--pro-line); border-radius: var(--r-md); background: var(--pro-tint); }
+.pp2-sum {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 44px;
+  padding: var(--sp-2) var(--sp-3); border: none; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); font-weight: 700; color: var(--pro-ink); text-align: start;
+}
+.pp2-sum > span { flex: 1 1 auto; min-width: 0; }
+.pp2-sum > .ti { flex: none; transition: transform var(--duration-quick) var(--ease-smooth-out); }
+.pp2-sum[aria-expanded="true"] > .ti { transform: rotate(180deg); }
+.pp2-sum .pro-crown { flex: none; color: var(--pro-crown); font-size: 1.1em; }
+.pp2-sum:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; border-radius: var(--r-md); }
+.pp2-body { display: grid; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-3); }
+.pp2-body[hidden] { display: none; }
+.pp2-list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-1); font-size: var(--fs-sm); line-height: 1.45; color: var(--pro-text); }
+.pp2-list > li { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.pp2-list .pro-crown { flex: none; margin-top: 3px; color: var(--pro-crown); }
+.pp2-line { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--pro-text); }
+.pp2-note { margin: 0; font-size: var(--fs-xs); line-height: 1.45; color: var(--pro-muted); }
+.pp2-note:empty { display: none; }
+.pp2-see { display: grid; gap: var(--sp-2); justify-items: start; }
+.pp2-see > .pro-alt { font-size: var(--fs-sm); }
+/* The preview: small on purpose, the film's own shape, never stretched. */
+.pp2-film { display: block; width: auto; height: auto; max-width: 100%; max-height: 38dvh; aspect-ratio: 9 / 16; border-radius: var(--r-sm); background: var(--pro-surface-2); }
+.pp2-make { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.pp2-make > .pro-btn, .pp2-make > .pro-alt { flex: 1 1 140px; font-size: var(--fs-sm); text-decoration: none; }
+/* The share dialog's one row to the Pro versions. */
+.pp2-share { margin-top: var(--sp-3); border: 1px solid var(--pro-line); border-radius: var(--r-md); background: var(--pro-tint); }
+[dir="rtl"] .pp2-share > .ti { transform: scaleX(-1); }

@@ -459,7 +459,7 @@ console.log('\n— the founding-fans card in the editor —');
   await p.fill('#p', ADMIN_PW);
   await p.click('#login-form button');
   await p.waitForSelector('#tabs .tab', { timeout: 30000 });
-  await p.click('.tab[data-tab="pro"]');
+  await p.click('.tab[data-tab="prices"]');
   // textContent: the section titles are upper-cased by CSS, which innerText would show.
   check('/admin → Pro: "What would you pay for Pro?" with every answer', await waitFor(p, () => /What would you pay for Pro\?/.test(document.body.textContent) && /\d+ answers so far/.test(document.body.textContent)));
   const adm = await p.evaluate(() => ({

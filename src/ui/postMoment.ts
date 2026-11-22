@@ -30,7 +30,7 @@ import { getLang, t } from './i18n';
 import { copyText } from './clipboard';
 import { tagShareUrl, type ShareSource } from '../core/utm';
 import { track } from '../net/analytics';
-import { recordShare } from '../net/api';
+import { fetchPro, recordShare } from '../net/api';
 import { exportGate } from './proGate';
 import { currentCredit, drawCreditLine, type Credit } from './creditLine';
 
@@ -46,6 +46,12 @@ export interface PostDeps {
    * step is as likely to be "change the words" as "show the group".
    */
   paint?(): void;
+  /**
+   * An account from here, kept-work-first (ui/toolbar.ts accountFromPost).
+   * When given, and the server says Pro's part of the sheet is on, a visitor
+   * who is signed out is offered one in a line under the buttons.
+   */
+  account?(how: 'google' | 'email'): Promise<boolean>;
 }
 
 /**
@@ -357,11 +363,14 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
       <p class="pm-note">${t('post.foot')}</p>
     </div>`;
   const opener = document.activeElement as HTMLElement | null;
+  const closers: (() => void)[] = [];
   const close = (): void => {
+    if (!open) return;
     overlay.remove();
     document.removeEventListener('keydown', onKey);
     open = false;
     if (opener && document.contains(opener)) opener.focus();
+    for (const run of closers.splice(0)) run();
   };
   const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
@@ -527,6 +536,14 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
     say(t('post.copiedLink'));
   }));
   acts.appendChild(row);
+  // Pro where the fan already is, and the account offer (ui/postPro.ts): under the buttons above, which stay
+  // exactly as they are. Only when the server says so (PRO_POST_OFFERS), and loaded only then.
+  void fetchPro().then((st) => {
+    if (!st.live || !st.offer?.post || !overlay.isConnected) return;
+    return import('./postPro').then((m) => {
+      if (overlay.isConnected) m.mountPostPro({ after: acts, state: st, title, close, whenClosed: (run) => closers.push(run), account: deps.account, place: 'post' });
+    });
+  }).catch(() => {});
   // A phone that cannot share files (an in-app browser, most often) can still
   // save the picture from the image itself.
   if (!canShareFiles(file) && matchMedia('(pointer: coarse)').matches) say(t('post.pressHold'));

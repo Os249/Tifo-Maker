@@ -162,11 +162,12 @@ const readCard = (p) => p.evaluate(() => ({
   await p.click('#login-form button');
   await p.waitForSelector('#tabs .tab', { timeout: 30000 });
 
-  // Board → Library, in-page.
+  // Today → Review, in-page.
   await p.click('.tab[data-tab="board"]');
-  const board = await p.evaluate(() => [...document.querySelectorAll('a.card')].map((a) => [a.textContent, a.getAttribute('href')]));
-  check('board cards point at the Library tab, not the editor', board.length >= 3 && board.every(([, h]) => h === '#library' || h === '#security'), JSON.stringify(board));
-  await p.click('a.card[href="#library"]');
+  const board = await p.evaluate(() => [...document.querySelectorAll('.todo a')].map((a) => [a.textContent, a.getAttribute('href')]));
+  check('Today lists what is waiting, each row a door to its screen, not the editor', board.length >= 5 && board.every(([, h]) => ['#review', '#security', '#orders', '#feedback'].includes(h)) && board.filter(([, h]) => h === '#review').length === 3, JSON.stringify(board));
+  check('with the number waiting on each', board.some(([t]) => /^3Stadium submissions/.test(t)) && board.some(([t]) => /^1Match photos/.test(t)) && board.some(([t]) => /^1Reported designs/.test(t)), JSON.stringify(board));
+  await p.click('.todo a[href="#review"]');
   await p.waitForSelector('.qitem', { timeout: 15000 });
   const lib = await p.evaluate(() => ({
     hash: location.hash,
@@ -177,7 +178,7 @@ const readCard = (p) => p.evaluate(() => ({
     submitter: document.querySelector('.qitem[data-kind="stadium"] .qmeta')?.textContent ?? '',
     over: document.documentElement.scrollWidth - innerWidth,
   }));
-  check('the queue is reviewable with the password session', lib.hash === '#library' && lib.stadiums === 3 && lib.photos === 1 && lib.reports === 1, JSON.stringify(lib));
+  check('the queue is reviewable with the password session', lib.hash === '#review' && lib.stadiums === 3 && lib.photos === 1 && lib.reports === 1, JSON.stringify(lib));
   check('each stadium shows its seat plan and who sent it', lib.plans > 20 && lib.submitter.includes('@'), `${lib.plans} rects · ${lib.submitter}`);
   await p.waitForFunction(() => !!document.querySelector('.qitem[data-kind="photo"] .qpic img'), null, { timeout: 15000 }).catch(() => {});
   check('the photo loads with the token', await p.evaluate(() => /^data:image\//.test(document.querySelector('.qitem[data-kind="photo"] .qpic img')?.getAttribute('src') ?? '')));
@@ -195,7 +196,7 @@ const readCard = (p) => p.evaluate(() => ({
   await p.waitForFunction(() => !document.querySelector('.qitem[data-kind="report"]'), null, { timeout: 10000 }).catch(() => {});
   const after = await p.evaluate(() => ({
     items: document.querySelectorAll('.qitem').length,
-    badge: document.querySelector('.tab[data-tab="library"] .pill')?.textContent ?? '0',
+    badge: document.querySelector('.tab[data-tab="review"] .pill')?.textContent ?? '0',
     errs: [...document.querySelectorAll('.qerr')].map((e) => e.textContent).filter(Boolean),
   }));
   check('approve, reject, verify and take down all go through', after.items === 1 && after.badge === '1' && !after.errs.length, JSON.stringify(after));
@@ -219,7 +220,7 @@ const readCard = (p) => p.evaluate(() => ({
 
   // Phone width: no sideways scroll on the queue.
   await p.setViewportSize({ width: 390, height: 844 });
-  await p.click('.tab[data-tab="library"]');
+  await p.click('.tab[data-tab="review"]');
   check('on a phone the queue fits the width', await p.evaluate(() => document.documentElement.scrollWidth - innerWidth <= 0));
   await p.context().close();
 }

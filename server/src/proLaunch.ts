@@ -78,15 +78,21 @@
  */
 import type { PaymentRepository, ProOrder } from './payRepo';
 import type { FounderMail, FounderSource, LaunchRepository } from './launchRepo';
-import { OFFER } from './proPlan';
+import { OFFER, monthlyPriceInvalid, monthlyPriceSetting } from './proPlan';
 
 const RIYADH_MS = 3 * 3600_000;
 const HOUR_MS = 3600_000;
 
 // ---------------------------------------------------------------- price ---
 
-/** The regular price of a month of Pro, in halalas. */
-export const regularHalalas = (): number => Math.round(OFFER.monthly.price * 100);
+/**
+ * The regular price of a month of Pro, in halalas: PRO_MONTHLY_PRICE when it
+ * is set (22 Nov 2026: the price is a setting), OFFER.monthly.price otherwise.
+ * With the setting there is one price and no launch price beside it (priceAt),
+ * so nothing says "from <date> the price will be": the price shown is the
+ * price charged, and what auto-renew renews at.
+ */
+export const regularHalalas = (env: NodeJS.ProcessEnv = process.env): number => monthlyPriceSetting(env) ?? Math.round(OFFER.monthly.price * 100);
 /** The launch price, in halalas. */
 export const launchHalalas = (): number => Math.round(OFFER.monthly.launchPrice * 100);
 
@@ -148,11 +154,12 @@ export interface PriceNow {
 /** The price of a month of Pro for an order made at `now`. */
 export function priceAt(now: Date, env: NodeJS.ProcessEnv = process.env): PriceNow {
   const until = launchPriceUntil(env);
-  const launch = until !== null && now.getTime() < until.getTime() && launchHalalas() < regularHalalas();
+  // A price set by PRO_MONTHLY_PRICE has no launch price beside it, whatever PRO_LAUNCH_PRICE_UNTIL still says.
+  const launch = monthlyPriceSetting(env) === null && until !== null && now.getTime() < until.getTime() && launchHalalas() < regularHalalas(env);
   const shown = priceDisplay(env);
   return {
-    halalas: launch ? launchHalalas() : regularHalalas(),
-    regular: regularHalalas(),
+    halalas: launch ? launchHalalas() : regularHalalas(env),
+    regular: regularHalalas(env),
     launch,
     until: launch ? until.toISOString() : null,
     display: launch ? shown.mode : 'plain',
@@ -174,6 +181,10 @@ export function priceStatus(now: Date, env: NodeJS.ProcessEnv = process.env) {
     untilInvalid: launchPriceUntilInvalid(env),
     /** The launch price's day has passed: the setting can be removed. */
     untilPassed: until !== null && !p.launch,
+    /** The price comes from PRO_MONTHLY_PRICE: the launch price and its date are not used. */
+    setting: monthlyPriceSetting(env) !== null,
+    /** PRO_MONTHLY_PRICE is set but is not a price from SAR 1 to SAR 100: it is ignored. */
+    settingInvalid: monthlyPriceInvalid(env),
     display: priceDisplay(env).mode,
     /** PRO_PRICE_DISPLAY=strike was asked for without a licence number: the plain wording is shown. */
     strikeRefused: (env.PRO_PRICE_DISPLAY ?? '').trim().toLowerCase() === 'strike' && priceDisplay(env).mode !== 'strike',
@@ -325,7 +336,7 @@ export class LaunchService {
 
   /** The extra days a payment confirmed now may carry (0: none). payRepo.markPaid still decides once-per-account. */
   async bonusDays(order: ProOrder, now: Date): Promise<number> {
-    if (!founderBonusOn(this.env) || !order.userId || order.testMode || order.kind === 'renewal') return 0;
+    if (!founderBonusOn(this.env) || !order.userId || order.testMode || order.kind === 'renewal' || order.product !== 'monthly') return 0;
     const at = await this.launchedAt();
     return at && bonusInTime(order, at, now) ? FOUNDER_BONUS_DAYS : 0;
   }
