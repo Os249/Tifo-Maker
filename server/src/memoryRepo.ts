@@ -15,6 +15,7 @@ import type {
   FeedPage,
   Lead,
   LeadsRepository,
+  StoredLead,
   NewDesign,
   AiEventInput,
   AiEventsRepository,
@@ -1247,10 +1248,22 @@ export class MemoryEventsRepository implements EventsRepository {
 
 /** In-memory B2B leads store (dev/tests). */
 export class MemoryLeadsRepository implements LeadsRepository {
-  readonly leads: (Lead & { id: string; createdAt: string })[] = [];
+  readonly leads: StoredLead[] = [];
   async createLead(lead: Lead): Promise<{ id: string }> {
     const id = randomUUID();
-    this.leads.push({ ...lead, id, createdAt: new Date().toISOString() });
+    this.leads.push({ ...lead, id, createdAt: new Date().toISOString(), handled: false });
     return { id };
+  }
+  async list(limit: number): Promise<StoredLead[]> {
+    return this.leads.slice().reverse().slice(0, limit).map((l) => ({ ...l }));
+  }
+  async counts(): Promise<{ total: number; open: number }> {
+    return { total: this.leads.length, open: this.leads.filter((l) => !l.handled).length };
+  }
+  async setHandled(id: string, handled: boolean): Promise<boolean> {
+    const row = this.leads.find((l) => l.id === id);
+    if (!row) return false;
+    row.handled = handled;
+    return true;
   }
 }

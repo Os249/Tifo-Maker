@@ -12,7 +12,7 @@ import { MemoryDailyFeatureRepository } from '../src/featureRepo';
 import { DailyFeaturePicker } from '../src/featured';
 import { MemoryAdminStatsRepository } from '../src/statsRepo';
 import { MemoryFeedbackRepository } from '../src/feedbackRepo';
-import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
+import { PgAuthRepository, PgDesignRepository, PgLeadsRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
 import { schemaStatements } from '../src/schema';
@@ -1334,7 +1334,55 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal((await app.inject({ method: 'POST', url: '/api/leads', payload: { name: 'No Email', email: 'not-an-email' } })).statusCode, 400);
   assert.equal(leads.leads.length, 1, 'invalid leads not stored');
 
-  console.log('leads: all assertions passed (store valid, reject missing name / bad email)');
+  // Reading them back is admin-only; the list is newest first, with what is still waiting.
+  {
+    const sent: { to: string; subject: string; html: string; text?: string }[] = [];
+    const auth2 = new MemoryAuthRepository();
+    const leads2 = new MemoryLeadsRepository();
+    const app2 = await buildApp(new MemoryDesignRepository((id) => auth2.usernameOf(id)), auth2, templates, {
+      leads: leads2, emailSender: { send: async (m) => { sent.push(m as typeof sent[number]); } }, feedbackTo: 'owner@example.test',
+      adminUsernames: ['leadboss'], aiAdminPassword: ADMIN_PW,
+    });
+    const boss = { token: await registerUser(app2, 'leadboss') };
+    const fan = { token: await registerUser(app2, 'leadfan') };
+    const h = bearer;
+    const before = sent.length;
+    await app2.inject({ method: 'POST', url: '/api/leads', payload: { name: 'First <b>', email: 'first@club.test', organization: 'Club One', orgType: 'club', message: 'Hello\nthere' } });
+    await app2.inject({ method: 'POST', url: '/api/leads', payload: { name: 'Second', email: 'second@club.test' } });
+    await new Promise((r) => setTimeout(r, 20));
+    const mine = sent.slice(before).filter((m) => /club enquiry/i.test(m.subject));
+    assert.equal(mine.length, 2, 'each enquiry is emailed to the owner once');
+    assert.ok(mine.every((m) => m.to === 'owner@example.test'), 'and only to the owner');
+    assert.match(mine[0].subject, /Club One/);
+    assert.ok(mine[0].html.includes('First &lt;b&gt;') && !mine[0].html.includes('First <b>'), 'what the club typed is escaped in the mail');
+    assert.match(mine[1].html, /no message/);
+
+    assert.equal((await app2.inject({ method: 'GET', url: '/api/admin/leads' })).statusCode, 403, 'anonymous cannot read enquiries');
+    assert.equal((await app2.inject({ method: 'GET', url: '/api/admin/leads', headers: h(fan.token) })).statusCode, 403, 'nor can a fan');
+    const list = (await app2.inject({ method: 'GET', url: '/api/admin/leads', headers: h(boss.token) })).json() as { items: { id: string; name: string; handled: boolean; organization: string | null }[]; counts: { total: number; open: number } };
+    assert.deepEqual(list.counts, { total: 2, open: 2 });
+    assert.deepEqual(list.items.map((i) => i.name), ['Second', 'First <b>'], 'newest first');
+    const id = list.items[1].id;
+    assert.equal((await app2.inject({ method: 'POST', url: `/api/admin/leads/${id}/handled`, payload: {} })).statusCode, 403, 'marking handled is admin-only');
+    assert.equal((await app2.inject({ method: 'POST', url: `/api/admin/leads/${id}/handled`, headers: h(boss.token), payload: {} })).statusCode, 200);
+    const after = (await app2.inject({ method: 'GET', url: '/api/admin/leads', headers: h(boss.token) })).json() as typeof list;
+    assert.deepEqual(after.counts, { total: 2, open: 1 });
+    assert.equal(after.items[1].handled, true);
+    assert.equal((await app2.inject({ method: 'POST', url: `/api/admin/leads/${id}/handled`, headers: h(boss.token), payload: { handled: false } })).statusCode, 200, 'and it can be reopened');
+    assert.equal(((await app2.inject({ method: 'GET', url: '/api/admin/leads', headers: h(boss.token) })).json() as typeof list).counts.open, 2);
+    assert.equal((await app2.inject({ method: 'POST', url: '/api/admin/leads/00000000-0000-0000-0000-000000000000/handled', headers: h(boss.token), payload: {} })).statusCode, 404);
+
+    // Without an owner address nothing is sent, and the enquiry is stored all the same.
+    const leads3 = new MemoryLeadsRepository();
+    const sent3: unknown[] = [];
+    const auth3 = new MemoryAuthRepository();
+    const app3 = await buildApp(new MemoryDesignRepository((i) => auth3.usernameOf(i)), auth3, templates, { leads: leads3, emailSender: { send: async (m) => { sent3.push(m); } } });
+    assert.equal((await app3.inject({ method: 'POST', url: '/api/leads', payload: { name: 'Quiet', email: 'quiet@club.test' } })).statusCode, 201);
+    assert.equal(sent3.length, 0, 'no owner address, no mail');
+    assert.equal(leads3.leads.length, 1);
+  }
+
+  console.log('leads: all assertions passed (store valid, reject missing name / bad email, owner emailed once, admin-only list, handled and reopened)');
 }
 
 // ---- .tifo format validation endpoint ----
@@ -2029,6 +2077,27 @@ if (process.env.DATABASE_URL) {
     assert.deepEqual(await budget.load(day), { calls: 7, pictures: 2 }, 'adds accumulate, concurrent ones included');
     await pool.query('DELETE FROM ai_budget WHERE day = $1', [day]);
     console.log('postgres: ai phase 0 passed (usage columns, cost panel equal to memory, polish not a design, our limits apart, unpriced not $0, budget table)');
+  }
+  // Club enquiries on real Postgres: the list /admin reads, and "handled" kept by the row.
+  {
+    await pool.query('DELETE FROM leads');
+    const leads = new PgLeadsRepository(pool);
+    const first = await leads.createLead({ name: 'First', email: 'first@club.test', organization: 'Club One', orgType: 'club', message: 'Hello' });
+    await pool.query("UPDATE leads SET created_at = now() - interval '1 hour' WHERE id::text = $1", [first.id]);
+    const second = await leads.createLead({ name: 'Second', email: 'second@club.test' });
+    const list = await leads.list(50);
+    assert.deepEqual(list.map((l) => l.name), ['Second', 'First'], 'newest first');
+    assert.deepEqual({ ...list[1], createdAt: '' }, { id: first.id, name: 'First', email: 'first@club.test', organization: 'Club One', orgType: 'club', message: 'Hello', handled: false, createdAt: '' });
+    assert.equal(list[0].message, null);
+    assert.deepEqual(await leads.counts(), { total: 2, open: 2 });
+    assert.equal(await leads.setHandled(second.id, true), true);
+    assert.deepEqual(await leads.counts(), { total: 2, open: 1 });
+    assert.equal((await leads.list(1))[0].handled, true);
+    assert.equal(await leads.setHandled(second.id, false), true, 'reopened');
+    assert.equal(await leads.setHandled('00000000-0000-0000-0000-000000000000', true), false, 'no such enquiry');
+    assert.equal(await leads.setHandled('not-an-id', true), false);
+    await pool.query('DELETE FROM leads');
+    console.log('postgres: club enquiries passed (newest first, counts, handled and reopened, unknown id)');
   }
   await pool.end();
 } else {

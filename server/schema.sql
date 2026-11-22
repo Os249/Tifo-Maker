@@ -260,6 +260,8 @@ CREATE TABLE IF NOT EXISTS leads (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at DESC);
+-- /admin lists the enquiries, and one stays "not handled" until the owner says so.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS handled BOOLEAN NOT NULL DEFAULT false;
 
 -- AI Tifo Designer: per-account free generation quota. One row per user; `used`
 -- is incremented atomically by the route under a configurable ceiling.
