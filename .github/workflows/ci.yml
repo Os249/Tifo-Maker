@@ -109,6 +109,11 @@ jobs:
       - name: "Launch tests: price, founders, bonus (Postgres)"
         run: npm run test:launch
 
+      # The turnaround: the monthly price as a setting, the match pass, the
+      # automatic 7 days and their three emails, every switch off by default.
+      - name: "Turnaround tests: price setting, match pass, automatic gift, emails (Postgres)"
+        run: npm run test:turnaround
+
       - name: Club kit tests (Postgres)
         run: npx tsx server/test/kits.test.mts
 
