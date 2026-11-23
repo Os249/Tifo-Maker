@@ -50,10 +50,13 @@ export function refundEmail(r: RefundMailInput): EmailMessage {
   const link = purchasesUrl(r.base);
   // What the order was, in its own words: a month, or the match pass (said in hours, as the page sold it).
   const match = o.product === 'match';
-  const whatAr = match ? `باقة المباراة ${o.days * 24} ساعة` : `${o.days} يوم`;
-  const whatEn = match ? `match pass, ${o.days * 24} hours` : `${o.days} days`;
-  const endedAr = match ? 'باقة المباراة اللي دفعتها بهالطلب انتهت على حسابك.' : 'شهر برو اللي دفعته بهالطلب انتهى على حسابك. وإذا كان التجديد التلقائي شغّال، وقفناه وما راح ينخصم منك شي.';
-  const endedEn = match
+  const year = o.product === 'year';
+  const whatAr = year ? `سنة: ${o.days} يوم` : match ? `باقة المباراة ${o.days * 24} ساعة` : `${o.days} يوم`;
+  const whatEn = year ? `a year: ${o.days} days` : match ? `match pass, ${o.days * 24} hours` : `${o.days} days`;
+  const endedAr = year ? 'سنة برو اللي دفعتها بهالطلب انتهت على حسابك.' : match ? 'باقة المباراة اللي دفعتها بهالطلب انتهت على حسابك.' : 'شهر برو اللي دفعته بهالطلب انتهى على حسابك. وإذا كان التجديد التلقائي شغّال، وقفناه وما راح ينخصم منك شي.';
+  const endedEn = year
+    ? 'The year of Pro this order paid for has ended on your account.'
+    : match
     ? 'The match pass this order paid for has ended on your account.'
     : `The month of Pro this order paid for has ended on your account${o.bonusDays > 0 ? `, and its ${o.bonusDays} free founder days with it` : ''}. If auto-renew was on, it's now off and nothing more will be charged.`;
   const ar =
@@ -84,8 +87,8 @@ export function refundEmail(r: RefundMailInput): EmailMessage {
     html: layoutEmail({ title: subject, siteUrl: r.base, blocks: [{ lang: 'ar', html: ar }, { lang: 'en', html: en }] }),
     text:
       (test ? 'TEST: no real money moved.\n\n' : '') +
-      `رجّعنا لك ${amount} ريال (تيفو ميكر برو، المرجع ${ref}). ${match ? 'باقة المباراة حق هالطلب انتهت.' : 'شهر برو حق هالطلب انتهى.'} المبلغ يرجع على نفس طريقة الدفع، وغالبًا خلال كم يوم عمل حسب بنكك.\n${link}\n\n` +
-      `We've refunded SAR ${amount} for TifoMaker Pro (reference ${ref}) on ${dayOf(at, 'en')}. The ${match ? 'match pass' : 'month of Pro'} it paid for has ended.\n` +
+      `رجّعنا لك ${amount} ريال (تيفو ميكر برو، المرجع ${ref}). ${year ? 'سنة برو حق هالطلب انتهت.' : match ? 'باقة المباراة حق هالطلب انتهت.' : 'شهر برو حق هالطلب انتهى.'} المبلغ يرجع على نفس طريقة الدفع، وغالبًا خلال كم يوم عمل حسب بنكك.\n${link}\n\n` +
+      `We've refunded SAR ${amount} for TifoMaker Pro (reference ${ref}) on ${dayOf(at, 'en')}. The ${year ? 'year of Pro' : match ? 'match pass' : 'month of Pro'} it paid for has ended.\n` +
       `The money goes back the way you paid, usually within a few working days depending on your bank.\nYour purchases: ${link}\nQuestions: ${r.contact}\n` +
       textFooter(r.base),
   };
@@ -102,15 +105,18 @@ export function refundReceivedEmail(r: RequestMailInput): EmailMessage {
   const amount = sarOf(o.amount);
   const subject = `${test}وصلنا طلب الاسترداد · We got your refund request`;
   const link = purchasesUrl(r.base);
+  // What ends if the refund is given, in the order's own words (it always said "that month": 22 Nov 2026).
+  const endsAr = o.product === 'year' ? 'تنتهي سنة برو' : o.product === 'match' ? 'تنتهي باقة المباراة' : 'ينتهي شهر برو';
+  const endsEn = o.product === 'year' ? 'that year of Pro ends' : o.product === 'match' ? 'that match pass ends' : 'that month of Pro ends';
   const ar =
     para(`وصلنا طلبك لاسترداد ${amount} ريال (تيفو ميكر برو، دفعة يوم ${dayOf(o.paidAt ?? o.createdAt, 'ar')}).`) +
-    para(`أراجع كل طلب بنفسي، وبرد عليك بإيميل خلال ${ANSWER_DAYS} أيام عمل: إذا تمت الموافقة يرجع المبلغ على نفس طريقة الدفع وينتهي شهر برو، وإذا لا أوضح لك السبب.`) +
+    para(`أراجع كل طلب بنفسي، وبرد عليك بإيميل خلال ${ANSWER_DAYS} أيام عمل: إذا تمت الموافقة يرجع المبلغ على نفس طريقة الدفع و${endsAr}، وإذا لا أوضح لك السبب.`) +
     para('ولين وقتها برو يبقى شغّال على حسابك، وما تحتاج تسوي شي.') +
     button(link, 'مشترياتك') +
     smallPrint(`إذا مو أنت اللي طلبت، أو عندك سؤال: ${r.contact}`);
   const en =
     para(`We got your request to refund SAR ${amount} (TifoMaker Pro, paid on ${dayOf(o.paidAt ?? o.createdAt, 'en')}).`) +
-    para(`I look at every request myself and will answer by email within ${ANSWER_DAYS} working days: if it's approved, the money goes back the way you paid and that month of Pro ends; if not, I'll tell you why.`) +
+    para(`I look at every request myself and will answer by email within ${ANSWER_DAYS} working days: if it's approved, the money goes back the way you paid and ${endsEn}; if not, I'll tell you why.`) +
     para("Until then Pro stays on for your account, and there's nothing you need to do.") +
     button(link, 'Your purchases') +
     smallPrint(`If this wasn't you, or you have a question: ${r.contact}`);

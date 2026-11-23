@@ -315,6 +315,16 @@ One title, one sentence, one blue action, at most one quiet alternative.
   month keeps the one blue button). The 7 days can start by themselves: then
   one welcome sheet, once, with one thing to try, and one end sheet, once,
   with what the fan made, one blue "Keep Pro" and "Not now" beside it.
+- **Three plans (22 Nov 2026, docs/pro-three-plans.md; behind `PRO_THREE_PLANS`).**
+  /pro is one price list: the match pass, the month and the year in one
+  joined card, each with its length, its whole price, a price per day and
+  its own button. The month has the gold tint, "Our pick" and the one blue
+  button; the others are outlines, and a plan a link asked for is a gold
+  tint. The three promises (refund, Moyasar, nothing renews) sit right under
+  the card. Everywhere else Pro is sold keeps its one button for the month,
+  with the other plans named under it as quiet links (`ui/proPlanList.ts`).
+  Never "save", a percentage, a crossed-out price, "free months", "most
+  popular" or a countdown: the suite fails on them.
 - **Pro on Post it.** Under the sheet's own buttons, never above them and
   never blue: one closed row ("Pro versions of this tifo") that opens to the
   three versions, a small marked preview of the fan's own tifo, then one way

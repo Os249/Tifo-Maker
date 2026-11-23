@@ -40,6 +40,7 @@ import { t, tv } from './i18n';
 import { CROWN_SVG, money } from './pro';
 import { cleanByDefault } from './proMark';
 import { getPressed, offerSeen, proLink, type ProPlace } from './proWhere';
+import { otherPlansHtml, plansListed, wirePlanList } from './proPlanList';
 
 export interface PostProContext {
   /** Where the block goes: after this element. */
@@ -181,10 +182,12 @@ export function mountPostPro(ctx: PostProContext): void {
       action = `<p class="pp2-line">${escapeHtml(tv('pp2.acct', { n: offer.gift.days }))}</p>`;
     } else if (offer.paymentsOpen) {
       price = `<p class="pp2-line">${escapeHtml(tv('pp2.price', { price: money(offer.monthly.price), days: offer.monthly.days }))}` +
-        (m ? ` ${escapeHtml(tv('pp2.priceMatch', { hours: m.hours, price: money(m.price) }))}` : '') + `</p>`;
+        (m && !plansListed(offer) ? ` ${escapeHtml(tv('pp2.priceMatch', { hours: m.hours, price: money(m.price) }))}` : '') + `</p>`;
       action =
         `<div class="pp2-make"><a class="pro-btn" data-act="get" href="${escapeHtml(proLink(ctx.place))}">${CROWN_SVG}<span>${escapeHtml(t('pp2.get'))}</span></a>` +
-        (m ? `<a class="pro-alt" data-act="get" href="${escapeHtml(proLink(ctx.place, 'match'))}">${escapeHtml(t('pp2.matchGet'))}</a>` : '') + `</div>`;
+        (m && !plansListed(offer) ? `<a class="pro-alt" data-act="get" href="${escapeHtml(proLink(ctx.place, 'match'))}">${escapeHtml(t('pp2.matchGet'))}</a>` : '') + `</div>` +
+        // Where every plan on sale is named (PRO_THREE_PLANS): the match pass and the year under the month's button.
+        otherPlansHtml(offer, ctx.place);
     } else {
       action = `<a class="pro-text-btn" href="${escapeHtml(proLink(ctx.place))}">${escapeHtml(t('pro.act.seePage'))}</a>`;
     }
@@ -195,6 +198,7 @@ export function mountPostPro(ctx: PostProContext): void {
       price + action +
       `<p class="pp2-note">${escapeHtml(t('pp2.free'))}</p>`;
     body.querySelectorAll('[data-act="get"]').forEach((a) => a.addEventListener('click', () => getPressed(ctx.place)));
+    wirePlanList(body, offer, ctx.place);
     body.querySelector('[data-act="gift"]')?.addEventListener('click', async () => {
       const { openGiftSheet } = await import('./proSheets');
       if (await openGiftSheet(st)) forgetPro();

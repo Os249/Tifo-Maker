@@ -41,7 +41,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { PASS_COLS, rowToPass, type MemoryProRepository, type ProPass } from './proRepo';
-import type { Product } from './proPlan';
+import { asProduct, type Product } from './proPlan';
 
 export type OrderStatus = 'pending' | 'paid' | 'refunded' | 'failed' | 'expired' | 'review';
 /** How an order is paid: Moyasar's hosted invoice page (v1), its form on /pro, or a renewal on a saved card. */
@@ -815,7 +815,7 @@ function rowToOrder(r: Record<string, unknown>): ProOrder {
     refundMailAt: iso(r.refund_mail_at as string | null),
     refundSeenAt: iso(r.refund_seen_at as string | null),
     bonusDays: Number(r.bonus_days ?? 0),
-    product: r.product === 'match' ? 'match' : 'monthly',
+    product: asProduct(r.product),
     src: s(r.src),
   };
 }
@@ -1246,7 +1246,7 @@ export class PgPaymentRepository implements PaymentRepository {
       [since, limit],
     );
     return r.rows.map((x) => ({
-      userId: s(x.user_id), paidAt: iso(x.paid_at as string)!, product: x.product === 'match' ? 'match' as const : 'monthly' as const,
+      userId: s(x.user_id), paidAt: iso(x.paid_at as string)!, product: asProduct(x.product),
       src: s(x.src), amount: Number(x.amount), refunded: x.status === 'refunded',
     }));
   }

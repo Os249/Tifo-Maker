@@ -787,6 +787,35 @@ var FUNNEL_STEP = {
   pro_preview_post:  ['Previewed Pro on Post it','their own tifo as the vertical video'],
   monthly_bought:    ['Bought 30 days of Pro','came back from paying'],
   match_bought:      ['Bought a match pass','came back from paying'],
+  year_bought:       ['Bought a year of Pro','came back from paying'],
+  pro_plans_post: ['Saw the plan list on Post it',''],
+  pro_plans_share: ['Saw the plan list on the share dialog',''],
+  pro_plans_export: ['Saw the plan list on the export sheet',''],
+  pro_plans_page: ['Saw the plan list on the Pro page',''],
+  pro_plans_giftend: ['Saw the plan list after the gift',''],
+  pro_plans_limit: ['Saw the plan list on a limit card',''],
+  pro_plans_account: ['Saw the plan list on the account page',''],
+  pro_pick_monthly_post: ['Chose the month on Post it',''],
+  pro_pick_monthly_share: ['Chose the month on the share dialog',''],
+  pro_pick_monthly_export: ['Chose the month on the export sheet',''],
+  pro_pick_monthly_page: ['Chose the month on the Pro page',''],
+  pro_pick_monthly_giftend: ['Chose the month after the gift',''],
+  pro_pick_monthly_limit: ['Chose the month on a limit card',''],
+  pro_pick_monthly_account: ['Chose the month on the account page',''],
+  pro_pick_match_post: ['Chose the match pass on Post it',''],
+  pro_pick_match_share: ['Chose the match pass on the share dialog',''],
+  pro_pick_match_export: ['Chose the match pass on the export sheet',''],
+  pro_pick_match_page: ['Chose the match pass on the Pro page',''],
+  pro_pick_match_giftend: ['Chose the match pass after the gift',''],
+  pro_pick_match_limit: ['Chose the match pass on a limit card',''],
+  pro_pick_match_account: ['Chose the match pass on the account page',''],
+  pro_pick_year_post: ['Chose the year on Post it',''],
+  pro_pick_year_share: ['Chose the year on the share dialog',''],
+  pro_pick_year_export: ['Chose the year on the export sheet',''],
+  pro_pick_year_page: ['Chose the year on the Pro page',''],
+  pro_pick_year_giftend: ['Chose the year after the gift',''],
+  pro_pick_year_limit: ['Chose the year on a limit card',''],
+  pro_pick_year_account: ['Chose the year on the account page',''],
   gift_auto:         ['The gift started by itself','7 days of Pro'],
   gift_welcome:      ['Saw the gift welcome','Pro is on for 7 days'],
   gift_end_seen:     ['Saw the gift-end card','what they made, and the price'],
@@ -2236,10 +2265,12 @@ function loadProFunnel(){
 function onOff(v){ return v ? '<b>on</b>' : 'off'; }
 function turnaroundHtml(){
   if (!PRO || PRO.error) return '';
-  var s = PRO.settings || {}, m = s.match || {}, g = PRO.giftsStarted || null;
+  var s = PRO.settings || {}, m = s.match || {}, y = s.year || {}, g = PRO.giftsStarted || null;
   var html = '<h2 class="sec">Switches <span class="hint">Railway variables, as the server reads them now</span></h2><div class="card"><table class="tbl"><tbody>';
   html += '<tr><td>PRO_MONTHLY_PRICE</td><td>' + (s.monthlyPriceInvalid ? '<b>not a price from SAR 1 to SAR 100: ignored</b>' : s.monthlyPrice == null ? 'unset: the launch and regular prices decide' : '<b>SAR ' + esc(String(s.monthlyPrice)) + '</b> for 30 days, with no launch price beside it') + '</td></tr>';
   html += '<tr><td>PRO_MATCH_PASS</td><td>' + onOff(m.asked) + ': SAR ' + esc(String(m.price)) + ' for ' + esc(String((m.days || 0) * 24)) + ' hours' + (m.asked && !PRO.paymentsOpen ? ' (not sold until Pro is on sale)' : '') + '</td></tr>';
+  html += '<tr><td>PRO_YEAR</td><td>' + onOff(y.asked) + ': SAR ' + esc(String(y.price)) + ' for ' + esc(String(y.days || 0)) + ' days, one payment, never renews' + (y.priceInvalid ? ' <b>(PRO_YEAR_PRICE is not a price from SAR 1 to SAR 100: ignored)</b>' : '') + (y.asked && !PRO.paymentsOpen ? ' (not sold until Pro is on sale)' : '') + '</td></tr>';
+  html += '<tr><td>PRO_THREE_PLANS</td><td>' + onOff(s.threePlans) + ': /pro is the three-plan page, and the sheets name every plan on sale' + (s.threePlans && !PRO.paymentsOpen ? ' (only where Pro is on sale)' : '') + '</td></tr>';
   html += '<tr><td>PRO_AUTO_GIFT</td><td>' + onOff(s.autoGift) + ': the 7 days start by themselves for a verified email that never held Pro</td></tr>';
   html += '<tr><td>PRO_GIFT_MAILS</td><td>' + onOff(s.giftMails) + (s.giftMails ? '' : (s.autoGift ? '' : ' (needs PRO_AUTO_GIFT too)')) + ': the three emails about the 7 days. '
     + 'See one as it would go now: '
@@ -2263,13 +2294,15 @@ function turnaroundHtml(){
   else if (PROFUNNEL.error) html += '<p class="note">The Pro funnel could not be loaded (' + esc(String(PROFUNNEL.error)) + ').</p>';
   else {
     var F = PROFUNNEL, rows = F.places || [];
-    html += '<div class="card"><table class="tbl"><thead><tr><th>Where the offer was seen</th><th>Saw a Pro offer</th><th>Pressed Get Pro</th><th>Paid: monthly</th><th>Paid: match pass</th></tr></thead><tbody>';
+    html += '<div class="card"><table class="tbl"><thead><tr><th>Where the offer was seen</th><th>Saw a Pro offer</th><th>Pressed Get Pro</th><th>Saw the plan list</th><th>Chose: match pass / month / year</th><th>Paid: match pass</th><th>Paid: monthly</th><th>Paid: year</th></tr></thead><tbody>';
     for (var i = 0; i < rows.length; i++){
       var r = rows[i];
-      html += '<tr><td>' + esc(PLACE_LABEL[r.place] || r.place) + '</td><td>' + fmt(r.saw) + '</td><td>' + fmt(r.pressed) + (r.saw ? ' <span class="dim">' + pct(r.pressed, r.saw) + '</span>' : '') + '</td><td>' + fmt(r.monthly) + '</td><td>' + fmt(r.match) + '</td></tr>';
+      html += '<tr><td>' + esc(PLACE_LABEL[r.place] || r.place) + '</td><td>' + fmt(r.saw) + '</td><td>' + fmt(r.pressed) + (r.saw ? ' <span class="dim">' + pct(r.pressed, r.saw) + '</span>' : '') + '</td><td>' + fmt(r.plans || 0) + '</td><td>' + fmt((r.pick || {}).match || 0) + ' / ' + fmt((r.pick || {}).monthly || 0) + ' / ' + fmt((r.pick || {}).year || 0) + '</td><td>' + fmt(r.match) + '</td><td>' + fmt(r.monthly) + '</td><td>' + fmt(r.year || 0) + '</td></tr>';
     }
-    html += '<tr><td>Place not said</td><td class="dim">n/a</td><td class="dim">n/a</td><td>' + fmt((F.notSaid || {}).monthly || 0) + '</td><td>' + fmt((F.notSaid || {}).match || 0) + '</td></tr>';
-    html += '<tr><td><b>All</b></td><td></td><td></td><td><b>' + fmt((F.paid || {}).monthly || 0) + '</b></td><td><b>' + fmt((F.paid || {}).match || 0) + '</b></td></tr>';
+    html += '<tr><td>Place not said</td><td class="dim">n/a</td><td class="dim">n/a</td><td class="dim">n/a</td><td class="dim">n/a</td><td>' + fmt((F.notSaid || {}).match || 0) + '</td><td>' + fmt((F.notSaid || {}).monthly || 0) + '</td><td>' + fmt((F.notSaid || {}).year || 0) + '</td></tr>';
+    html += '<tr><td><b>All</b></td><td></td><td></td><td></td><td></td><td><b>' + fmt((F.paid || {}).match || 0) + '</b></td><td><b>' + fmt((F.paid || {}).monthly || 0) + '</b></td><td><b>' + fmt((F.paid || {}).year || 0) + '</b></td></tr>';
+    var rb = (F.paid || {}).revenueBy || {};
+    html += '<tr><td>Money kept (SAR)</td><td></td><td></td><td></td><td></td><td>' + esc(String(rb.match || 0)) + '</td><td>' + esc(String(rb.monthly || 0)) + '</td><td>' + esc(String(rb.year || 0)) + '</td></tr>';
     html += '</tbody></table></div>';
     var st = F.steps || {};
     html += '<div class="grid three">';
@@ -2279,6 +2312,7 @@ function turnaroundHtml(){
     html += stat(st.gift_end_seen || 0, plural(st.gift_end_seen || 0, 'session', 'sessions'), 'Saw the gift-end card', (st.bought_after_gift || 0) + ' paid after their gift', '');
     html += stat(st.monthly_bought || 0, plural(st.monthly_bought || 0, 'session', 'sessions'), 'Came back from paying: monthly', '', '');
     html += stat(st.match_bought || 0, plural(st.match_bought || 0, 'session', 'sessions'), 'Came back from paying: match pass', '', '');
+    html += stat(st.year_bought || 0, plural(st.year_bought || 0, 'session', 'sessions'), 'Came back from paying: year', '', '');
     html += '</div>';
     html += '<p class="note">Saw and pressed are sessions that allowed counting, so they read lower than what happened. Paid is every real order in the period that was not refunded (SAR ' + esc(String((F.paid || {}).revenue || 0)) + ' in all); an order names its place only when its buyer allowed counting.' + (F.counted ? '' : ' Event counting is not enabled on this server.') + '</p>';
   }
@@ -2427,7 +2461,7 @@ function ordersHtml(){
   html += requestsHtml();
   var rows = ORDERS.orders || [];
   if (!rows.length) return html + '<p class="empty">No orders yet.</p>';
-  html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Who</th><th>Amount</th><th>Status</th><th>How</th><th>Pro used</th><th></th></tr></thead><tbody>';
+  html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Who</th><th>Plan</th><th>Amount</th><th>Status</th><th>How</th><th>Pro used</th><th></th></tr></thead><tbody>';
   for (var i = 0; i < rows.length; i++){
     var o = rows[i], lab = ORDER_STATUS[o.status] || [o.status, ''];
     var act = '';
@@ -2436,7 +2470,7 @@ function ordersHtml(){
         + (o.refundable ? 'Refund' : 'Refund anyway') + '</button>';
     }
     html += '<tr><td>' + esc(String(o.createdAt || '').slice(0, 16).replace('T', ' ')) + (o.test ? ' <b class="dim">TEST</b>' : '') + '</td><td>'
-      + (o.username ? '@' + esc(o.username) : '<span class="dim">account deleted</span>') + '</td><td>SAR ' + esc(String(o.amount))
+      + (o.username ? '@' + esc(o.username) : '<span class="dim">account deleted</span>') + '</td><td>' + esc(o.product === 'year' ? 'Year' : o.product === 'match' ? 'Match pass' : 'Month') + ' <span class="dim">' + esc(String(o.days || '')) + ' days' + (o.src ? ', from ' + esc(PLACE_LABEL[o.src] || o.src) : '') + '</span></td><td>SAR ' + esc(String(o.amount))
       + (o.refunded ? ' <span class="dim">(' + esc(String(o.refunded)) + ' back)</span>' : '') + '</td><td>'
       + (lab[1] ? '<span class="' + lab[1] + '">' + esc(lab[0]) + '</span>' : esc(lab[0]))
       + (o.told === true ? '<br><span class="dim">fan emailed</span>' : o.told === false ? '<br><span class="warn">fan not emailed yet</span>' : '')

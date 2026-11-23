@@ -31,6 +31,8 @@ import { CROWN_SVG, backWhen, endsText, kindName, money, proChipHtml, proNavOnSa
 import { localPath, onLangChange, t, tv } from './i18n';
 import { supporterBadgeHtml } from './supporterBadge';
 import type { PurchasesUi } from './proPurchases';
+import { otherPlansHtml, plansListed, wirePlanList } from './proPlanList';
+import { getPressed, offerSeen, proLink } from './proWhere';
 
 const ORDER: AllowanceKind[] = ['std', 'polish', 'cutout', 'photo'];
 const DAY = 24 * 60 * 60 * 1000;
@@ -140,7 +142,7 @@ export function mountProAccount(sections: HTMLElement, onSummary?: (summary: Pro
       `<p class="ac-lead">${escapeHtml(t('ac.area.billing.d'))}</p></header>` +
       (refunded && pu ? pu.refundedHtml(refunded) : '');
     const card =
-      `<div class="pro-plan${paid ? ' paid' : ''}"><div class="ac-row"><span class="ac-value">${escapeHtml(t(`ac.pro.plan.${plan}`))}</span>` +
+      `<div class="pro-plan${paid ? ' paid' : ''}"><div class="ac-row"><span class="ac-value">${escapeHtml(plan === 'monthly' && st.offer?.plans ? t('ac.pro.plan.pro') : t(`ac.pro.plan.${plan}`))}</span>` +
       (paid ? proChipHtml() : '') +
       (pass ? `<span class="ac-badge" data-state="${ending ? 'pending' : 'ok'}">${escapeHtml(tv('ac.pro.ends', { date: endsText(pass.endsAt) }))}</span>` : '') +
       // Every pass is counted in days: how many are left, beside the day it ends.
@@ -173,8 +175,10 @@ export function mountProAccount(sections: HTMLElement, onSummary?: (summary: Pro
     const offer = !st.live || st.supporter || g?.state === 'offered'
       ? ''
       : canBuy && st.offer
-        ? `<div class="ac-actions"><a class="pro-btn pro-ac-get" data-act="get" href="${escapeHtml(localPath('/pro'))}">${CROWN_SVG}<span>${escapeHtml(tv('pb.buy', { price: money(st.offer.monthly.price) }))}</span></a>` +
-          `<button type="button" class="ac-btn" data-act="what">${escapeHtml(t('pro.sheet.whatTitle'))}</button></div>`
+        ? `<div class="ac-actions"><a class="pro-btn pro-ac-get" data-act="get" href="${escapeHtml(plansListed(st.offer) ? proLink('account') : localPath('/pro'))}">${CROWN_SVG}<span>${escapeHtml(tv(plansListed(st.offer) ? 'pl.month.get' : 'pb.buy', { price: money(st.offer.monthly.price) }))}</span></a>` +
+          `<button type="button" class="ac-btn" data-act="what">${escapeHtml(t('pro.sheet.whatTitle'))}</button></div>` +
+          // Where every plan on sale is named (PRO_THREE_PLANS): the match pass and the year, under the month's button.
+          otherPlansHtml(st.offer, 'account')
         : paid
           ? ''
           : `<div class="ac-actions"><button type="button" class="ac-btn" data-act="what">${escapeHtml(t('pro.sheet.whatTitle'))}</button></div>`;
@@ -230,6 +234,12 @@ export function mountProAccount(sections: HTMLElement, onSummary?: (summary: Pro
       const { openGiftSheet } = await import('./proSheets');
       if (await openGiftSheet(st)) await load(true);
     });
+    // The plans named here count as an offer seen on the account page, and each press by its plan.
+    if (plansListed(st.offer) && sec.querySelector('[data-plans]')) {
+      offerSeen('account');
+      sec.querySelector('[data-act="get"]')?.addEventListener('click', () => getPressed('account'));
+      wirePlanList(sec, st.offer, 'account');
+    }
     sec.querySelector('[data-act="what"]')?.addEventListener('click', () => void import('./proSheets').then((m) => m.openProSheet(st)));
     pu?.wirePurchases(sec, ui, paint, () => load(true));
     sec.hidden = false;

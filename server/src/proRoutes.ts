@@ -9,7 +9,7 @@
  * and which plan.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, UNLISTED, autoGiftOn, giftMailsOn, matchPass, monthlyPriceInvalid, monthlyPriceSetting, postOffersOn, proMode, previewUsers, type AllowanceKind, type MatchPass, type Window } from './proPlan';
+import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, UNLISTED, autoGiftOn, giftMailsOn, matchPass, monthlyPriceInvalid, monthlyPriceSetting, postOffersOn, proMode, previewUsers, threePlansOn, yearPlan, yearPriceInvalid, PRODUCTS, type AllowanceKind, type MatchPass, type Product, type Window, type YearPlan } from './proPlan';
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
 import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarizeAll } from './proPrice';
 import type { PriceAnswer } from './proRepo';
@@ -60,6 +60,8 @@ export interface ProRouteDeps {
   payInfo?: (userId: string) => Promise<{ purchases: boolean; refundNotice: { order: string; amount: number; at: string; test: boolean } | null } | null>;
   /** The match pass as it is sold now (payments.ts match()). Absent: it is not sold. */
   match?: () => MatchPass;
+  /** The year as it is sold now (payments.ts year()). Absent: it is not sold. */
+  year?: () => YearPlan;
   /** Real purchases paid since a day, for /admin's gift and funnel counts (payRepo.paidOrders). Absent: none. */
   paidOrders?: (since: Date) => Promise<PaidOrder[]>;
   /** How many sessions reached each of these funnel steps in the last `days` (the consent-gated events). Absent: none. */
@@ -106,8 +108,13 @@ const ADMIN_PRICE_ROWS = 300;
 const ADMIN_MEMBER_ROWS = 2000;
 
 /** The parts of the offer the Pro page shows: Free against Pro, one price, and whether this visitor can buy it. */
-function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false, match: MatchPass | null = null) {
+function publicOffer(p: PriceNow, paymentsOpen: boolean, checkout: 'invoice' | 'form' = 'invoice', autoRenew = false, match: MatchPass | null = null, year: YearPlan | null = null) {
   return {
+    // The year, where it is sold and can be bought: its price, its length, and a twelfth of the price (to the
+    // nearest halala) as "a month" of it. The page shows the whole price first; this is only the comparison.
+    ...(paymentsOpen && year?.on ? { year: { price: year.halalas / 100, days: year.days, perMonth: Math.round(year.halalas / 12) / 100 } } : {}),
+    // /pro is the three-plan page and the sheets name every plan on sale (PRO_THREE_PLANS).
+    ...(paymentsOpen && threePlansOn() ? { plans: true } : {}),
     // The match pass, where it is sold and can be bought: its price, its length, and that length in hours as the page says it.
     ...(paymentsOpen && match?.on ? { match: { price: match.halalas / 100, days: match.days, hours: match.days * 24 } } : {}),
     // Pro's versions and the account offer show on Post it and share (PRO_POST_OFFERS).
@@ -139,6 +146,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
   const canBuy = (username: string | null): boolean => deps.paymentsOpenFor?.(username) ?? false;
   const priceNow = (): PriceNow => deps.price?.() ?? priceAt(pro.now());
   const matchNow = (): MatchPass | null => deps.match?.() ?? null;
+  const yearNow = (): YearPlan | null => deps.year?.() ?? null;
   /** The language the caller's browser asks for first, for the gift's record (its emails are in both anyway). */
   const langOf = (req: FastifyRequest): 'en' | 'ar' | null => {
     const h = String(req.headers['accept-language'] ?? '').trim().toLowerCase();
@@ -157,7 +165,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId) {
       const open = proMode() === 'on';
-      return open ? { live: true, signedIn: false, offer: publicOffer(priceNow(), deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.(), matchNow()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
+      return open ? { live: true, signedIn: false, offer: publicOffer(priceNow(), deps.paymentsPublic?.() ?? false, deps.checkoutKind?.(), deps.autoRenew?.(), matchNow(), yearNow()), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
     }
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user) return { live: false, signedIn: true, soon: soonOffer() };
@@ -188,7 +196,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       allowances,
       gift,
       notified,
-      offer: publicOffer(priceNow(), buys, deps.checkoutKind?.(), deps.autoRenew?.(), matchNow()),
+      offer: publicOffer(priceNow(), buys, deps.checkoutKind?.(), deps.autoRenew?.(), matchNow(), yearNow()),
       // Only said to an account that has it: nobody else's answer changes.
       ...(renewal ? { renewal: true } : {}),
       ...(founder ? { founder } : {}),
@@ -383,18 +391,28 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
     void reply.header('cache-control', 'no-store');
     const days = Math.max(1, Math.min(365, Number((req.query as { days?: string }).days) || 30));
-    const names = OFFER_PLACES.flatMap((p) => [`pro_offer_${p}`, `pro_get_${p}`]);
-    const extra = ['pro_checkout', 'pro_paid', 'monthly_bought', 'match_bought', 'gift_auto', 'gift_welcome', 'gift_end_seen', 'bought_after_gift', 'pro_preview_post', 'signup_offer_post', 'signup_post'];
+    const names = OFFER_PLACES.flatMap((p) => [`pro_offer_${p}`, `pro_get_${p}`, `pro_plans_${p}`, ...PRODUCTS.map((x) => `pro_pick_${x}_${p}`)]);
+    const extra = ['pro_checkout', 'pro_paid', 'monthly_bought', 'match_bought', 'year_bought', 'gift_auto', 'gift_welcome', 'gift_end_seen', 'bought_after_gift', 'pro_preview_post', 'signup_offer_post', 'signup_post'];
     const steps = deps.funnel ? await deps.funnel([...names, ...extra], days).catch(() => []) : [];
     const n = (name: string): number => steps.find((s) => s.name === name)?.sessions ?? 0;
     const since = new Date(pro.now().getTime() - days * DAY_MS);
     const paid = (deps.paidOrders ? await deps.paidOrders(since).catch(() => []) : []).filter((o) => !o.refunded);
-    const paidAt = (place: string | null, product: 'monthly' | 'match'): number => paid.filter((o) => (o.src ?? null) === place && o.product === product).length;
+    const paidAt = (place: string | null, product: Product): number => paid.filter((o) => (o.src ?? null) === place && o.product === product).length;
+    const of = (product: Product) => paid.filter((o) => o.product === product);
+    const sum = (product: Product): number => of(product).reduce((s, o) => s + o.amount, 0) / 100;
     return {
       days,
-      places: OFFER_PLACES.map((p) => ({ place: p, saw: n(`pro_offer_${p}`), pressed: n(`pro_get_${p}`), monthly: paidAt(p, 'monthly'), match: paidAt(p, 'match') })),
-      notSaid: { monthly: paidAt(null, 'monthly'), match: paidAt(null, 'match') },
-      paid: { monthly: paid.filter((o) => o.product === 'monthly').length, match: paid.filter((o) => o.product === 'match').length, revenue: paid.reduce((s, o) => s + o.amount, 0) / 100 },
+      places: OFFER_PLACES.map((p) => ({
+        place: p, saw: n(`pro_offer_${p}`), pressed: n(`pro_get_${p}`), monthly: paidAt(p, 'monthly'), match: paidAt(p, 'match'), year: paidAt(p, 'year'),
+        // The plan list was shown here, and which plan was pressed on it (PRO_THREE_PLANS).
+        plans: n(`pro_plans_${p}`), pick: { monthly: n(`pro_pick_monthly_${p}`), match: n(`pro_pick_match_${p}`), year: n(`pro_pick_year_${p}`) },
+      })),
+      notSaid: { monthly: paidAt(null, 'monthly'), match: paidAt(null, 'match'), year: paidAt(null, 'year') },
+      paid: {
+        monthly: of('monthly').length, match: of('match').length, year: of('year').length, revenue: paid.reduce((s, o) => s + o.amount, 0) / 100,
+        // Money by plan, so what a year buyer brings can be read off the page.
+        revenueBy: { monthly: sum('monthly'), match: sum('match'), year: sum('year') },
+      },
       steps: Object.fromEntries(extra.map((e) => [e, n(e)])),
       counted: !!deps.funnel,
     };
@@ -428,6 +446,8 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
         autoGift: autoGiftOn(), giftMails: giftMailsOn(), postOffers: postOffersOn(),
         monthlyPrice: monthlyPriceSetting() === null ? null : monthlyPriceSetting()! / 100, monthlyPriceInvalid: monthlyPriceInvalid(),
         match: ((m) => ({ asked: m.on, price: m.halalas / 100, days: m.days }))(matchPass()),
+        year: ((y) => ({ asked: y.on, price: y.halalas / 100, days: y.days, priceInvalid: yearPriceInvalid() }))(yearPlan()),
+        threePlans: threePlansOn(),
       },
       giftsStarted: await giftCounts(),
       cutoutConfigured: deps.cutoutConfigured(),

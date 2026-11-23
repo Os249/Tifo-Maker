@@ -652,6 +652,7 @@ const ALL_OFF = {
   PRO_LAUNCH_PRICE_UNTIL: undefined, PRO_PRICE_DISPLAY: undefined, PRO_DISCOUNT_LICENCE: undefined, PRO_FOUNDERS_BONUS: undefined,
   PRO_MONTHLY_PRICE: undefined, PRO_MATCH_PASS: undefined, PRO_MATCH_PRICE: undefined, PRO_MATCH_DAYS: undefined,
   PRO_AUTO_GIFT: undefined, PRO_GIFT_MAILS: undefined, PRO_POST_OFFERS: undefined,
+  PRO_YEAR: undefined, PRO_YEAR_PRICE: undefined, PRO_THREE_PLANS: undefined,
 };
 const restore = setEnv(ALL_OFF);
 {
@@ -728,7 +729,9 @@ const restore = setEnv(ALL_OFF);
     assert.equal((await get(url, null)).statusCode, 403);
   }
   const admin = (await boss('/api/admin/pro')).json();
-  assert.deepEqual(admin.settings, { autoGift: true, giftMails: false, postOffers: true, monthlyPrice: 9.99, monthlyPriceInvalid: false, match: { asked: true, price: 4.99, days: 3 } });
+  assert.deepEqual(admin.settings, { autoGift: true, giftMails: false, postOffers: true, monthlyPrice: 9.99, monthlyPriceInvalid: false, match: { asked: true, price: 4.99, days: 3 },
+    // The year and the three-plan page (server/test/plans.test.mts): off here, as everywhere until switched on.
+    year: { asked: false, price: 89.99, days: 365, priceInvalid: false }, threePlans: false });
   assert.deepEqual([admin.giftsStarted.auto.started, admin.giftsStarted.auto.running, admin.giftsStarted.auto.boughtDuring, admin.giftsStarted.accept.started], [1, 1, 1, 0], 'one gift started (the other account has not been back), and its holder bought while it ran');
   await app.inject({ method: 'POST', url: '/api/events', payload: { session: 's1', name: 'pro_offer_post' } });
   await app.inject({ method: 'POST', url: '/api/events', payload: { session: 's1', name: 'pro_get_post' } });

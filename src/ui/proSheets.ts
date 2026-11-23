@@ -17,6 +17,7 @@ import { containDialog } from './dialogFocus';
 import { localPath, t, tv } from './i18n';
 import { CROWN_SVG, money, whenDate } from './pro';
 import type { BothWays } from './proGate';
+import { otherPlansHtml, plansListed, wirePlanList } from './proPlanList';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -149,14 +150,24 @@ export function priceLine(offer: ProOffer): string {
 
 /** The match pass in one quiet line that is also the way to it, while it is sold; otherwise nothing. */
 function matchLine(offer: ProOffer | undefined, place: ProPlace): string {
+  // Where the sheets name every plan on sale (PRO_THREE_PLANS): the match pass and the year, with their prices and lengths.
+  if (plansListed(offer)) return otherPlansHtml(offer, place);
   const m = offer?.paymentsOpen ? offer.match : undefined;
   if (!m) return '';
   return `<a class="pro-text-btn" data-act="match" href="${escapeHtml(proLink(place, 'match'))}">${escapeHtml(tv('pro.matchLine', { hours: m.hours, price: money(m.price) }))}</a>`;
 }
 
 /** Get Pro and the match pass link in a sheet count as "pressed Get Pro" at this place. */
-function wireGet(sheet: Sheet, place: ProPlace): void {
+function wireGet(sheet: Sheet, place: ProPlace, offer?: ProOffer): void {
   sheet.body.querySelectorAll('[data-act="get"], [data-act="match"]').forEach((a) => a.addEventListener('click', () => getPressed(place)));
+  // The plans named on the sheet: shown here, and which one was pressed.
+  wirePlanList(sheet.body, offer, place);
+}
+
+/** The month's own button on a sheet: "Get Pro for SAR 9.99", or "Get the month" where the other plans are named beside it. */
+function monthLabel(offer: ProOffer, keep = false): string {
+  const price = money(offer.monthly.price);
+  return plansListed(offer) ? tv(keep ? 'pl.month.keep' : 'pl.month.get', { price }) : tv(keep ? 'ge.keepBtn' : 'pro.act.getPro', { price });
 }
 
 // -------------------------------------------------- the automatic gift ---
@@ -251,7 +262,7 @@ export function openGiftEndSheet(state: ProState): Promise<void> {
     (offer?.paymentsOpen ? `<p>${escapeHtml(priceLine(offer))}</p>` : '') +
     `<div class="pro-actions">` +
     (offer?.paymentsOpen
-      ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink('giftend'))}">${escapeHtml(tv('ge.keepBtn', { price: money(offer.monthly.price) }))}</a>` + matchLine(offer, 'giftend')
+      ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink('giftend'))}">${escapeHtml(monthLabel(offer, true))}</a>` + matchLine(offer, 'giftend')
       : `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(t('pro.act.seePage'))}</a>`) +
     `<button type="button" class="pro-text-btn" data-act="later">${escapeHtml(t('pro.act.notNow'))}</button>` +
     `</div>`,
@@ -260,7 +271,7 @@ export function openGiftEndSheet(state: ProState): Promise<void> {
   track('gift_end_seen');
   offerSeen('giftend');
   void giftEndSeen();
-  wireGet(sheet, 'giftend');
+  wireGet(sheet, 'giftend', offer);
   sheet.body.querySelector('[data-act="later"]')!.addEventListener('click', sheet.close);
   return sheet.closed;
 }
@@ -279,19 +290,20 @@ export function openProSheet(state: ProState, opts: { title?: string; lead?: str
     mark() +
     `<h2>${escapeHtml(opts.title ?? t('pro.sheet.whatTitle'))}</h2>` +
     `<p>${escapeHtml(opts.lead ?? t('pro.sheet.whatLead'))}</p>` +
-    perksHtml(perksOf([...GIFT_PERKS, 'pro.perk.badge'], state)) +
+    // The crown comes with any paid plan: where the plans are named, it is not said to be the month's.
+    perksHtml(perksOf([...GIFT_PERKS, plansListed(offer) ? 'pl.perk.badge' : 'pro.perk.badge'], state)) +
     (offer ? `<p>${escapeHtml(priceLine(offer))}</p>` : '') +
     `<div class="pro-actions">` +
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink(place))}">${escapeHtml(tv('pro.act.getPro', { price: money(offer.monthly.price) }))}</a>` + matchLine(offer, place)
+        ? `<a class="pro-primary" data-act="get" href="${escapeHtml(proLink(place))}">${escapeHtml(monthLabel(offer))}</a>` + matchLine(offer, place)
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<a class="pro-text-btn" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(t('pro.act.seePage'))}</a>` +
     `</div><p class="pro-note" role="status" aria-live="polite"></p>`,
   );
   offerSeen(place);
-  wireGet(sheet, place);
+  wireGet(sheet, place, offer);
   const note = sheet.body.querySelector('.pro-note') as HTMLElement;
   sheet.body.querySelector('[data-act="gift"]')?.addEventListener('click', () => {
     sheet.close();
@@ -382,7 +394,7 @@ export function openExportSheet(items: string[], state: ProState, both?: BothWay
   );
   track('export_sheet');
   offerSeen('export');
-  wireGet(sheet, 'export');
+  wireGet(sheet, 'export', offer);
   // Free first, then Pro, one at a time (they share the device's one 3D view).
   // A side with no picture is left out; with neither, the block goes.
   const stop = new AbortController();

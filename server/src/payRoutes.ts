@@ -40,6 +40,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { REFUND_DAYS, type PaymentService, type Purchase } from './payments';
 import { ORDER_SRC, type ProOrder, type ProSubscription } from './payRepo';
+import { asProduct } from './proPlan';
 import type { UserRow } from './repo';
 
 export interface PayRouteDeps {
@@ -121,13 +122,13 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
     if (!pay.openFor(user.username)) return notFound(reply);
     const body = (req.body ?? {}) as { lang?: unknown; product?: unknown; src?: unknown };
     const lang = body.lang === 'ar' ? 'ar' : 'en';
-    // Which of the two things on sale: anything but 'match' is the month. The price is the server's.
-    if (body.product !== undefined && body.product !== 'monthly' && body.product !== 'match') return reply.code(400).send({ error: 'product must be monthly or match' });
+    // Which of the things on sale: the month when nothing is said. The price is the server's.
+    if (body.product !== undefined && body.product !== 'monthly' && body.product !== 'match' && body.product !== 'year') return reply.code(400).send({ error: 'product must be monthly, match or year' });
     const r = await pay.checkout(
       { id: user.id, username: user.username, email: user.email, emailVerified: !!user.emailVerifiedAt },
       lang,
       deps.baseOf(req),
-      { product: body.product === 'match' ? 'match' : 'monthly', src: typeof body.src === 'string' && ORDER_SRC.test(body.src) ? body.src : null },
+      { product: asProduct(body.product), src: typeof body.src === 'string' && ORDER_SRC.test(body.src) ? body.src : null },
     );
     if (r.ok) return 'url' in r ? { ok: true, order: r.orderId, url: r.url } : { ok: true, order: r.orderId, form: r.form };
     const status = r.reason === 'off' ? 404 : r.reason === 'verify' ? 403 : r.reason === 'held' ? 409 : r.reason === 'busy' ? 429 : 503;

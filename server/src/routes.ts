@@ -47,7 +47,7 @@ import { registerKitRoutes } from './kitRoutes';
 import type { EventRepository } from './eventRepo';
 import { registerEventRoutes } from './eventRoutes';
 import { cutoutConfigured } from './cutout';
-import { OFFER, autoGiftOn, giftMailsOn, liveFor, proMode } from './proPlan';
+import { OFFER, autoGiftOn, giftMailsOn, liveFor, proMode, threePlansOn } from './proPlan';
 import { GIFT_MAILS_PER_DAY, GiftMailService } from './proGift';
 import { giftEmail } from './proGiftMail';
 import type { GiftMailKind } from './proRepo';
@@ -1290,6 +1290,12 @@ export async function buildApp(
     'pro_preview_post',   // saw their own tifo as the Pro version, on Post it
     'monthly_bought',     // came back from paying for 30 days of Pro
     'match_bought',       // came back from paying for a match pass
+    'year_bought',        // came back from paying for a year
+    // The three plans (22 Nov 2026, PRO_THREE_PLANS): the plan list was shown at a place, and which plan was pressed there.
+    'pro_plans_post', 'pro_plans_share', 'pro_plans_export', 'pro_plans_page', 'pro_plans_giftend', 'pro_plans_limit', 'pro_plans_account',
+    'pro_pick_monthly_post', 'pro_pick_monthly_share', 'pro_pick_monthly_export', 'pro_pick_monthly_page', 'pro_pick_monthly_giftend', 'pro_pick_monthly_limit', 'pro_pick_monthly_account',
+    'pro_pick_match_post', 'pro_pick_match_share', 'pro_pick_match_export', 'pro_pick_match_page', 'pro_pick_match_giftend', 'pro_pick_match_limit', 'pro_pick_match_account',
+    'pro_pick_year_post', 'pro_pick_year_share', 'pro_pick_year_export', 'pro_pick_year_page', 'pro_pick_year_giftend', 'pro_pick_year_limit', 'pro_pick_year_account',
     'gift_auto',          // the 7-day gift started by itself for them
     'gift_welcome',       // ...and they saw the welcome
     'gift_end_seen',      // saw the card that says the gift ended
@@ -1731,6 +1737,7 @@ export async function buildApp(
   // The automatic gift's emails (proGift.ts). Nothing is sent unless PRO_GIFT_MAILS and PRO_AUTO_GIFT are both on.
   const giftMail = (kind: GiftMailKind, to: string, stopToken: string, endsAt: string, offersOk: boolean, now: Date) => {
     const m = payService?.match() ?? null;
+    const y = payService?.year() ?? null;
     // A price only for a fan who asked for Pro's offers by email, and only where Pro can really be bought.
     const selling = !!payService?.on() && paymentsPublic();
     return giftEmail({
@@ -1738,7 +1745,7 @@ export async function buildApp(
       stopUrl: `${payBase}/pro?nomail=${encodeURIComponent(stopToken)}`,
       stopPost: `${payBase}/api/pro/mail/stop?t=${encodeURIComponent(stopToken)}`,
       offer: kind === 'end' && offersOk && selling
-        ? { monthly: priceAt(now).halalas, monthlyDays: OFFER.monthly.days, match: m?.on ? { price: m.halalas, hours: m.days * 24 } : null, autoRenew: payService?.renewOn() ?? false }
+        ? { monthly: priceAt(now).halalas, monthlyDays: OFFER.monthly.days, match: m?.on ? { price: m.halalas, hours: m.days * 24 } : null, year: y?.on ? { price: y.halalas, days: y.days } : null, autoRenew: payService?.renewOn() ?? false }
         : null,
     });
   };
@@ -1816,6 +1823,7 @@ export async function buildApp(
         };
       },
       match: () => payService?.match() ?? { on: false, halalas: 0, days: 0 },
+      year: () => payService?.year() ?? { on: false, halalas: 0, days: 0 },
       paidOrders: async (since) => (options.payments ? options.payments.paidOrders(since, 5000) : []),
       funnel: options.events ? (steps, days) => options.events!.funnel(steps, days) : undefined,
       useConfig: options.rateLimit ? { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } } : undefined,
@@ -5784,9 +5792,11 @@ export async function buildApp(
       const made = (raw: string, launching: boolean): string => {
         const p = priceAt(launching && until ? new Date(until.getTime() - 1) : new Date(8.64e15));
         const mp = payService?.match() ?? null;
+        const yp = payService?.year() ?? null;
         return payLegal(raw, onSale, renewTerms, {
           launch: launching && p.launch && p.until ? { price: p.halalas, regular: p.regular, until: p.until } : null, founders: founderTerms,
           match: mp?.on ? { price: mp.halalas, hours: mp.days * 24 } : null,
+          year: yp?.on ? { price: yp.halalas, days: yp.days } : null,
           gift: proMode() === 'on' && autoGiftOn() ? { days: OFFER.gift.days, mails: giftMailsOn() } : null,
         });
       };
@@ -5853,12 +5863,13 @@ export async function buildApp(
     // the same list the page swaps by. The price is never in the HTML: it is /api/pro's to say.
     try {
       const proHtml = readFileSync(join(staticDir, 'pro.html'), 'utf8');
-      const how = { form: proOnSale && payService?.checkoutKind() === 'form', renew: proOnSale && !!payService?.renewOn() };
+      // The three-plan page (PRO_THREE_PLANS) is sent already laid out as one: its own hero words, and the class the page's styles go by.
+      const how = { form: proOnSale && payService?.checkoutKind() === 'form', renew: proOnSale && !!payService?.renewOn(), plans: proOnSale && threePlansOn() };
       const saleHtml = (html: string, lang: PageLang): string => {
         let out = html
           .replace(/\s*<!--[^>]*-->\s*(?=<meta name="robots")/, '\n  ')
           .replace(/<meta name="robots" content="noindex"\s*\/?>\s*/, '')
-          .replace(/<div id="pp-open">/, '<div id="pp-open" class="on-sale">')
+          .replace(/<div id="pp-open">/, `<div id="pp-open" class="on-sale${how.plans ? ' plans3' : ''}">`)
           .replace(/<body>/, '<body class="pp-selling">')
           .replace(/(<details id="pp-faq-(?:refund|who)") hidden>/g, '$1>');
         for (const [soon, sale] of SALE_KEYS) {

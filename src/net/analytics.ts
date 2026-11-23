@@ -51,6 +51,10 @@ export type FunnelEvent =
   | 'pro_preview_post'   // saw their own tifo as the Pro version, on Post it
   | 'monthly_bought'     // came back from paying for 30 days of Pro
   | 'match_bought'       // came back from paying for a match pass
+  | 'year_bought'        // came back from paying for a year
+  // The three plans (PRO_THREE_PLANS): the plan list was shown at a place, and which plan was pressed there.
+  | `pro_plans_${ProPlace}`
+  | `pro_pick_${'monthly' | 'match' | 'year'}_${ProPlace}`
   | 'gift_auto'          // the 7-day gift started by itself for them
   | 'gift_welcome'       // ...and they saw the welcome
   | 'gift_end_seen'      // saw the card that says the gift ended

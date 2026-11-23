@@ -164,6 +164,9 @@
       <template data-pay="match">
       <p><b>The match pass.</b> A match pass is the same Pro for {{matchHours}} hours from the moment it is paid, for one payment of SAR {{matchPrice}}. That is the whole amount: nothing is added at checkout and no VAT is charged. It never renews, and no card is kept for it: when the hours end, your account goes back to the free plan by itself. If you already hold Pro, a match pass starts when that Pro ends. The refund is the same as for a month: all of your money back within 7 days of paying if you haven't used Pro with it, asked for in the same way. Those 7 days still run after the pass itself has ended.</p>
       </template>
+      <template data-pay="year">
+      <p><b>The year.</b> A year is the same Pro for {{yearDays}} days, for one payment of SAR {{yearPrice}}. That is the whole amount: nothing is added at checkout and no VAT is charged. Where the Pro page says "SAR {{yearPerMonth}} a month", that is this one payment divided by twelve, shown only to compare; it is not a monthly charge. It never renews, and no card is kept for it: when the days end, your account goes back to the free plan by itself, and the date it ends is on your receipt and on your account page. If you already hold Pro, a year starts when that Pro ends. The refund is the same as for a month: all of your money back within 7 days of paying if you haven't used Pro with it, asked for in the same way. After that a year isn't refunded, with one addition: if I stop providing Pro before your year ends, you get back the part of the price for the days that were left.</p>
+      </template>
       <template data-pay="gift">
       <p><b>The {{giftDays}} free days.</b> An account with a verified email address that has never held Pro gets Pro for {{giftDays}} days, once, at no charge. The days start by themselves the first time you are on the site with a verified email. No card is asked for, nothing is charged when they end and nothing renews: your account goes back to the free plan, and everything you made stays yours. They are not given to throwaway email addresses, and cannot be passed to another account or exchanged for money.</p>
       </template>
@@ -372,6 +375,9 @@
       </template>
       <template data-pay="match">
       <p><b>باقة المباراة.</b> باقة المباراة هي نفس برو لمدة {{matchHours}} ساعة من لحظة الدفع، بدفعة وحدة قدرها {{matchPrice}} ريال. هذا المبلغ كامل: ما ينضاف عليه شي وقت الدفع، وما فيه ضريبة قيمة مضافة. ما تتجدد أبد، وما نحفظ لها بطاقة: إذا خلصت الساعات يرجع حسابك للباقة المجانية لحاله. وإذا عندك برو من قبل، تبدأ باقة المباراة لما يخلص. والاسترداد مثل الشهر: ترجع لك فلوسك كاملة خلال 7 أيام من الدفع إذا ما استخدمت برو فيها، وتطلبه بنفس الطريقة. وهالـ7 أيام تبقى ماشية حتى بعد ما تخلص الباقة نفسها.</p>
+      </template>
+      <template data-pay="year">
+      <p><b>السنة.</b> السنة هي نفس برو لمدة {{yearDays}} يوم، بدفعة وحدة قدرها {{yearPrice}} ريال. هذا المبلغ كامل: ما ينضاف عليه شي وقت الدفع، وما فيه ضريبة قيمة مضافة. وإذا كتبنا في صفحة برو «{{yearPerMonth}} ريال بالشهر» فهذا نفس الدفعة مقسومة على 12 للمقارنة بس، ومو مبلغ ينخصم منك كل شهر. ما تتجدد أبد، وما نحفظ لها بطاقة: إذا خلصت الأيام يرجع حسابك للباقة المجانية لحاله، وتاريخ انتهائها مكتوب في إيصالك وفي صفحة حسابك. وإذا عندك برو من قبل، تبدأ السنة لما يخلص. والاسترداد مثل الشهر: ترجع لك فلوسك كاملة خلال 7 أيام من الدفع إذا ما استخدمت برو فيها، وتطلبه بنفس الطريقة. وبعدها السنة ما تُسترد، إلا في حالة وحدة زيادة: إذا وقّفت خدمة برو قبل ما تخلص سنتك، يرجع لك من المبلغ قد الأيام اللي بقت.</p>
       </template>
       <template data-pay="gift">
       <p><b>أيام برو الـ{{giftDays}} المجانية.</b> الحساب اللي بريده موثّق وما سبق له أخذ برو، ياخذ برو {{giftDays}} أيام، مرة وحدة، بدون مقابل. تبدأ الأيام لحالها أول مرة تكون في الموقع وبريدك موثّق. ما نطلب بطاقة، وما ينخصم شي لما تخلص، وما يتجدد شي: يرجع حسابك للباقة المجانية، وكل شي سويته يبقى لك. وما تنعطى لعناوين البريد المؤقتة، وما تتحوّل لحساب ثاني ولا تتبدّل بفلوس.</p>
