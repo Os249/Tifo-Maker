@@ -1,0 +1,423 @@
+<title>TifoMaker Social HQ</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Changa:wght@600;800&family=Inter:wght@400;500;600&family=Almarai:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a working desk. Sticky tab bar, then one column of review cards; each card is a post exactly as it would go out, with its reasoning folded underneath. */
+:root{
+  --bg:#F3F6FB; --card:#FFFFFF; --sunk:#E8EEF7; --ink:#0B1120; --muted:#55627A; --line:#D6DEEA;
+  --blue:#1C6FE0; --blue-ink:#155EC4; --tint:#E3EDFC; --flare:#D9F000; --on-flare:#0B1120;
+  --ok:#1E8E4F; --ok-bg:#E2F5EA; --warn:#B25E00; --warn-bg:#FFF0DB; --skip:#6B7280; --skip-bg:#EEF0F3;
+  --x:#0B1120; --tt:#E5245E; --yt:#D42A2A;
+  --f-display:"Changa","Arial Narrow",system-ui,sans-serif; --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-ar:"Almarai","Geeza Pro","Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#070B14; --card:#0F172A; --sunk:#161E31; --ink:#E8EEF8; --muted:#97A3BA; --line:#243049;
+  --blue:#1C6FE0; --blue-ink:#7FB0FF; --tint:#16264A; --ok:#5FD08E; --ok-bg:#0F2A1D; --warn:#FFB65C; --warn-bg:#33230C; --skip:#9AA3B2; --skip-bg:#1B2232;
+  --x:#E8EEF8; --tt:#FF5C8A; --yt:#FF6B6B; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#070B14; --card:#0F172A; --sunk:#161E31; --ink:#E8EEF8; --muted:#97A3BA; --line:#243049;
+  --blue:#1C6FE0; --blue-ink:#7FB0FF; --tint:#16264A; --ok:#5FD08E; --ok-bg:#0F2A1D; --warn:#FFB65C; --warn-bg:#33230C; --skip:#9AA3B2; --skip-bg:#1B2232;
+  --x:#E8EEF8; --tt:#FF5C8A; --yt:#FF6B6B; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 var(--f-body);margin:0}
+.wrap{max-width:920px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--f-display);line-height:1.1;margin:0;text-wrap:balance}
+p{margin:0}
+a{color:var(--blue-ink)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.ar,[dir=rtl]{font-family:var(--f-ar)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--card)}
+header.top{padding-block:28px 18px;display:grid;gap:8px}
+header.top h1{font-size:clamp(28px,5vw,40px);font-weight:800}
+header.top h1 b{color:var(--blue-ink)}
+header.top p{color:var(--muted);max-width:62ch}
+nav.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
+nav.tabs .wrap{display:flex;gap:4px;overflow-x:auto;padding-block:8px;scrollbar-width:none}
+nav.tabs a{flex:none;text-decoration:none;color:var(--muted);padding:8px 12px;border-radius:999px;font-weight:600;font-size:14px;min-height:36px;display:flex;align-items:center;gap:6px}
+nav.tabs a[aria-current="page"]{background:var(--tint);color:var(--blue-ink)}
+nav.tabs .count{font:500 11px/1 var(--f-mono);background:var(--sunk);color:var(--muted);padding:3px 6px;border-radius:999px}
+main{padding-block:24px 64px}
+.view{display:grid;gap:16px}
+.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.sum{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.sum b{display:block;font:800 26px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.sum span{font-size:13px;color:var(--muted)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chip{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;font:600 13px/1 var(--f-body);cursor:pointer;min-height:34px}
+.chip[aria-pressed="true"]{background:var(--tint);border-color:transparent;color:var(--blue-ink)}
+.notice{font-size:13px;color:var(--muted);background:var(--sunk);border-radius:10px;padding:10px 12px}
+.post{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:grid}
+.post-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line)}
+.plat{font:600 12px/1 var(--f-mono);padding:5px 8px;border-radius:6px;color:var(--card);text-transform:uppercase;letter-spacing:.06em}
+.plat.x{background:var(--x)}.plat.tiktok{background:var(--tt)}.plat.youtube{background:var(--yt)}
+.post-head h3{font-size:18px;font-weight:600;flex:1 1 240px;min-width:0}
+.meta{font:500 12px/1.3 var(--f-mono);color:var(--muted)}
+.status{font:600 12px/1 var(--f-body);padding:5px 10px;border-radius:999px;background:var(--sunk);color:var(--muted)}
+.status.approved{background:var(--ok-bg);color:var(--ok)}
+.status.changes{background:var(--warn-bg);color:var(--warn)}
+.status.skip{background:var(--skip-bg);color:var(--skip)}
+.post-body{padding:16px;display:grid;gap:14px}
+.copy-block{position:relative;background:var(--sunk);border-radius:10px;padding:14px 16px;padding-inline-end:84px;white-space:pre-wrap;font-size:16px;line-height:1.75;min-width:0;overflow-wrap:anywhere}
+.copy-block[dir=rtl]{padding-inline-end:16px;padding-inline-start:84px}
+.copy-block .lbl{display:block;font:500 11px/1 var(--f-mono);color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;direction:ltr;text-align:left;font-family:var(--f-mono)}
+.copy-btn{position:absolute;top:10px;inset-inline-end:10px;appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 10px;font:600 12px/1 var(--f-body);cursor:pointer;min-height:32px}
+.copy-block[dir=rtl] .copy-btn{inset-inline-end:auto;inset-inline-start:10px}
+.gloss{color:var(--muted);font-size:14px;font-style:italic}
+.rows{display:grid;gap:10px}
+.row{display:grid;grid-template-columns:110px minmax(0,1fr);gap:12px;font-size:14px}
+.row dt{font:500 11px/1.8 var(--f-mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.row dd{margin:0;min-width:0}
+.row ul{margin:0;padding-inline-start:18px;display:grid;gap:4px}
+.asset{display:inline-flex;gap:6px;align-items:center;font-weight:600}
+.asset i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.asset.have i{background:var(--ok)}.asset.need i{background:var(--warn)}
+.asset small{font:500 12px/1.4 var(--f-mono);color:var(--muted);font-weight:500;display:block}
+.dep{font-size:13px;background:var(--warn-bg);color:var(--warn);padding:8px 10px;border-radius:8px}
+details summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--blue-ink);min-height:32px;display:flex;align-items:center}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;border-top:1px solid var(--line);background:var(--card)}
+.btn{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:9px 14px;font:600 14px/1 var(--f-body);cursor:pointer;min-height:40px}
+.btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.note{width:100%;min-height:72px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);padding:10px;font:14px/1.5 var(--f-body);resize:vertical}
+.note-wrap{display:grid;gap:8px;width:100%}
+.saved-note{font-size:13px;color:var(--muted);width:100%}
+.saved-note b{color:var(--ink)}
+.prose{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:clamp(18px,4vw,28px);display:grid;gap:14px}
+.prose h2{font-size:24px;font-weight:800}
+.prose h3{font-size:18px;font-weight:600;margin-top:6px}
+.prose p,.prose li{max-width:68ch}
+.prose ul,.prose ol{margin:0;padding-inline-start:20px;display:grid;gap:6px}
+.prose .muted{color:var(--muted)}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.mini{border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:6px;align-content:start;background:var(--bg)}
+.mini h3{margin:0}
+.mini p{font-size:14px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+.tbl{overflow-x:auto}
+th,td{text-align:start;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11px/1.4 var(--f-mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font:600 11px/1 var(--f-mono);padding:4px 6px;border-radius:5px;background:var(--sunk);color:var(--muted)}
+.tag.big{background:var(--flare);color:var(--on-flare)}
+.dec{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:10px}
+.dec .h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.dec .id{font:500 12px/1 var(--f-mono);color:var(--muted)}
+.dec h3{font-size:18px;font-weight:600;flex:1 1 260px}
+.rec{background:var(--tint);border-radius:10px;padding:10px 12px}
+.rec b{color:var(--blue-ink)}
+.dec .why{color:var(--muted);font-size:14px}
+.trend{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}
+.trend:first-of-type{border-top:0;padding-top:0}
+.do-dont{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.do-dont div{border-radius:12px;padding:14px;background:var(--bg);border:1px solid var(--line)}
+.do-dont .bad li{text-decoration:line-through;text-decoration-color:var(--warn)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:600;font-size:14px;z-index:20}
+@media (max-width:720px){
+  .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid3{grid-template-columns:1fr}
+  .row{grid-template-columns:1fr;gap:2px}
+  .do-dont{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:no-preference){.post,.dec{transition:border-color .15s ease}}
+</style>
+
+<header class="wrap top">
+  <h1>TIFO<b>MAKER</b> Social HQ</h1>
+  <p>Every post for X, TikTok and YouTube waits here until you approve it. Nothing goes out before that. Approve, or say what to change, and I'll read your answers back and revise.</p>
+</header>
+
+<nav class="tabs" aria-label="Sections">
+  <div class="wrap">
+    <a href="#queue" data-tab="queue">Review queue <span class="count" id="c-queue">0</span></a>
+    <a href="#decisions" data-tab="decisions">Decisions <span class="count" id="c-dec">10</span></a>
+    <a href="#plan" data-tab="plan">The plan</a>
+    <a href="#trends" data-tab="trends">What's working</a>
+    <a href="#calendar" data-tab="calendar">Calendar</a>
+    <a href="#voice" data-tab="voice">How we sound</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <section class="view" id="v-queue" data-view="queue">
+    <div class="summary" aria-live="polite">
+      <div class="sum"><b id="s-wait">0</b><span>waiting for you</span></div>
+      <div class="sum"><b id="s-ok">0</b><span>approved</span></div>
+      <div class="sum"><b id="s-ch">0</b><span>need changes</span></div>
+      <div class="sum"><b id="s-need">0</b><span>need a video or image made</span></div>
+    </div>
+    <div class="filters" role="group" aria-label="Filter posts">
+      <button class="chip" data-f="all" aria-pressed="true">All</button>
+      <button class="chip" data-f="x" aria-pressed="false">X</button>
+      <button class="chip" data-f="tiktok" aria-pressed="false">TikTok</button>
+      <button class="chip" data-f="youtube" aria-pressed="false">YouTube</button>
+      <button class="chip" data-f="waiting" aria-pressed="false">Waiting</button>
+    </div>
+    <p class="notice" id="store-note">Loading your saved answers…</p>
+    <div id="posts" class="view"></div>
+  </section>
+
+  <section class="view" id="v-decisions" data-view="decisions" hidden>
+    <p class="notice">These shape everything in the queue. Each one has my recommendation and the reason. Agree, or write what you want instead.</p>
+    <div id="decs" class="view"></div>
+  </section>
+
+  <section class="view" id="v-plan" data-view="plan" hidden>
+    <div class="prose">
+      <h2>The plan in one paragraph</h2>
+      <p>TikTok brings new fans in, X is where they hear it from us first, and YouTube is where they learn to do it and find us through search. Everything is Arabic-first, made around real clubs, real grounds and real match weeks, and sounds like a fan talking. Every post has one job: get a fan to open the site and see their own club's stand. The next six weeks build up to the Asian Cup opener in Riyadh on 7 January.</p>
+    </div>
+    <div class="prose">
+      <h2>Each platform's job</h2>
+      <div class="grid3">
+        <div class="mini"><span class="plat x" style="justify-self:start">X</span><h3>The official word</h3><p>Announcements, new grounds, features, events and Asian Cup news. Match-night reactions within three hours of a real tifo. Tifo of the Week every Friday. Fifteen minutes a day replying to fans and fan groups.</p></div>
+        <div class="mini"><span class="plat tiktok" style="justify-self:start">TikTok</span><h3>New fans</h3><p>Short, loud, Arabic. Club rivalry does the work: "comment your club", derby duels, build timelapses, card counts. Comments become the next videos.</p></div>
+        <div class="mini"><span class="plat youtube" style="justify-self:start">YouTube</span><h3>Found by search</h3><p>Every TikTok again as a Short, plus a long video every two weeks: tutorials and ground flyovers that people find by searching "تيفو" and ground names.</p></div>
+      </div>
+    </div>
+    <div class="prose">
+      <h2>What we post about</h2>
+      <ol>
+        <li><b>Your club.</b> One club at a time, in its own ground, named in the post. Rotate fairly through the league.</li>
+        <li><b>Reveal nights.</b> When a fan group raises a real tifo, we credit it and add the one thing only we know: roughly how many cards it took.</li>
+        <li><b>How it's made.</b> Seat-by-seat builds, card counts, block names, ground measuring. The careful work is the content.</li>
+        <li><b>Fans' tifos.</b> The best community designs, credited, every week.</li>
+        <li><b>Big moments.</b> Derbies and the Asian Cup, built around Al-Akhdar so every club's fans join in.</li>
+        <li><b>News.</b> New grounds and features, on X, written as what a fan can now do.</li>
+      </ol>
+    </div>
+    <div class="prose">
+      <h2>How we learn what works</h2>
+      <ol>
+        <li>Every Monday, paste me the week's analytics screenshots from the three apps.</li>
+        <li>I log each post: views, viewers still there at 1 and 3 seconds, average watch, shares, saves, replies and site visits.</li>
+        <li>Anything above our own average gets a reason written next to it (the hook? the club? the time?) and a follow-up in the same shape the next week.</li>
+        <li>Anything below gets one change only, so we know what fixed it.</li>
+      </ol>
+      <p class="muted">Use a separate link on each profile so the site can tell where visitors came from: tifomaker.org/?utm_source=tiktok, ?utm_source=x and ?utm_source=youtube.</p>
+    </div>
+    <div class="prose">
+      <h2>Targets for the first six weeks</h2>
+      <ul>
+        <li>TikTok: a video keeps 60% of viewers past 3 seconds (video 1 lost more than half in the first second).</li>
+        <li>TikTok: 15 or more comments per 1,000 views on the "comment your club" series.</li>
+        <li>X: every question post gets 25 or more real replies.</li>
+        <li>Site: visits with a social source each week, rising week on week.</li>
+        <li>Asian Cup: 100 designs made on the King Fahd ground by 7 January.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="view" id="v-trends" data-view="trends" hidden>
+    <div class="prose">
+      <h2>What took off, and why</h2>
+      <div class="trend">
+        <h3>Al-Hilal's "3PTS" tifo, King's Cup final, May 2026</h3>
+        <p>A Steph Curry three-pointer with "3PTS" written across it. It was picked up by Marca, Globo and The Athletic, which almost never cover Saudi stands.</p>
+        <p><b>Why it worked:</b> a pun with a point (three points), and a star from outside football, which gave foreign media a reason to write about it.</p>
+        <p><b>What we take from it:</b> when a tifo means something, say the meaning in one line. Our reveal posts (x-07) do that.</p>
+      </div>
+      <div class="trend">
+        <h3>Al-Hilal's "hidden tifo" against Al-Ittihad, October 2026</h3>
+        <p>The group announced only the stand and the colours, white, blue and black. News sites wrote whole articles about it before it went up.</p>
+        <p><b>Why it worked:</b> anticipation and a guessing game. Fans argued about it for days.</p>
+        <p><b>What we take from it:</b> before big games, ask fans what they would put on the stand (x-03), then draw the best answer.</p>
+      </div>
+      <div class="trend">
+        <h3>Our own first TikTok</h3>
+        <p>246 views, 88% from the For You feed. Average watch 4.1 of 14.4 seconds, only 4.6% finished, and the biggest drop at 0:01. 70% Saudi audience, but the video was in English.</p>
+        <p><b>Why it stalled:</b> TikTok did show it to people. The first second didn't hold them: slow start, wrong language, read like an ad.</p>
+        <p><b>What we take from it:</b> the best moment comes first, Arabic on screen, club names in the first three seconds.</p>
+      </div>
+      <div class="trend">
+        <h3>How the platforms rank posts in 2026</h3>
+        <ul>
+          <li><b>TikTok:</b> how much of the video people watch, then shares and saves, then likes. More people now find videos through TikTok search, so captions should use the words fans type ("تيفو الهلال").</li>
+          <li><b>X:</b> replies count most, and X scores how good a reply is, so one-word replies count for little. Links in the main post are widely reported to reduce reach. We'll test that ourselves.</li>
+          <li><b>YouTube Shorts:</b> each Short is first shown to a small group. If they swipe away, it stops there. Channels that stick to one subject get recommended more easily.</li>
+        </ul>
+        <p class="muted">Most of these claims come from marketing blogs, not the platforms themselves. We test them against our own numbers.</p>
+      </div>
+    </div>
+    <div class="prose">
+      <h2>Sources</h2>
+      <ul class="muted">
+        <li><a href="https://www.eremnews.com/sports/2516dly" rel="noopener">Eremnews: the Steph Curry tifo against Al-Ittihad</a></li>
+        <li><a href="https://slaati.com/2026/10/10/p2872017.html" rel="noopener">Slaati: the hidden tifo's colours, October 2026</a></li>
+        <li><a href="https://www.socialpilot.co/blog/tiktok-algorithm" rel="noopener">SocialPilot: how TikTok recommends videos (Sept 2026)</a></li>
+        <li><a href="https://socialpilot.co/blog/twitter-algorithm" rel="noopener">SocialPilot: how the X algorithm works (2026)</a></li>
+        <li><a href="https://vidiq.com/blog/post/youtube-shorts-algorithm/" rel="noopener">vidIQ: the YouTube Shorts algorithm in 2026</a></li>
+        <li><a href="https://www.khaleejtimes.com/sports/football/saudi-arabia-to-kick-off-2027-asian-cup-against-palestine-in-riyadh" rel="noopener">Khaleej Times: Asian Cup opener in Riyadh</a></li>
+        <li><a href="https://www.betexplorer.com/football/saudi-arabia/saudi-professional-league/fixtures/" rel="noopener">Betexplorer: Roshn League fixtures</a></li>
+        <li>Our own: marketing/TIKTOK_VIDEO_2_PLAN.md (video 1 analytics)</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="view" id="v-calendar" data-view="calendar" hidden>
+    <div class="prose">
+      <h2>Match weeks and moments to Asian Cup opening day</h2>
+      <p class="muted">Fixture dates are from third-party listings and can move. Check the SPL site the day before each post that depends on one.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Date</th><th>What's on</th><th>What we post</th></tr></thead>
+        <tbody>
+          <tr><td class="d">24–25 Nov</td><td>Launch week</td><td>Pin x-01, English intro x-02, first TikTok hooks tt-01, series starts tt-02</td></tr>
+          <tr><td class="d">26–28 Nov</td><td>Matchday 13: Al-Fateh v Al-Riyadh, Al-Ittihad v NEOM, Ettifaq v Al-Hilal, Al-Hazem v Al-Nassr</td><td>Fans write the Ettifaq tifo (x-03, x-04), derby duel tt-04, reply videos tt-03</td></tr>
+          <tr><td class="d">29 Nov</td><td>After the round</td><td>Real blocks announcement x-05, card count tt-05</td></tr>
+          <tr><td class="d">1 Dec</td><td></td><td>Founder video tt-06</td></tr>
+          <tr><td class="d">3 Dec</td><td>Al-Hilal v Al-Diriyah</td><td>Kingdom Arena build tt-07</td></tr>
+          <tr><td class="d">5 Dec</td><td></td><td>First long YouTube tutorial yt-03</td></tr>
+          <tr><td class="d">7 Dec</td><td><span class="tag big">1 month to go</span> Asian Cup</td><td>Al-Akhdar contest opens (x-08, tt-08)</td></tr>
+          <tr><td class="d">19 Dec</td><td></td><td>Ground flyover yt-04</td></tr>
+          <tr><td class="d">20–21 Dec</td><td>Al-Riyadh v Al-Hilal, Al-Ittihad v Al-Shabab</td><td>Next "you write the tifo" round, for a different club</td></tr>
+          <tr><td class="d">1 Jan</td><td>Riyadh derby, Al-Nassr v Al-Hilal (date and ground not confirmed)</td><td>Derby week: both ends, both sets of fans</td></tr>
+          <tr><td class="d">7 Jan</td><td><span class="tag big">Opener</span> Saudi Arabia v Palestine, King Fahd Sports City</td><td>Contest winners on all three platforms</td></tr>
+          <tr><td class="d">7 Jan – 5 Feb</td><td>Asian Cup in Riyadh, Jeddah and Al-Khobar</td><td>A tifo for every Saudi match, and the host grounds</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="view" id="v-voice" data-view="voice" hidden>
+    <div class="prose">
+      <h2>How we sound</h2>
+      <p>Like a fan talking in the stands or the group chat after a match, not a company. If a line could be on any brand's account, rewrite it.</p>
+      <ul>
+        <li>Short lines. One idea each.</li>
+        <li>Name the club, the ground, the block. "The north stand at Al-Awwal Park" beats "your stadium".</li>
+        <li>Gulf Arabic, the way people text. Not formal news Arabic.</li>
+        <li>Western digits in both languages: 60,000, 3D, C3.</li>
+        <li>One emoji where a fan would use one: 🔥 👏 👇 and club hearts. Never a row of them.</li>
+        <li>Banter is fine. Insulting a club, its fans or its players is not.</li>
+        <li>Always credit the fan group or designer by their handle.</li>
+        <li>Never pass off a render as a real photo. Say it's drawn in TifoMaker if it could be mistaken.</li>
+      </ul>
+    </div>
+    <div class="prose">
+      <h2>Words we never use</h2>
+      <div class="do-dont">
+        <div><h3>Sounds like us</h3><ul><li>ارسم تيفو ناديك</li><li>شوفه يرتفع بالمدرج</li><li>كم كرت يحتاج؟</li><li>Draw it, watch it go up</li></ul></div>
+        <div class="bad"><h3>Sounds like a company</h3><ul><li>منصة مبتكرة</li><li>نفخر بتقديم</li><li>تجربة فريدة من نوعها</li><li>اكتشف الآن</li><li>Revolutionary, unleash, elevate, game-changer</li></ul></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+  var DATA=null, reviews={}, decisions={}, db=null, canWrite=false, filter='all';
+  var $=function(s,r){return (r||document).querySelector(s)};
+  function el(tag,attrs,kids){var e=document.createElement(tag);if(attrs)for(var k in attrs){if(k==='text')e.textContent=attrs[k];else if(k==='class')e.className=attrs[k];else e.setAttribute(k,attrs[k]);}(kids||[]).forEach(function(c){if(c)e.appendChild(typeof c==='string'?document.createTextNode(c):c)});return e}
+  function isAr(s){return /[\u0600-\u06FF]/.test(s||'')}
+  function toast(msg){var t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(function(){t.hidden=true},1800)}
+
+  // tabs
+  var TABS=['queue','decisions','plan','trends','calendar','voice'];
+  function show(){var h=(location.hash||'#queue').slice(1);if(TABS.indexOf(h)<0)h='queue';
+    document.querySelectorAll('[data-view]').forEach(function(v){v.hidden=v.getAttribute('data-view')!==h});
+    document.querySelectorAll('[data-tab]').forEach(function(a){if(a.getAttribute('data-tab')===h)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});}
+  addEventListener('hashchange',show);show();
+
+  document.querySelectorAll('[data-f]').forEach(function(b){b.addEventListener('click',function(){filter=b.getAttribute('data-f');document.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});renderPosts()})});
+
+  function copyBlock(label,text){
+    var box=el('div',{class:'copy-block'});if(isAr(text))box.setAttribute('dir','rtl');
+    box.appendChild(el('span',{class:'lbl',text:label}));
+    var body=el('span',{text:text});box.appendChild(body);
+    var b=el('button',{class:'copy-btn',type:'button',text:'Copy'});
+    b.addEventListener('click',function(){try{navigator.clipboard.writeText(text).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1400)},sel)}catch(e){sel()}
+      function sel(){var r=document.createRange();r.selectNodeContents(body);var s=getSelection();s.removeAllRanges();s.addRange(r);b.textContent='Selected'}});
+    box.appendChild(b);return box;
+  }
+  function row(k,v){if(!v)return null;var dd=el('dd');if(Array.isArray(v)){var ul=el('ul');v.forEach(function(x){var li=el('li',{text:x});if(isAr(x))li.setAttribute('dir','auto');ul.appendChild(li)});dd.appendChild(ul)}else if(v.nodeType)dd.appendChild(v);else dd.textContent=v;return el('div',{class:'row'},[el('dt',{text:k}),dd])}
+  var LABEL={approved:'Approved',changes:'Needs changes',skip:'Skipped'};
+
+  function save(coll,id,obj,done){
+    if(!db||!canWrite){toast('Saving is not available in this view');return}
+    obj.at=new Date().toISOString();
+    db.collection(coll).doc(id).set(obj).then(function(){toast('Saved');done&&done()},function(e){toast(e&&e.code==='not_granted'?'You can view but not save here':'Could not save, try again')});
+  }
+
+  function renderPosts(){
+    if(!DATA)return;var box=$('#posts');box.textContent='';
+    var wait=0,ok=0,ch=0,need=0;
+    DATA.posts.forEach(function(p){var r=reviews[p.id];var st=r&&r.status;if(!st)wait++;if(st==='approved')ok++;if(st==='changes')ch++;if(p.asset&&p.asset.status==='need'&&st!=='skip')need++;});
+    $('#s-wait').textContent=wait;$('#s-ok').textContent=ok;$('#s-ch').textContent=ch;$('#s-need').textContent=need;$('#c-queue').textContent=wait;
+    DATA.posts.forEach(function(p){
+      var r=reviews[p.id]||{};var st=r.status||'';
+      if(filter==='waiting'&&st)return; if(['x','tiktok','youtube'].indexOf(filter)>=0&&p.platform!==filter)return;
+      var plat={x:'X',tiktok:'TikTok',youtube:'YouTube'}[p.platform];
+      var head=el('div',{class:'post-head'},[el('span',{class:'plat '+p.platform,text:plat}),el('h3',{text:p.title}),el('span',{class:'status '+st,text:LABEL[st]||'Waiting'})]);
+      var body=el('div',{class:'post-body'});
+      body.appendChild(el('div',{class:'meta',text:p.when+' · '+p.format+' · '+p.pillar}));
+      body.appendChild(copyBlock(p.platform==='youtube'?'Text':'Post',p.text));
+      if(p.reply)body.appendChild(copyBlock(p.platform==='x'?'First reply':'Comment',p.reply));
+      if(p.gloss)body.appendChild(el('p',{class:'gloss',text:'In English: '+p.gloss}));
+      var rows=el('dl',{class:'rows'});
+      [row('On screen',p.onscreen),row('Shots',p.script),row('Hashtags',p.hashtags)].forEach(function(x){if(x)rows.appendChild(x)});
+      if(p.asset){var a=el('span',{class:'asset '+p.asset.status},[el('i'),p.asset.status==='have'?'Ready':'To make']);a.appendChild(el('small',{text:p.asset.file}));var w=el('div');w.appendChild(a);rows.appendChild(row('Video / image',w))}
+      body.appendChild(rows);
+      if(p.depends)body.appendChild(el('p',{class:'dep',text:'Before posting: '+p.depends}));
+      var det=el('details',{},[el('summary',{text:'Why this post, and how we judge it'}),el('dl',{class:'rows',style:'margin-top:8px'},[row('Why',p.why),row('Measure',p.measure)])]);
+      body.appendChild(det);
+      var act=el('div',{class:'actions'});
+      if(r.note)act.appendChild(el('p',{class:'saved-note'},[el('b',{text:'Your note: '}),r.note]));
+      var bOk=el('button',{class:'btn primary',type:'button',text:st==='approved'?'Approved ✓':'Approve'});
+      var bCh=el('button',{class:'btn',type:'button',text:'Needs changes'});
+      var bSk=el('button',{class:'btn',type:'button',text:'Skip this one'});
+      if(!canWrite){[bOk,bCh,bSk].forEach(function(b){b.disabled=true})}
+      bOk.addEventListener('click',function(){save('reviews',p.id,{status:'approved',note:r.note||''})});
+      bSk.addEventListener('click',function(){save('reviews',p.id,{status:'skip',note:r.note||''})});
+      bCh.addEventListener('click',function(){
+        if(act.querySelector('.note-wrap'))return;
+        var id='note-'+p.id,ta=el('textarea',{class:'note',id:id,placeholder:'What should change? For example: make the hook about Al-Nassr instead'});ta.value=r.note||'';
+        var send=el('button',{class:'btn primary',type:'button',text:'Save note'});
+        send.addEventListener('click',function(){var v=ta.value.trim();if(!v){ta.focus();return}save('reviews',p.id,{status:'changes',note:v})});
+        var lab=el('label',{for:id,class:'meta',text:'What to change'});
+        act.appendChild(el('div',{class:'note-wrap'},[lab,ta,send]));ta.focus();
+      });
+      [bOk,bCh,bSk].forEach(function(b){act.appendChild(b)});
+      box.appendChild(el('article',{class:'post',id:'post-'+p.id},[head,body,act]));
+    });
+    if(!box.children.length)box.appendChild(el('p',{class:'notice',text:'Nothing here with this filter.'}));
+  }
+
+  function renderDecs(){
+    if(!DATA)return;var box=$('#decs');box.textContent='';var open=0;
+    DATA.decisions.forEach(function(d){
+      var r=decisions[d.id]||{};if(!r.choice)open++;
+      var st=r.choice==='agree'?'approved':r.choice==='other'?'changes':'';
+      var card=el('article',{class:'dec'},[
+        el('div',{class:'h'},[el('span',{class:'id',text:d.id}),el('h3',{text:d.q}),el('span',{class:'status '+st,text:r.choice==='agree'?'Agreed':r.choice==='other'?'Your call':'Open'})]),
+        el('p',{class:'rec'},[el('b',{text:'My recommendation: '}),d.rec]),
+        el('p',{class:'why',text:d.why})
+      ]);
+      if(r.note)card.appendChild(el('p',{class:'saved-note'},[el('b',{text:'Your answer: '}),r.note]));
+      var acts=el('div',{class:'filters'});
+      var a=el('button',{class:'btn primary',type:'button',text:r.choice==='agree'?'Agreed ✓':'Agree'});
+      var o=el('button',{class:'btn',type:'button',text:'I want something else'});
+      if(!canWrite){a.disabled=true;o.disabled=true}
+      a.addEventListener('click',function(){save('decisions',d.id,{choice:'agree',note:''})});
+      o.addEventListener('click',function(){if(card.querySelector('.note-wrap'))return;var id='dn-'+d.id;var ta=el('textarea',{class:'note',id:id,placeholder:'What do you want instead?'});ta.value=r.note||'';var s=el('button',{class:'btn primary',type:'button',text:'Save answer'});s.addEventListener('click',function(){var v=ta.value.trim();if(!v){ta.focus();return}save('decisions',d.id,{choice:'other',note:v})});card.appendChild(el('div',{class:'note-wrap'},[el('label',{for:id,class:'meta',text:'Your answer'}),ta,s]));ta.focus()});
+      acts.appendChild(a);acts.appendChild(o);card.appendChild(acts);box.appendChild(card);
+    });
+    $('#c-dec').textContent=open;
+  }
+
+  fetch('data.json').then(function(r){return r.json()}).then(function(d){DATA=d;renderPosts();renderDecs()}).catch(function(){$('#posts').appendChild(el('p',{class:'notice',text:'The posts could not load. Reload the page.'}))});
+
+  var note=$('#store-note');
+  var timer=setTimeout(function(){note.textContent='Saved answers could not load, so the buttons are off. Reload to try again.'},10000);
+  (window.claude&&window.claude.use?window.claude.use('db'):Promise.resolve(null)).then(function(d){
+    if(!d){clearTimeout(timer);note.textContent='Sign in to claude.ai to approve posts. You can still read and copy everything.';return}
+    db=d;
+    var user=window.claude.use('user');
+    Promise.resolve(user).then(function(u){return u&&u.can?u.can('data.write'):null}).then(function(c){canWrite=c!==false;renderPosts();renderDecs()},function(){canWrite=true;renderPosts();renderDecs()});
+    db.collection('reviews').onSnapshot(function(s){clearTimeout(timer);reviews={};s.docs.forEach(function(x){reviews[x.id]=x.data()||{}});note.textContent='Your answers save as you click, and I read them back before revising.';renderPosts()},function(){clearTimeout(timer);note.textContent='Saved answers could not load. Reload to try again.'});
+    db.collection('decisions').onSnapshot(function(s){decisions={};s.docs.forEach(function(x){decisions[x.id]=x.data()||{}});renderDecs()});
+  });
+})();
+</script>
