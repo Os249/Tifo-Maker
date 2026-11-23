@@ -107,6 +107,8 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
 .rec{background:var(--tint);border-radius:10px;padding:10px 12px}
 .rec b{color:var(--blue-ink)}
 .dec .why{color:var(--muted);font-size:14px}
+.final{background:var(--ok-bg);border-radius:10px;padding:10px 12px}
+.final b{color:var(--ok)}
 .trend{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}
 .trend:first-of-type{border-top:0;padding-top:0}
 .do-dont{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -533,6 +535,7 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
         el('p',{class:'rec'},[el('b',{text:'My recommendation: '}),d.rec]),
         el('p',{class:'why',text:d.why})
       ]);
+      if(d.final)card.appendChild(el('p',{class:'final'},[el('b',{text:'Where we landed: '}),d.final]));
       if(r.note)card.appendChild(el('p',{class:'saved-note'},[el('b',{text:'Your answer: '}),r.note]));
       var acts=el('div',{class:'filters'});
       var a=el('button',{class:'btn primary',type:'button',text:r.choice==='agree'?'Agreed ✓':'Agree'});
