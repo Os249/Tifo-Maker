@@ -6,7 +6,7 @@
  * crown alone, with the badge's words spoken and on hover.
  *
  * It shows what the server says (`ownerSupporter`, `supporter`, server/src
- * routes.ts supportersFor): a fact about the account (a paid pass, now),
+ * routes.ts supportersFor): a fact about the account (Pro running now, the gift included),
  * never which plan or until when, and nothing while Pro is off or, in
  * preview, to anyone outside it. One mark, the crown, in gold
  * (docs/DESIGN.md, Pro); never blue.

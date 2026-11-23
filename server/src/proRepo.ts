@@ -14,7 +14,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AllowanceKind, PassPlan } from './proPlan';
-import { LEGACY_PAID_PLANS, PAID_PLANS, PASS_PLANS, normalizePlan } from './proPlan';
+import { CROWN_PLANS, LEGACY_PAID_PLANS, PASS_PLANS, normalizePlan } from './proPlan';
 import type { PriceCounted, PriceCurrency, PriceSource } from './proPrice';
 
 export interface ProPass {
@@ -308,7 +308,7 @@ export class MemoryProRepository implements ProRepository {
     const want = new Set(userIds);
     const t = now.getTime();
     for (const p of this.passes) {
-      if (want.has(p.userId) && !p.revokedAt && PAID_PLANS.includes(p.plan) && Date.parse(p.startsAt) <= t && Date.parse(p.endsAt) > t) {
+      if (want.has(p.userId) && !p.revokedAt && CROWN_PLANS.includes(p.plan) && Date.parse(p.startsAt) <= t && Date.parse(p.endsAt) > t) {
         out.add(p.userId);
       }
     }
@@ -714,7 +714,7 @@ export class PgProRepository implements ProRepository {
       `SELECT DISTINCT user_id FROM pro_passes
        WHERE user_id = ANY($1::uuid[]) AND plan = ANY($2::text[])
          AND revoked_at IS NULL AND starts_at <= $3 AND ends_at > $3`,
-      [ids, [...PAID_PLANS, ...LEGACY_PAID_PLANS], now],
+      [ids, [...CROWN_PLANS, ...LEGACY_PAID_PLANS], now],
     );
     return new Set(r.rows.map((x) => String(x.user_id)));
   }

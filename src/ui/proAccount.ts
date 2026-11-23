@@ -191,8 +191,8 @@ export function mountProAccount(sections: HTMLElement, onSummary?: (summary: Pro
     const meters = al
       ? `<div class="pro-block"><h3 class="pro-ac-h">${escapeHtml(t('ac.pro.left'))}</h3><ul class="pro-meters">${ORDER.filter((k) => al[k]).map((k) => meter(al[k])).join('')}</ul></div>`
       : '';
-    // A supporter sees their name as the community shows it, badge and all.
-    const foot = st.live && st.supporter
+    // Whoever has Pro running (the gift too) sees their name as the community shows it, badge and all.
+    const foot = st.live && plan !== 'free'
       ? `<div class="pro-block"><p class="ac-note pro-ac-foot">${escapeHtml(t('qk.badgeYou'))}</p>` +
         `<p class="pro-ac-name"><bdi dir="ltr">@${escapeHtml(username)}</bdi>${supporterBadgeHtml()}</p></div>`
       : '';

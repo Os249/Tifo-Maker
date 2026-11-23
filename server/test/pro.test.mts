@@ -240,11 +240,12 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   await repo.offerGift(userB, new Date(Date.now() - 730 * 86_400_000));
   const late = await repo.acceptGift(userB, new Date(), 7);
   assert.equal(late.ok, true, `${label}: a gift waits for its holder, however long`);
-  // Supporters are paid passes only.
+  // The crown is for every Pro that is running: the gift is Pro in full.
   const sup0 = await repo.supporters([userA, userB], new Date());
-  assert.equal(sup0.size, 0, `${label}: a gift is not the Supporter crown`);
+  assert.deepEqual([...sup0].sort(), [userA, userB].sort(), `${label}: a running gift wears the crown`);
+  assert.equal((await repo.supporters([userA, userB], new Date(Date.now() + 8 * 86_400_000))).size, 0, `${label}: and none once the 7 days are over`);
   const month = await repo.grantPass({ userId: userB, plan: 'monthly', startsAt: new Date(Date.now() - 1000), endsAt: new Date(Date.now() + 30 * 86_400_000), source: 'admin', createdBy: null });
-  assert.deepEqual([...(await repo.supporters([userA, userB], new Date()))], [userB], `${label}: a month of Pro is`);
+  assert.deepEqual([...(await repo.supporters([userA, userB], new Date()))].sort(), [userA, userB].sort(), `${label}: a month of Pro does too`);
   const held = await svc.plan(userB);
   assert.equal(held.plan, 'monthly', `${label}: the paid month wins over the gift`);
   assert.equal(held.pass?.id, month.id);
@@ -596,7 +597,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(anon.allowances, undefined);
   assert.equal(anon.offer.monthly.price, 19.99);
   assert.equal(((await get(other.token)).json() as Record<string, unknown>).live, true);
-  assert.equal(fanCard(await gallery())?.ownerSupporter, undefined, 'the crown follows the pass: none now');
+  assert.equal(fanCard(await gallery())?.ownerSupporter, true, 'the month is revoked, the gift still runs: the crown stays');
   restore();
 }
 

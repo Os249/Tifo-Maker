@@ -44,8 +44,15 @@ export type PassPlan = 'monthly' | 'gift';
 export const PASS_PLANS: PassPlan[] = ['monthly', 'gift'];
 export type PlanKind = 'free' | PassPlan;
 
-/** Plans that are paid for (the Supporter crown). The gift is not. */
+/** Plans that are paid for. The gift is not: its holder is still offered Pro to buy. */
 export const PAID_PLANS: PassPlan[] = ['monthly'];
+
+/**
+ * Plans that wear the crown beside the name (the supporter badge): every Pro
+ * that is running. The 7-day gift is Pro in full, the badge included (the
+ * owner's rule, 23 Nov 2026); only its length differs.
+ */
+export const CROWN_PLANS: PassPlan[] = ['monthly', 'gift'];
 
 /**
  * The plans of the first build (28 Oct 2026), before Pro became one monthly
