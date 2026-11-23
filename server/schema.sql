@@ -897,6 +897,14 @@ ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS bonus_days INT NOT NULL DEFAULT 
 ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT 'monthly' CHECK (product IN ('monthly', 'match'));
 ALTER TABLE pro_orders ADD COLUMN IF NOT EXISTS src TEXT CHECK (src IS NULL OR src ~ '^[a-z]{2,12}$');
 
+-- The year (22 Nov 2026): a third product, 'year', 365 days of the same Pro
+-- for one payment, never renewed. Like the match pass it gives a pass of plan
+-- 'monthly'. The column's own check (above) names two products, so it is
+-- replaced by one that names three; dropping and adding it again is safe to
+-- run every boot.
+ALTER TABLE pro_orders DROP CONSTRAINT IF EXISTS pro_orders_product_check;
+ALTER TABLE pro_orders ADD CONSTRAINT pro_orders_product_check CHECK (product IN ('monthly', 'match', 'year'));
+
 -- Tifo events (15 Nov 2026; server/src/eventRepo.ts, tifoEvents.ts,
 -- eventRoutes.ts). A themed contest the admin makes on /admin: announced, open
 -- for entries, in voting, then closed and confirmed by hand. The stage is

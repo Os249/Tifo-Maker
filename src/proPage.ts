@@ -47,6 +47,13 @@
  *
  * /pro?stop=<token>: the one-click link in the renewal emails. The page turns
  * auto-renew off with it and says so (stopByLink); no sign-in needed.
+ *
+ * The three plans (22 Nov 2026): when the server says so (offer.plans, its
+ * PRO_THREE_PLANS), the page is one price list instead of Free against Pro:
+ * the match pass, the month and the year, each with its own button
+ * (proPlansView.ts, loaded only then). Who may buy, the sign-in, the form and
+ * the return from Moyasar are the same code as before; only what is drawn
+ * changes. With the switch off, nothing here is different.
  */
 import { cleanAddressBar } from './core/utm';
 import { track } from './net/analytics';
@@ -61,14 +68,14 @@ import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
 import {
   adoptProviderSession, fetchMe, fetchOrder, fetchPriceAnswer, fetchPro, forgetPro, markPayAttempt, notifyPro, sendPriceAnswer, setKeepPro,
-  startCheckout, stopProMail, stopRenewalByLink,
-  type AllowanceKind, type CheckoutForm, type CheckoutRefusal, type PayFail, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProState,
+  asProProduct, startCheckout, stopProMail, stopRenewalByLink,
+  type AllowanceKind, type CheckoutForm, type CheckoutRefusal, type PayFail, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProProduct, type ProState,
 } from './net/api';
 import { CROWN_SVG, endsText, money, proNavOnSale, whenDay, whenRiyadh } from './ui/pro';
 import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
 import { SALE_KEYS, keysOf, saleKey } from './ui/proSaleCopy';
-import { getPressed, offerSeen, orderSrc, readArrival } from './ui/proWhere';
+import { getPressed, offerSeen, orderSrc, planPicked, plansSeen, readArrival } from './ui/proWhere';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -89,7 +96,7 @@ const arrival = ((): ReturnType<typeof readArrival> => {
     }
     return a;
   } catch {
-    return { from: null, plan: 'monthly' };
+    return { from: null, plan: 'monthly' as const };
   }
 })();
 
@@ -118,6 +125,13 @@ const onSale = (): boolean => !!state?.offer?.paymentsOpen;
 
 /** Within this long of a month's end, another can be added (server/src/payments RENEW_WITHIN_DAYS). */
 const RENEW_MS = 7 * 24 * 3600_000;
+/** A year can be bought over Pro that ends within this long (server/src/proPlan YEAR_WITHIN_DAYS): a month still running. */
+const YEAR_MS = 37 * 24 * 3600_000;
+
+/** The three-plan page's drawing code (proPlansView.ts), once the server has said this page is that one. */
+let plansView: typeof import('./proPlansView') | null = null;
+/** The page is the price list: the server says so, Pro can be bought here, and the code for it has arrived. */
+const plansMode = (): boolean => !!plansView && !!state?.offer?.plans && onSale();
 
 /** What "Get Pro" last said, kept across repaints as a key and its values. */
 let buyMsg: { key: string; vars?: Record<string, string> } | null = null;
@@ -150,12 +164,15 @@ const formCheckout = (): boolean => state?.offer?.checkout === 'form';
 const renewOffered = (): boolean => state?.offer?.autoRenew === true;
 
 function setSaleCopy(on: boolean): void {
-  const want = on ? `sale${formCheckout() ? '+form' : ''}${renewOffered() ? '+renew' : ''}` : '';
+  const plans = on && plansMode();
+  const want = on ? `sale${formCheckout() ? '+form' : ''}${renewOffered() ? '+renew' : ''}${plans ? '+plans' : ''}` : '';
   if (want === saleCopy) return;
   saleCopy = want;
   for (const [el, soon, sale] of SALE_COPY) {
-    el.setAttribute('data-i18n', on ? saleKey(sale, { form: formCheckout(), renew: renewOffered() }) : soon);
+    el.setAttribute('data-i18n', on ? saleKey(sale, { form: formCheckout(), renew: renewOffered(), plans }) : soon);
   }
+  // The price list has its own layout (proPage.css #pp-open.plans3, then proPlans.css).
+  document.getElementById('pp-open')?.classList.toggle('plans3', plans);
   // The price first, how it works after it (proPage.css), and the questions only a buyer asks.
   document.getElementById('pp-open')?.classList.toggle('on-sale', on);
   // One blue button: while Pro is to buy here, the header's "Sign up" goes quiet (proPage.css).
@@ -269,6 +286,73 @@ function sayBuy(m: { key: string; vars?: Record<string, string> } | null): void 
   if (msg) msg.textContent = m ? tv(m.key, m.vars ?? {}) : '';
 }
 
+/** "Get Pro" pressed for a plan: an order from the server, then Moyasar's page or its form. The price is the server's. */
+async function startBuy(btn: HTMLButtonElement, product: ProProduct): Promise<void> {
+  btn.disabled = true;
+  const label = btn.textContent ?? '';
+  btn.textContent = t(formCheckout() ? 'pf.opening' : 'pb.going');
+  getPressed('page');
+  const r = await startCheckout(getLang(), { product, src: orderSrc(arrival.from) });
+  if (r.ok && 'url' in r) {
+    track('pro_checkout');
+    // Moyasar's own page: the card, Apple Pay or mada is handled there, never here.
+    location.assign(r.url);
+    return;
+  }
+  if (r.ok) {
+    track('pro_checkout');
+    btn.disabled = false;
+    btn.textContent = label;
+    sayBuy(null);
+    await openForm(r.order, r.form, false);
+    return;
+  }
+  if (r.reason === 'signin') {
+    await signIn();
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+  sayBuy({ key: REFUSED[r.reason], vars: r.endsAt ? { date: whenDay(r.endsAt) } : undefined });
+}
+
+/** Whether this account may buy this plan now: the server's rule (payments.ts startFor), said before the press. */
+function canBuyNow(p: ProProduct): boolean {
+  if (!state?.signedIn || state.emailVerified === false) return false;
+  const held = monthHeld();
+  if (!held) return true;
+  const left = Date.parse(held.endsAt) - Date.now();
+  // A year may follow a month still running; a month or a match pass waits for the last week (a founder's offer has a deadline).
+  if (p === 'year') return left <= YEAR_MS;
+  return left <= RENEW_MS || (p === 'monthly' && !!founderOpen());
+}
+
+/** The price list's buttons (proPlansView.ts): each plan's own, signed in or out. */
+function wirePlans(): void {
+  const box = document.getElementById('pb-buy');
+  if (!box) return;
+  box.querySelectorAll<HTMLButtonElement>('[data-act="buy-signin"]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const product = asProProduct(b.dataset.product);
+      getPressed('page');
+      planPicked('page', product);
+      if (!(await signIn('signup'))) return;
+      // Signed in. They pressed a plan with its price on it, so the page carries on to the payment when this
+      // account can buy it now; otherwise the next step has the focus (the email to verify, or what they hold).
+      const next = document.querySelector<HTMLElement>(`#pb-buy [data-act="buy"][data-product="${product}"], #pb-buy [data-act="verify"]`);
+      next?.focus();
+      if (next?.dataset.act === 'buy' && !monthHeld()) next.click();
+    }));
+  box.querySelectorAll<HTMLButtonElement>('[data-act="buy"]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const product = asProProduct(b.dataset.product);
+      planPicked('page', product);
+      void startBuy(b, product);
+    }));
+  // A repaint (a language switch) while the form is open: open it again, in the new language.
+  if (openOrder) void openForm(openOrder.id, openOrder.form, openOrder.keep);
+}
+
 function wireBuy(): void {
   const box = document.getElementById('pb-buy');
   if (!box) return;
@@ -290,37 +374,9 @@ function wireBuy(): void {
     if (next?.dataset.act === 'buy' && !monthHeld()) next.click();
   });
   const btn = box.querySelector<HTMLButtonElement>('[data-act="buy"]');
-  const buy = (btn: HTMLButtonElement, product: 'monthly' | 'match'): void => void (async () => {
-    btn.disabled = true;
-    const label = btn.textContent ?? '';
-    btn.textContent = t(formCheckout() ? 'pf.opening' : 'pb.going');
-    getPressed('page');
-    const r = await startCheckout(getLang(), { product, src: orderSrc(arrival.from) });
-    if (r.ok && 'url' in r) {
-      track('pro_checkout');
-      // Moyasar's own page: the card, Apple Pay or mada is handled there, never here.
-      location.assign(r.url);
-      return;
-    }
-    if (r.ok) {
-      track('pro_checkout');
-      btn.disabled = false;
-      btn.textContent = label;
-      sayBuy(null);
-      await openForm(r.order, r.form, false);
-      return;
-    }
-    if (r.reason === 'signin') {
-      await signIn();
-      return;
-    }
-    btn.disabled = false;
-    btn.textContent = label;
-    sayBuy({ key: REFUSED[r.reason], vars: r.endsAt ? { date: whenDay(r.endsAt) } : undefined });
-  })();
-  btn?.addEventListener('click', () => buy(btn, 'monthly'));
+  btn?.addEventListener('click', () => void startBuy(btn, 'monthly'));
   const matchBtn = box.querySelector<HTMLButtonElement>('[data-act="buy-match"]');
-  matchBtn?.addEventListener('click', () => buy(matchBtn, 'match'));
+  matchBtn?.addEventListener('click', () => void startBuy(matchBtn, 'match'));
   // A repaint (a language switch) while the form is open: open it again, in the new language.
   if (openOrder && btn) void openForm(openOrder.id, openOrder.form, openOrder.keep);
 }
@@ -361,6 +417,9 @@ function closeForm(): void {
     box.innerHTML = '';
   }
   document.querySelectorAll<HTMLElement>('#pb-buy [data-act="buy"], #pb-match').forEach((el) => { el.hidden = false; });
+  // The price list: its buttons come back, and no plan is marked as the one being paid for.
+  document.querySelector('.pt-list')?.classList.remove('paying');
+  document.querySelectorAll('.pt-col[data-paying]').forEach((el) => el.removeAttribute('data-paying'));
 }
 
 /**
@@ -391,7 +450,16 @@ async function openForm(orderId: string, form: CheckoutForm, keep: boolean): Pro
     `<div class="pb-mysr" id="pb-mysr" aria-busy="true"></div>` +
     `<button type="button" class="pb-form-close" data-act="form-close">${escapeHtml(t('pf.close'))}</button>`;
   box.hidden = false;
-  if (btn) btn.hidden = true;
+  const list = plansMode() ? document.querySelector('.pt-list') : null;
+  if (list && plansView && state?.offer) {
+    // The price list: every plan's button steps aside (proPlans.css .paying), the plan being paid for stays lit,
+    // and the form says above itself what it is for.
+    const product = asProProduct(form.product);
+    const row = plansView.plansOf(state.offer).find((p) => p.product === product);
+    list.classList.add('paying');
+    document.querySelectorAll('.pt-col').forEach((el) => el.toggleAttribute('data-paying', (el as HTMLElement).dataset.plan === product));
+    if (row) box.insertAdjacentHTML('afterbegin', `<p class="pt-paying" id="pt-paying">${escapeHtml(tv('pt.paying', { what: plansView.planLine(row) }))}</p>`);
+  } else if (btn) btn.hidden = true;
   // One thing is being paid for: the other offer steps aside while the form is open.
   const other = document.getElementById('pb-match');
   if (other) other.hidden = true;
@@ -519,7 +587,7 @@ async function watchOrder(id: string, back: boolean, declined = false): Promise<
     const o = await fetchOrder(id);
     if (o?.status === 'paid') {
       track('pro_paid');
-      track(o.product === 'match' ? 'match_bought' : 'monthly_bought');
+      track(o.product === 'match' ? 'match_bought' : o.product === 'year' ? 'year_bought' : 'monthly_bought');
       // Paid after the 7 days they were given: the gift did its work.
       if (state?.gift?.state === 'used' && state.gift.auto) track('bought_after_gift');
       forgetPro();
@@ -528,7 +596,7 @@ async function watchOrder(id: string, back: boolean, declined = false): Promise<
       // A founder's first purchase: the page says the extra month was given, as the receipt does.
       const total = o.bonusDays ? (o.days ?? 0) + o.bonusDays : 0;
       paidMsg = {
-        key: o.product === 'match' ? 'pm2.paid' : o.kept ? (o.renews ? 'pr.paid.renews' : 'pr.paid.once') : total ? 'pb.paid.founder' : 'pb.paid',
+        key: o.product === 'match' ? 'pm2.paid' : o.product === 'year' ? 'py.paid' : o.kept ? (o.renews ? 'pr.paid.renews' : 'pr.paid.once') : total ? 'pb.paid.founder' : 'pb.paid',
         vars: { date: o.endsAt ? whenDay(o.endsAt) : '', total: String(total) }, tone: 'ok',
       };
       await load(true);
@@ -737,6 +805,17 @@ function paintPlans(kept: { amount: string; comment: string } | null): void {
   }
   const sale = onSale();
   setSaleCopy(sale);
+  if (sale && plansMode() && plansView && st) {
+    const held = monthHeld();
+    $('pp-plans').innerHTML = plansView.listHtml(st, {
+      signedIn: !!st.signedIn, unverified: st.emailVerified === false, heldUntil: held?.endsAt ?? null, canBuy: canBuyNow,
+      asked: arrival.plan !== 'monthly' ? arrival.plan : null, msg: buyMsg ? tv(buyMsg.key, buyMsg.vars ?? {}) : '',
+      renew: renewOffered(), form: formCheckout(), adding: !!held && canBuyNow('monthly'),
+    });
+    wirePlans();
+    plansView.paintRest(st);
+    return;
+  }
   $('pp-plans').innerHTML =
     planCard({
       id: 'free', name: t('pp.free.name'), limits: lim?.free, pro: false, rows,
@@ -771,7 +850,8 @@ function paint(): void {
   const you = $('pp-you');
   const plan = st?.live ? (st.plan ?? 'free') : 'free';
   const holder = !!st?.live && !!st.pass && plan !== 'free';
-  if (holder && st?.pass) {
+  // The price list says what a paid pass holds itself, above the plans; the hero's line is kept for the gift.
+  if (holder && st?.pass && !(plansMode() && plan === 'monthly')) {
     you.hidden = false;
     you.innerHTML =
       `${CROWN_SVG}<span>${escapeHtml(tv('pp.youHave', { plan: t(`ac.pro.plan.${plan}`), date: endsText(st.pass.endsAt) }))}</span>` +
@@ -827,6 +907,8 @@ async function load(fresh = false): Promise<void> {
   const first = !loaded;
   const [st, mine] = await Promise.all([fetchPro(fresh).catch(() => null), fetchPriceAnswer()]);
   state = st;
+  // The price list's own code, the first time the server says this page is one. If it cannot be fetched, the page stays as it was.
+  if (st?.offer?.plans && st.offer.paymentsOpen && !plansView) plansView = await import('./proPlansView').catch(() => null);
   proNavOnSale(st);
   // A fresh load (after signing in) shows the account's answer, or this browser's.
   answer = mine?.answer ?? null;
@@ -847,6 +929,15 @@ async function load(fresh = false): Promise<void> {
   }
   if (first) track('pro_viewed');
   if (first && state?.offer?.paymentsOpen) offerSeen('page');
+  if (first && plansMode()) {
+    plansSeen('page');
+    // A link that asked for a plan (/pro?plan=year): that plan is in view, with its button ready.
+    if (arrival.plan !== 'monthly') {
+      const col = document.querySelector<HTMLElement>(`.pt-col[data-plan="${arrival.plan}"]`);
+      col?.scrollIntoView({ block: 'center' });
+      col?.querySelector<HTMLElement>('.pp-btn')?.focus({ preventScroll: true });
+    }
+  }
 }
 
 async function refreshAuth(): Promise<void> {

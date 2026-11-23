@@ -59,6 +59,8 @@
     "test:launch": "tsx server/test/launch.test.mts",
     "test:turnaround": "tsx server/test/turnaround.test.mts",
     "test:turnaround-ui": "node e2e-pro-turnaround.mjs",
+    "test:plans": "tsx server/test/plans.test.mts",
+    "test:plans-ui": "node e2e-pro-plans.mjs",
     "test:soc": "tsx server/test/soc.test.mts",
     "test:deploy": "tsx server/test/deploy.test.mts",
     "test:images": "tsx server/test/images.test.mts",

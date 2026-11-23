@@ -187,6 +187,13 @@ export const OFFER = {
    * is on (matchPass, below). Halalas: 499.
    */
   match: { price: 4.99, days: 3 },
+  /**
+   * The year (22 Nov 2026): 365 days of the same Pro, one payment, never
+   * renewed. SAR 89.99 is Osamh's decision of that day (12 months at SAR 9.99
+   * are SAR 119.88; this is SAR 7.50 a month). PRO_YEAR_PRICE says otherwise;
+   * nothing is sold until PRO_YEAR is on (yearPlan, below). Halalas: 8999.
+   */
+  year: { price: 89.99, days: 365 },
   /** Once per account, started whenever its holder likes: it never expires unclaimed. */
   gift: { days: 7 },
   /*
@@ -213,6 +220,10 @@ export const OFFER = {
 //   PRO_AUTO_GIFT=on         the 7-day gift starts by itself (pro.ts giftFor).
 //   PRO_GIFT_MAILS=on        the gift's three emails are sent (proGift.ts).
 //   PRO_POST_OFFERS=on       Pro and the account offer show on Post it and share.
+//   PRO_YEAR=on              the year is sold (365 days, one payment, never renews).
+//   PRO_YEAR_PRICE=89.99     its price in riyals (default OFFER.year.price).
+//   PRO_THREE_PLANS=on       /pro is the three-plan page (the price list), and the
+//                            sheets name every plan on sale beside the month.
 
 const settingOn = (v: string | undefined): boolean => (v ?? '').trim().toLowerCase() === 'on';
 
@@ -254,9 +265,43 @@ export function matchPass(env: NodeJS.ProcessEnv = process.env): MatchPass {
   return { on: settingOn(env.PRO_MATCH_PASS), halalas: readPrice(env.PRO_MATCH_PRICE) ?? Math.round(OFFER.match.price * 100), days };
 }
 
-/** What an order buys: 30 days of Pro, or the match pass. Both are the same Pro. */
-export type Product = 'monthly' | 'match';
-export const PRODUCTS: Product[] = ['monthly', 'match'];
+export interface YearPlan {
+  /** Sold: PRO_YEAR=on (and, like everything paid, only where payments are open). */
+  on: boolean;
+  halalas: number;
+  days: number;
+}
+
+/**
+ * The year as the settings have it. Its length is not a setting: a year is 365
+ * days. A price that cannot be read (or is over the ceiling) falls back to
+ * OFFER.year, and /admin says so (yearPriceInvalid).
+ */
+export function yearPlan(env: NodeJS.ProcessEnv = process.env): YearPlan {
+  return { on: settingOn(env.PRO_YEAR), halalas: readPrice(env.PRO_YEAR_PRICE) ?? Math.round(OFFER.year.price * 100), days: OFFER.year.days };
+}
+
+/** PRO_YEAR_PRICE is set but cannot be read as a price from SAR 1 to SAR 100. */
+export function yearPriceInvalid(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !!(env.PRO_YEAR_PRICE ?? '').trim() && readPrice(env.PRO_YEAR_PRICE) === null;
+}
+
+/**
+ * A year can be bought by someone who holds Pro for up to this long: a month
+ * (30 days) bought in the last week of another (7). The year then starts when
+ * that Pro ends, so no day is lost. Longer than this is a year already held:
+ * come back near its end, as with a month.
+ */
+export const YEAR_WITHIN_DAYS = CYCLE_DAYS + 7;
+
+/** What an order buys: 30 days of Pro, the match pass, or the year. All three are the same Pro. */
+export type Product = 'monthly' | 'match' | 'year';
+export const PRODUCTS: Product[] = ['monthly', 'match', 'year'];
+/** A product name as stored or sent, as a Product: anything unknown is the month. */
+export const asProduct = (v: unknown): Product => (v === 'match' || v === 'year' ? v : 'monthly');
+
+/** /pro is the three-plan page, and the sheets name every plan on sale. */
+export const threePlansOn = (env: NodeJS.ProcessEnv = process.env): boolean => settingOn(env.PRO_THREE_PLANS);
 
 /** The 7-day gift starts by itself for every account that qualifies (pro.ts). */
 export const autoGiftOn = (env: NodeJS.ProcessEnv = process.env): boolean => settingOn(env.PRO_AUTO_GIFT);

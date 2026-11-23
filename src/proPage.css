@@ -321,6 +321,14 @@ body.pp-selling .nav-cta:not(.is-user):hover { background: transparent; border-c
   .ps-sends { flex-direction: column; align-items: stretch; }
 }
 
+/* ---- the three-plan page (server: PRO_THREE_PLANS; the rest is proPlans.css, which arrives with its code) ----
+   What the price list replaces is hidden from the first paint, and the hero sits over the list. */
+#pp-open.plans3 > .ps-steps, #pp-open.plans3 > .pp-show { display: none; }
+#pp-open.plans3 > .pp-hero { max-width: 820px; margin-inline: auto; padding-bottom: var(--sp-6); text-align: center; }
+#pp-open.plans3 .pp-lead { margin-inline: auto; }
+#pp-open.plans3 > .pp-plans { display: block; }
+#pp-open.plans3 > .pp-plans[aria-busy="true"] { min-height: 520px; }
+
 /* The match pass, under the month: the same Pro for a match week, quieter than the month's own button. */
 .pb-match { display: grid; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--line); }
 .pb-match[hidden] { display: none; }

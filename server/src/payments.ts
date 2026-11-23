@@ -108,6 +108,13 @@
  *   - its pass starts when the Pro the account holds ends, like a month bought
  *     early, so nothing paid for overlaps.
  *
+ * The year (22 Nov 2026). A third thing to buy: 365 days of the same Pro for
+ * one payment (PRO_YEAR_PRICE, SAR 89.99 by default). Off until PRO_YEAR=on.
+ * An order like any other, with the match pass's three differences (never
+ * renews, no founders bonus, starts when the Pro held ends) and one of its
+ * own: it can be bought over a month still running (YEAR_WITHIN_DAYS), where
+ * a month or a match pass waits for the last week.
+ *
  *   PRO_AUTO_REFUND=on       refund such a request at once, with no person
  *                            looking, when the order was paid within
  *                            REFUND_DAYS, its pass shows no use, and the
@@ -119,7 +126,7 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { MoyasarError, failReason, isMoyasarId, readPayment, type MoyasarApi, type MoyasarInvoice, type MoyasarPayment } from './moyasar';
 import type { PaymentRepository, ProOrder, ProSubscription, ProSubscriptionRow, RefundRequest, RefundRequestRow } from './payRepo';
-import { OFFER, liveFor, matchPass, previewUsers, proMode, type MatchPass, type Product } from './proPlan';
+import { OFFER, YEAR_WITHIN_DAYS, asProduct, liveFor, matchPass, previewUsers, proMode, yearPlan, type MatchPass, type Product, type YearPlan } from './proPlan';
 import { priceAt, regularHalalas } from './proLaunch';
 import type { ProService } from './pro';
 import type { ProPass } from './proRepo';
@@ -494,6 +501,12 @@ export class PaymentService {
     return { ...m, on: m.on && this.on() };
   }
 
+  /** The year as it is sold now: its price and length, and whether it is on sale at all. */
+  year(): YearPlan {
+    const y = yearPlan(this.env);
+    return { ...y, on: y.on && this.on() };
+  }
+
   /** "Keep Pro on" is offered, and renewals are charged. Never while Pro itself is switched off (PRO_MODE=off). */
   renewOn(): boolean {
     return this.on() && proMode(this.env) !== 'off' && autoRenewOn(this.env) && !!this.api?.chargeToken && !!this.api.payment;
@@ -514,17 +527,24 @@ export class PaymentService {
    * buying early. A running gift does not push it back: the paid month starts
    * now, and the gift's days run beside it.
    */
-  async startFor(userId: string, now: Date): Promise<{ start: Date } | { held: string }> {
+  async startFor(userId: string, now: Date, product: Product = 'monthly'): Promise<{ start: Date } | { held: string }> {
     const end = await this.monthEnd(userId, now);
     if (end === null) return { start: now };
-    if (end - now.getTime() > RENEW_WITHIN_DAYS * DAY_MS) return { held: new Date(end).toISOString() };
+    // A year may be bought over a month still running (it starts when the month ends); a year over a year waits for its end.
+    const within = product === 'year' ? YEAR_WITHIN_DAYS : RENEW_WITHIN_DAYS;
+    if (end - now.getTime() > within * DAY_MS) return { held: new Date(end).toISOString() };
     return { start: new Date(end) };
   }
 
-  /** When the months of Pro this account holds now run out (ms), or null when it holds none. */
+  /**
+   * When the Pro this account holds runs out (ms), or null when it holds none.
+   * A pass bought to follow the one running (a month added in the last week, a
+   * year bought over a month) counts too, though it has not started: otherwise
+   * a second purchase would start at the same moment as the first and the two
+   * would overlap (22 Nov 2026; before, only a pass running now was counted).
+   */
   private async monthEnd(userId: string, now: Date): Promise<number | null> {
-    const passes = (await this.pro.repo.activePasses(userId, now)).filter((p) => p.plan === 'monthly');
-    return passes.length ? Math.max(...passes.map((p) => Date.parse(p.endsAt))) : null;
+    return this.heldUntil(userId, now);
   }
 
   /**
@@ -541,6 +561,7 @@ export class PaymentService {
 
   private description(lang: 'en' | 'ar', days: number, product: Product = 'monthly'): string {
     if (product === 'match') return lang === 'ar' ? `تيفو ميكر برو، باقة المباراة: ${days * 24} ساعة` : `TifoMaker Pro match pass: ${days * 24} hours`;
+    if (product === 'year') return lang === 'ar' ? `تيفو ميكر برو، سنة: ${days} يوم` : `TifoMaker Pro, a year: ${days} days`;
     return lang === 'ar' ? `تيفو ميكر برو: ${days} يوم` : `TifoMaker Pro: ${days} days`;
   }
 
@@ -580,10 +601,12 @@ export class PaymentService {
   /** "Get Pro": an order and a Moyasar invoice (or the form for one), or the open one this account already has. */
   async checkout(b: Buyer, lang: 'en' | 'ar', base: string, what: { product?: Product; src?: string | null } = {}): Promise<CheckoutResult> {
     if (!this.openFor(b.username)) return { ok: false, reason: 'off' };
-    const product: Product = what.product === 'match' ? 'match' : 'monthly';
+    const product: Product = asProduct(what.product);
     const pass = this.match();
-    // The match pass is only sold while its own switch is on.
+    const year = this.year();
+    // The match pass and the year are each sold only while their own switch is on.
     if (product === 'match' && !pass.on) return { ok: false, reason: 'off' };
+    if (product === 'year' && !year.on) return { ok: false, reason: 'off' };
     // The receipt goes to the email, and a verified one is the account's proof of being a person.
     if (!b.emailVerified || !b.email) return { ok: false, reason: 'verify' };
     const now = this.pro.now();
@@ -597,7 +620,7 @@ export class PaymentService {
       for (const o of unsettled) await this.reconcile(o);
       recent = await this.repo.recentFor(b.id, since);
     }
-    const when = await this.startFor(b.id, now);
+    const when = await this.startFor(b.id, now, product);
     // The founders offer, while this account can still take it (never with test money, never on a match pass).
     const fo = this.testMode() || product !== 'monthly' ? null : (await this.opts.founders?.offerFor(b.id, now).catch(() => null)) ?? null;
     // Holding Pro for longer than a week normally means "come back later". A founder's offer has a deadline,
@@ -605,8 +628,8 @@ export class PaymentService {
     if ('held' in when && !fo) return { ok: false, reason: 'held', endsAt: when.held };
     const start = 'held' in when ? new Date(when.held) : when.start;
     // The server's price and length for the product named: the browser chooses which, never how much.
-    const amount = product === 'match' ? pass.halalas : priceHalalas(now, this.env);
-    const days = product === 'match' ? pass.days : OFFER.monthly.days;
+    const amount = product === 'match' ? pass.halalas : product === 'year' ? year.halalas : priceHalalas(now, this.env);
+    const days = product === 'match' ? pass.days : product === 'year' ? year.days : OFFER.monthly.days;
     const src = what.src ?? null;
     const kind = this.checkoutKind();
     const fresh = (o: ProOrder): boolean =>
@@ -1493,6 +1516,8 @@ export interface PayLegalMore {
   founders?: boolean;
   /** The match pass, while it is sold: its price in halalas and its length in hours. <template data-pay="match">, {{matchPrice}}, {{matchHours}}. */
   match?: { price: number; hours: number } | null;
+  /** The year, while it is sold: its price in halalas and its length in days. <template data-pay="year">, {{yearPrice}}, {{yearDays}}, {{yearPerMonth}}. */
+  year?: { price: number; days: number } | null;
   /**
    * The automatic gift, while it is on (it needs no sale: shown whenever Pro
    * is on): <template data-pay="gift"> with {{giftDays}}; and, when its emails
@@ -1516,6 +1541,15 @@ export function payLegal(html: string, onSale: boolean, renew = false, more: Pay
   const mp = onSale ? more.match ?? null : null;
   out = keep(out, 'match', !!mp);
   if (mp) out = out.replace(/\{\{matchPrice\}\}/g, sar(mp.price)).replace(/\{\{matchHours\}\}/g, String(mp.hours));
+  const yr = onSale ? more.year ?? null : null;
+  out = keep(out, 'year', !!yr);
+  if (yr) {
+    out = out
+      .replace(/\{\{yearPrice\}\}/g, sar(yr.price))
+      .replace(/\{\{yearDays\}\}/g, String(yr.days))
+      // A twelfth of the price, to the nearest halala, as /pro shows it.
+      .replace(/\{\{yearPerMonth\}\}/g, (Math.round(yr.price / 12) / 100).toFixed(2));
+  }
   const gift = more.gift ?? null;
   out = keep(out, 'gift', !!gift);
   out = keep(out, 'giftmail', !!gift?.mails);

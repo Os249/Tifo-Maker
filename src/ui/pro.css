@@ -84,6 +84,11 @@
 /* After both base rules, or their 40px and 32px win on a touch screen. */
 @media (pointer: coarse) { .pro-primary, .pro-text-btn { min-height: 44px; } }
 
+/* ---- the other plans, named under the month's button (ui/proPlanList.ts) ---- */
+.pro-plans { display: grid; justify-items: start; gap: 0; margin: var(--sp-2) 0 0; text-align: start; }
+.pro-plans p { margin: 0 0 var(--sp-1); padding: 0 var(--sp-2); font-size: var(--fs-sm); line-height: 1.45; color: var(--pro-muted); }
+.pro-plans .pro-text-btn { text-align: start; line-height: 1.4; }
+
 /* ---- the strip: "Free to try here. Export needs Pro or a gift." ---- */
 .pro-strip {
   display: flex; align-items: flex-start; gap: var(--sp-2);

@@ -2020,6 +2020,10 @@ export type GiftState =
 
 export type PlanLimits = Record<AllowanceKind, { period: 'day' | 'week' | 'month'; limit: number }[]>;
 
+/** What an order buys: 30 days of Pro, the match pass, or the year (server/src/proPlan.ts Product). All three are the same Pro. */
+export type ProProduct = 'monthly' | 'match' | 'year';
+export const asProProduct = (v: unknown): ProProduct => (v === 'match' || v === 'year' ? v : 'monthly');
+
 export interface ProOffer {
   /** What Free and Pro allow, from the server's settings (for the Pro page's table). */
   limits?: { free: PlanLimits; pro: PlanLimits };
@@ -2045,6 +2049,10 @@ export interface ProOffer {
   launch?: { regular: number; until: string; display: 'plain' | 'strike'; licence?: string };
   /** The match pass, while it is sold to this visitor: its price, and its length in days and in hours. */
   match?: { price: number; days: number; hours: number };
+  /** The year, while it is sold to this visitor: its price, its length, and a twelfth of the price as "a month" of it (server: PRO_YEAR). */
+  year?: { price: number; days: number; perMonth: number };
+  /** /pro is the three-plan page and the sheets name every plan on sale (server: PRO_THREE_PLANS). */
+  plans?: boolean;
   /** Pro's versions and the account offer show on Post it and share (server: PRO_POST_OFFERS). */
   post?: boolean;
   /** A new account with a verified email gets the 7 days by itself (server: PRO_AUTO_GIFT). */
@@ -2211,7 +2219,7 @@ export interface CheckoutForm {
   /** The founders offer on this order: paid by `until`, it buys `total` days. */
   founder?: { until: string; bonusDays: number; total: number } | null;
   /** What the order buys (30 days of Pro, or the match pass) and for how many days. */
-  product?: 'monthly' | 'match';
+  product?: ProProduct;
   days?: number;
 }
 
@@ -2220,10 +2228,10 @@ export type CheckoutStart =
   | { ok: true; form: CheckoutForm; order: string }
   | { ok: false; reason: CheckoutRefusal; endsAt?: string };
 
-export async function startCheckout(lang: 'en' | 'ar', what: { product?: 'monthly' | 'match'; src?: string | null } = {}): Promise<CheckoutStart> {
+export async function startCheckout(lang: 'en' | 'ar', what: { product?: ProProduct; src?: string | null } = {}): Promise<CheckoutStart> {
   try {
     // The product is named here; its price and its length are the server's. `src` is where the offer was seen, for /admin's counts.
-    const body = { lang, ...(what.product === 'match' ? { product: 'match' } : {}), ...(what.src ? { src: what.src } : {}) };
+    const body = { lang, ...(what.product && what.product !== 'monthly' ? { product: what.product } : {}), ...(what.src ? { src: what.src } : {}) };
     const res = await fetch(`${API}/pro/pay/checkout`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) });
     const data = (await res.json().catch(() => null)) as { url?: string; form?: CheckoutForm; order?: string; reason?: CheckoutRefusal; endsAt?: string } | null;
     // The address is Moyasar's page as our server got it from Moyasar's API; never anything but https.
@@ -2260,7 +2268,7 @@ export interface OrderView {
   bonusDays?: number;
   days?: number;
   /** What it bought: 30 days of Pro, or the match pass. */
-  product?: 'monthly' | 'match';
+  product?: ProProduct;
 }
 
 /** "Stop these emails", from the founders email's link. True when it worked. */
@@ -2289,7 +2297,7 @@ export async function fetchOrder(id: string): Promise<OrderView | null> {
       status: data.status, endsAt: data.endsAt ?? null, why: data.why ?? null, kept: data.kept === true, renews: data.renews === true,
       // The founders bonus and the product ride along when the server says them: the page's "paid" words follow them.
       ...(typeof data.bonusDays === 'number' && typeof data.days === 'number' ? { bonusDays: data.bonusDays, days: data.days } : {}),
-      product: data.product === 'match' ? 'match' : 'monthly',
+      product: asProProduct(data.product),
     };
   } catch {
     return null;
@@ -2384,7 +2392,7 @@ export interface PurchaseView {
   amount: number;
   days: number;
   /** What it bought: 30 days of Pro, or the match pass. */
-  product?: 'monthly' | 'match';
+  product?: ProProduct;
   /** Extra days the order's pass was given: the founders bonus. */
   bonusDays?: number;
   /** 'creditcard', 'applepay', 'stcpay', ... and the card's scheme ('mada', 'visa', 'master') when known. */

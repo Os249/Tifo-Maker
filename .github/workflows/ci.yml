@@ -114,6 +114,11 @@ jobs:
       - name: "Turnaround tests: price setting, match pass, automatic gift, emails (Postgres)"
         run: npm run test:turnaround
 
+      # The three plans: the year as a third product, bought over Pro already
+      # held, never renewed, and every new switch off by default.
+      - name: "Three plans tests: the year, the switches, the order store (Postgres)"
+        run: npm run test:plans
+
       - name: Club kit tests (Postgres)
         run: npx tsx server/test/kits.test.mts
 

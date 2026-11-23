@@ -32,16 +32,29 @@ export function getPressed(place: ProPlace): void {
   track(`pro_get_${place}`);
 }
 
+/** One of the things on sale (net/api.ts ProProduct; named here so this file imports nothing heavy). */
+export type PlanName = 'monthly' | 'match' | 'year';
+
+/** The list of plans was shown here (the three-plan page, or the plans named on a sheet). */
+export function plansSeen(place: ProPlace): void {
+  track(`pro_plans_${place}`);
+}
+
+/** This plan was pressed here. */
+export function planPicked(place: ProPlace, plan: PlanName): void {
+  track(`pro_pick_${plan}_${place}`);
+}
+
 /** The /pro address a Get Pro link at `place` goes to. */
-export function proLink(place: ProPlace, plan: 'monthly' | 'match' = 'monthly'): string {
-  return `${localPath('/pro')}?from=${place}${plan === 'match' ? '&plan=match' : ''}`;
+export function proLink(place: ProPlace, plan: PlanName = 'monthly'): string {
+  return `${localPath('/pro')}?from=${place}${plan === 'monthly' ? '' : `&plan=${plan}`}`;
 }
 
 /** What /pro was opened with: the place (when it is one of ours) and the plan asked for. */
-export function readArrival(search: string): { from: ProPlace | null; plan: 'monthly' | 'match' } {
+export function readArrival(search: string): { from: ProPlace | null; plan: PlanName } {
   const q = new URLSearchParams(search);
   const from = q.get('from');
-  return { from: PLACES.includes(from as ProPlace) ? (from as ProPlace) : null, plan: q.get('plan') === 'match' ? 'match' : 'monthly' };
+  return { from: PLACES.includes(from as ProPlace) ? (from as ProPlace) : null, plan: q.get('plan') === 'match' ? 'match' : q.get('plan') === 'year' ? 'year' : 'monthly' };
 }
 
 /** The place to name on an order, or null when the visitor has not allowed counting. */

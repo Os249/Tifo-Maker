@@ -1,0 +1,141 @@
+/*
+ * /pro as one price list (proPlansView.ts; server: PRO_THREE_PLANS). Built on
+ * the public pages' roles and Pro's gold, like proPage.css. One blue button:
+ * the month's. The other plans' buttons are outlines; the plan a link asked
+ * for is a gold tint, never blue.
+ *
+ * The few rules that must hold before this file arrives (what the page hides
+ * and where the hero sits) are in proPage.css under #pp-open.plans3.
+ */
+
+/* ---- the list: one joined card ---- */
+.pt-list { border-radius: var(--r-xl); background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-md); overflow: hidden; }
+.pt-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line); }
+.pt-head h2 { margin: 0; font-size: var(--fs-xl); font-weight: 800; letter-spacing: -0.02em; }
+[dir="rtl"] .pt-head h2 { letter-spacing: 0; }
+.pt-head p { margin: 0; font-size: var(--fs-md); color: var(--muted); }
+.pt-signin { margin: 0; padding: var(--sp-3) var(--sp-6) 0; font-size: var(--fs-sm); color: var(--muted); }
+.pt-state {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-4) var(--sp-6) 0; padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md); background: var(--pro-tint); border: 1px solid var(--pro-line); font-size: var(--fs-md); line-height: 1.5;
+}
+.pt-state p { display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0; flex: 1 1 28ch; }
+.pt-state .pro-crown { flex: none; margin-top: 3px; color: var(--pro-crown); }
+.pt-state a.pp-btn { text-decoration: none; }
+
+.pt-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pt-cols[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pt-cols[data-n="1"] { grid-template-columns: minmax(0, 1fr); }
+.pt-col { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-6); border-inline-start: 1px solid var(--line); min-width: 0; }
+.pt-col:first-child { border-inline-start: 0; }
+.pt-col.pick, .pt-col[data-asked] { background: var(--pro-tint); }
+.pt-nm { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: 26px; margin: 0; font-family: var(--font); font-size: var(--fs-md); font-weight: 800; color: var(--muted); }
+.pt-tag {
+  display: inline-flex; align-items: center; gap: var(--sp-1); padding: 2px var(--sp-3); border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: 800; white-space: nowrap; color: var(--pro-ink); background: var(--card); border: 1px solid var(--pro-line);
+}
+.pt-tag .pro-crown { color: var(--pro-crown); }
+.pt-len { margin: 0; font-size: var(--fs-3xl); font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+[dir="rtl"] .pt-len { letter-spacing: 0; line-height: 1.3; }
+.pt-pr { margin: 0; font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums; }
+.pt-pd { margin: 0; }
+.pt-pd span { display: inline-block; padding: 2px var(--sp-2); border-radius: var(--r-sm); background: var(--raise-2); font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pt-col.pick .pt-pd span, .pt-col[data-asked] .pt-pd span { background: var(--card); }
+.pt-note { margin: 0 0 var(--sp-3); font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+.pt-col .pp-btn { margin-top: auto; width: 100%; text-align: center; }
+/* The outline button sits on the card or the tint: its line is the stronger one. */
+.pt-col .pp-btn.quiet { border-color: var(--line-strong); }
+.pt-col .pp-btn.quiet:hover:not(:disabled) { background: transparent; border-color: var(--blue); color: var(--blue); }
+
+/* Moyasar's form, open under the plans: the plans' own buttons step aside while one thing is being paid for. */
+.pt-list .pb-form { padding: var(--sp-5) var(--sp-6); border-top: 1px solid var(--line); }
+/* The form keeps a form's width; the line above it runs the whole card. */
+.pt-list .pb-form > * { max-width: 520px; }
+.pt-list.paying .pt-col .pp-btn { display: none; }
+.pt-list.paying .pt-col:not([data-paying]) { opacity: 0.55; }
+.pt-paying { margin: 0; font-size: var(--fs-md); font-weight: 800; }
+.pt-list .pb-msg { padding: var(--sp-3) var(--sp-6); border-top: 1px solid var(--line); }
+
+.pt-foot { padding: var(--sp-5) var(--sp-6); border-top: 1px solid var(--line); background: var(--raise-2); }
+.pt-incl-h { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); font-size: var(--fs-md); font-weight: 800; }
+.pt-incl-h .pro-crown { color: var(--pro-crown); }
+.pt-ticks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-5); font-size: var(--fs-sm); line-height: 1.45; }
+.pt-ticks li { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.pt-check { flex: none; inline-size: 18px; block-size: 18px; margin-top: 1px; fill: none; stroke: var(--ok); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- the three promises, right under the buttons ---- */
+.pt-trust {
+  list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); margin: var(--sp-4) 0 0; padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); font-size: var(--fs-sm); line-height: 1.5; color: var(--muted);
+}
+.pt-trust li { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.pt-trust svg { flex: none; inline-size: 18px; block-size: 18px; margin-top: 1px; fill: none; stroke: var(--ok); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pt-trust b { font-weight: 700; color: var(--ink); }
+.pt-links { margin-top: var(--sp-2); }
+
+/* ---- what Pro makes: three rows, the picture and its words ---- */
+.pt-show, .pt-cmp { margin: var(--sp-10) 0 0; }
+.pt-show h2, .pt-cmp h2 { margin: 0; font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; }
+[dir="rtl"] .pt-show h2, [dir="rtl"] .pt-cmp h2 { letter-spacing: 0; }
+.pt-rows { display: grid; gap: var(--sp-8); }
+.pt-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-8); align-items: center; }
+.pt-row:nth-child(even) .pt-pic { order: 2; }
+.pt-pic { position: relative; border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--pro-line); background: var(--raise-2); }
+.pt-pic img { display: block; width: 100%; height: auto; }
+.pt-pic.tall { justify-self: center; width: min(100%, 250px); border: 0; overflow: visible; background: none; }
+/* The vertical video is shown the way it is watched: in a phone. */
+.pt-phone { padding: 6px; border-radius: var(--r-xl); background: var(--night-950); border: 1px solid var(--line-strong); box-shadow: var(--shadow-lg); }
+.pt-phone img { border-radius: var(--r-lg); aspect-ratio: 9 / 16; object-fit: cover; }
+.pt-words h3 { margin: 0; font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 800; }
+.pt-words p { margin: var(--sp-2) 0 0; max-width: 44ch; line-height: 1.55; color: var(--muted); }
+/* Free or with Pro: two halves of one pill over the picture. Chosen is the light half. */
+.pt-seg { position: absolute; top: var(--sp-2); inset-inline-end: var(--sp-2); display: inline-flex; padding: 3px; border-radius: var(--r-pill); background: var(--scrim); }
+.pt-seg button {
+  min-height: 44px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-pill); background: transparent; color: var(--snow);
+  font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  transition: background-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out);
+}
+.pt-seg button[aria-pressed="true"] { background: var(--snow); color: var(--ink-strong); }
+.pt-seg button:focus-visible { outline: 2px solid var(--snow); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .pt-seg button { min-height: 32px; } }
+
+/* ---- Free against Pro: one table ---- */
+.pt-table { margin-top: var(--sp-5); border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); overflow: hidden; }
+.pt-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); line-height: 1.45; }
+.pt-table th, .pt-table td { padding: var(--sp-3) var(--sp-4); text-align: start; vertical-align: top; border-top: 1px solid var(--line); }
+.pt-table thead th { border-top: 0; font-weight: 800; background: var(--raise-2); }
+.pt-table tbody th { width: 46%; font-weight: 400; color: var(--muted); }
+.pt-table td { font-weight: 700; font-variant-numeric: tabular-nums; }
+.pt-table .pro { background: var(--pro-tint); }
+.pt-table thead .pro { color: var(--pro-ink); }
+.pt-table thead .pro .pro-crown { margin-inline-end: var(--sp-1); color: var(--pro-crown); vertical-align: -2px; }
+.pt-no { color: var(--muted); font-weight: 400; }
+.pt-yes .pt-check { vertical-align: -4px; }
+.pt-sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  /* The list becomes rows, so every plan is on one screen: name and length at the start, the price at the end. */
+  .pt-head { padding: var(--sp-3) var(--sp-4); }
+  .pt-head p { font-size: var(--fs-sm); }
+  .pt-foot { padding: var(--sp-4); }
+  .pt-signin { padding: var(--sp-2) var(--sp-4) 0; }
+  .pt-state { margin: var(--sp-3) var(--sp-4) 0; }
+  .pt-cols, .pt-cols[data-n="2"] { grid-template-columns: minmax(0, 1fr); }
+  .pt-col { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); row-gap: 2px; align-items: center; padding: var(--sp-3) var(--sp-4); border-inline-start: 0; border-top: 1px solid var(--line); }
+  .pt-col:first-child { border-top: 0; }
+  .pt-nm, .pt-len, .pt-pd { grid-column: 1; }
+  .pt-len { font-size: var(--fs-xl); }
+  .pt-pr { grid-column: 2; grid-row: 1 / span 2; text-align: end; }
+  .pt-note { grid-column: 1 / -1; margin: var(--sp-1) 0 0; }
+  .pt-col .pp-btn { grid-column: 1 / -1; margin-top: var(--sp-2); min-height: 44px; padding-block: var(--sp-2); }
+  .pt-list .pb-form { padding: var(--sp-4); }
+  .pt-list .pb-msg { padding: var(--sp-3) var(--sp-4); }
+  .pt-ticks { grid-template-columns: minmax(0, 1fr); }
+  .pt-trust { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); padding: var(--sp-4); }
+  .pt-show, .pt-cmp { margin-top: var(--sp-8); }
+  .pt-show h2, .pt-cmp h2 { font-size: var(--fs-xl); }
+  .pt-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+  .pt-row:nth-child(even) .pt-pic { order: 0; }
+  .pt-table th, .pt-table td { padding: var(--sp-3); font-size: var(--fs-sm); }
+  .pt-table tbody th { width: 44%; }
+}

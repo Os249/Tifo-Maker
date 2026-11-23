@@ -23,12 +23,19 @@ const FORM_COPY: Record<string, string> = { 'pb.step1.t': 'pf.step1.t', 'pb.step
 /** The words that differ when "Keep Pro on" is offered. */
 const RENEW_COPY: Record<string, string> = { 'pb.step3.t': 'pr.step3.t', 'pb.step3.b': 'pr.step3.b', 'pp.faq.a2': 'pr.faq.a2', 'pb.lead': 'pr.lead' };
 
+/**
+ * The words that differ on the three-plan page (PRO_THREE_PLANS): the hero sells what Pro makes, and "does it
+ * renew" answers for every plan. Where "Keep Pro on" is offered, its own answer about renewing stays.
+ */
+const PLANS_COPY: Record<string, string> = { 'pb.title': 'pt.title', 'pb.lead': 'pt.lead', 'pp.faq.a2': 'pt.faq.a2' };
+
 /** The key an on-sale string is shown under, given how Pro is being sold. */
-export function saleKey(sale: string, how: { form: boolean; renew: boolean }): string {
+export function saleKey(sale: string, how: { form: boolean; renew: boolean; plans?: boolean }): string {
+  if (how.plans && PLANS_COPY[sale] && !(how.renew && sale === 'pp.faq.a2')) return PLANS_COPY[sale];
   return (how.renew && RENEW_COPY[sale]) || (how.form && FORM_COPY[sale]) || sale;
 }
 
 /** Every key one of pro.html's swapped elements can carry: its coming-soon key and each on-sale variant. */
 export function keysOf(soon: string, sale: string): string[] {
-  return [...new Set([soon, sale, FORM_COPY[sale], RENEW_COPY[sale]].filter((k): k is string => !!k))];
+  return [...new Set([soon, sale, FORM_COPY[sale], RENEW_COPY[sale], PLANS_COPY[sale]].filter((k): k is string => !!k))];
 }

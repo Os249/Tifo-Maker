@@ -47,7 +47,7 @@ export interface GiftMailInput {
    * email: what Pro costs now (halalas), and the match pass when it is sold.
    * Null: the email carries no price and nothing to buy.
    */
-  offer?: { monthly: number; monthlyDays: number; match: { price: number; hours: number } | null; autoRenew: boolean } | null;
+  offer?: { monthly: number; monthlyDays: number; match: { price: number; hours: number } | null; year?: { price: number; days: number } | null; autoRenew: boolean } | null;
 }
 
 export function giftEmail(m: GiftMailInput): EmailMessage {
@@ -105,15 +105,17 @@ export function giftEmail(m: GiftMailInput): EmailMessage {
     const o = m.offer ?? null;
     const matchAr = o?.match ? ` أو باقة المباراة: ${o.match.hours} ساعة بـ${sar(o.match.price)} ريال، دفعة وحدة وما تتجدد.` : '';
     const matchEn = o?.match ? ` Or a match pass: ${o.match.hours} hours for SAR ${sar(o.match.price)}, one payment, never renewed.` : '';
+    const yearAr = o?.year ? ` أو سنة: ${o.year.days} يوم بـ${sar(o.year.price)} ريال، دفعة وحدة وما تتجدد.` : '';
+    const yearEn = o?.year ? ` Or a year: ${o.year.days} days for SAR ${sar(o.year.price)}, one payment, never renewed.` : '';
     const renewAr = o?.autoRenew ? 'وما يتجدد إلا إذا أنت اخترت «خلّ برو شغّال» وقت الدفع.' : 'دفعة وحدة، وما يتجدد لحاله.';
     const renewEn = o?.autoRenew ? 'It renews only if you choose "Keep Pro on" when you pay.' : 'One payment, and it does not renew by itself.';
     const offerAr = o
-      ? para(`إعلان: إذا تبي برو يكمّل معك، ${o.monthlyDays} يوم بـ${sar(o.monthly)} ريال. ${renewAr}${matchAr}`) +
+      ? para(`إعلان: إذا تبي برو يكمّل معك، ${o.monthlyDays} يوم بـ${sar(o.monthly)} ريال. ${renewAr}${matchAr}${yearAr}`) +
         button(`${m.base}/ar/pro`, 'شوف برو') +
         smallPrint(`البائع: ${SELLER.ar}، مستقل مسجّل في منصة العمل الحر (وثيقة رقم ${SELLER.document}). السعر هو المبلغ كامل، وما فيه ضريبة قيمة مضافة. وتقدر تسترد المبلغ كامل خلال 7 أيام من الدفع إذا ما استخدمت برو. للتواصل: ${m.contact}`)
       : '';
     const offerEn = o
-      ? para(`Advertisement: to keep Pro, it is SAR ${sar(o.monthly)} for ${o.monthlyDays} days. ${renewEn}${matchEn}`) +
+      ? para(`Advertisement: to keep Pro, it is SAR ${sar(o.monthly)} for ${o.monthlyDays} days. ${renewEn}${matchEn}${yearEn}`) +
         button(`${m.base}/pro`, 'See Pro') +
         smallPrint(`Sold by ${SELLER.en}, a freelancer registered on Saudi Arabia's freelance platform (document ${SELLER.document}). The price is the full amount; no VAT is charged. Full refund within 7 days of paying if you haven't used Pro. Contact: ${m.contact}`)
       : '';
