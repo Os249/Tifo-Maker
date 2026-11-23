@@ -128,6 +128,11 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'فإذا صار فيه خلل، أو ستادك ناقص، أو سويت تيفو تفتخر فيه، قل لي. توصلني مباشرة.',
   },
   'foot.contact': { en: 'Contact the dev', ar: 'تواصل مع المطوّر' },
+  // The brand names stay as written on screen; these labels say whose
+  // account each link opens, for screen readers.
+  'foot.youtube': { en: 'TifoMaker on YouTube', ar: 'تيفو ميكر على يوتيوب' },
+  'foot.x': { en: 'TifoMaker on X', ar: 'تيفو ميكر على إكس' },
+  'foot.tiktok': { en: 'TifoMaker on TikTok', ar: 'تيفو ميكر على تيك توك' },
   'foot.ai': { en: 'An independent project by one developer, built with the help of AI.', ar: 'مشروع مستقل من تطوير شخص واحد، بُني بمساعدة الذكاء الاصطناعي.' },
   'community.title': { en: 'The tifo community', ar: 'مجتمع التيفو' },
   'community.sub': {
