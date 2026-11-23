@@ -353,7 +353,7 @@ export class ProService {
     return { ok: true, endsAt: r.pass.endsAt };
   }
 
-  /** Accounts showing the Supporter crown (a paid pass, now). Empty while Pro is off. */
+  /** Accounts showing the crown beside their name (Pro running now, the gift included). Empty while Pro is off. */
   async supporters(userIds: string[]): Promise<Set<string>> {
     if (!userIds.length) return new Set();
     return this.repo.supporters(userIds, this.now());

@@ -283,11 +283,11 @@ One title, one sentence, one blue action, at most one quiet alternative.
   the gold ring and crown on the account's letter, with the countdown's
   words in its menu (see The site header).
 - **The supporter badge** (`supporterBadgeHtml()`, `ui/supporterBadge.ts`)
-  follows a paid month of Pro's name: the crown and "Pro supporter" /
+  follows the name of anyone whose Pro is running, the 7-day gift included: the crown and "Pro supporter" /
   "داعم برو" on their tifo cards, their public tifo page, their profile
   header and their account page; the crown alone, its words spoken, in a
   tight row (a comment). It shows what the server says (`ownerSupporter`,
-  `supporter`), never a plan or a date, and never for the gift.
+  `supporter`), never a plan or a date.
 - **A club kit dresses what it touches** (`ui/kitEverywhere.ts`): the AI
   panel says "Using kit: …" in a tint, a banner gets one gold-tinted "Dress
   this banner in …", Post it wears the kit's colours and crest. The kit's

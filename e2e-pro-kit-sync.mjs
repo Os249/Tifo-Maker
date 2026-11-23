@@ -615,7 +615,7 @@ await api(`/api/designs/${fan.design}`, fan.token, { method: 'PATCH', body: JSON
 {
   const item = (await api(`/api/gallery/${sup.design}`, viewer.token)).json;
   check('the server says so, and nothing more: no plan, no date', item?.ownerSupporter === true && !/monthly|endsAt|plan/.test(JSON.stringify(item)), JSON.stringify(item).slice(0, 200));
-  check('…not for a gift', (await api(`/api/gallery/${fan.design}`, viewer.token)).json?.ownerSupporter === undefined);
+  check('…and for a running gift too: it is Pro in full', (await api(`/api/gallery/${fan.design}`, viewer.token)).json?.ownerSupporter === true);
   check('…and not to a viewer outside the preview', (await api(`/api/gallery/${sup.design}`, outsider.token)).json?.ownerSupporter === undefined);
   const prof = (await api(`/api/users/${sup.id}/profile`, viewer.token)).json;
   check('the profile says so too', prof?.supporter === true && !/monthly|endsAt/.test(JSON.stringify(prof)));
@@ -634,15 +634,17 @@ for (const [lang, theme, w] of [['en', 'dark', 1440], ['en', 'light', 1440], ['a
   const { ctx, p } = await device(viewer.token, { lang, theme, w, h: w < 500 ? 844 : 900, phone: w < 500 });
   // The tifo card.
   await p.goto(`${B}${lang === 'ar' ? '/ar' : ''}/community`, { waitUntil: 'domcontentloaded' });
-  await waitFor(p, () => !!document.querySelector('.tifo-card .supporter-badge'), null, 60000);
-  const card = await badgeLook(p, '.tifo-card .supporter-badge');
-  const cardOwner = await p.evaluate(() => document.querySelector('.tifo-card .supporter-badge')?.closest('.tifo-card')?.querySelector('.card-creator')?.textContent);
+  // The gift holder's card wears the badge too, so the supporter's card is found by its creator.
+  await waitFor(p, () => !![...document.querySelectorAll('.tifo-card')].find((c) => c.querySelector('.card-creator')?.textContent === '@sync_sup')?.querySelector('.supporter-badge'), null, 60000);
+  await p.evaluate(() => [...document.querySelectorAll('.tifo-card')].find((c) => c.querySelector('.card-creator')?.textContent === '@sync_sup')?.setAttribute('data-sup', ''));
+  const card = await badgeLook(p, '.tifo-card[data-sup] .supporter-badge');
+  const cardOwner = await p.evaluate(() => document.querySelector('.tifo-card[data-sup] .card-creator')?.textContent);
   check(`${tag}: the tifo card shows "${word}" with the crown, in gold, beside the name`, !!card && card.text === word && card.crown && gold(card.color) && cardOwner === '@sync_sup' && card.right <= card.vw, JSON.stringify({ card, cardOwner }));
   const giftCard = await p.evaluate(() => [...document.querySelectorAll('.tifo-card')].find((c) => c.querySelector('.card-creator')?.textContent === '@sync_fan')?.querySelector('.supporter-badge') ?? null);
-  check(`${tag}: …and none for a gift holder`, giftCard === null);
-  await p.locator('.tifo-card:has(.supporter-badge)').first().screenshot({ path: SHOTS ? join(SHOTS, `badge-card-${tag}.png`) : '/tmp/badge-card.png' });
+  check(`${tag}: …and the gift holder's card shows it too`, giftCard !== null);
+  await p.locator('.tifo-card[data-sup]').first().screenshot({ path: SHOTS ? join(SHOTS, `badge-card-${tag}.png`) : '/tmp/badge-card.png' });
   // The profile header.
-  await p.click('.tifo-card:has(.supporter-badge) .card-creator');
+  await p.click('.tifo-card[data-sup] .card-creator');
   await waitFor(p, () => !!document.querySelector('.profile-name .supporter-badge'), null, 30000);
   const head = await badgeLook(p, '.profile-name .supporter-badge');
   check(`${tag}: the profile header shows it`, !!head && head.text === word && gold(head.color), JSON.stringify(head));

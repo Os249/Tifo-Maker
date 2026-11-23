@@ -217,7 +217,8 @@ function renderSummary(): void {
   const avatar = $('ac-sum-avatar');
   if (avatar) avatar.textContent = me.username.charAt(0);
   const sup = $('ac-sum-badge');
-  if (sup) sup.innerHTML = pro?.supporter ? supporterBadgeHtml() : '';
+  // The badge is for Pro that is running, the gift included; `supporter` (paid) only decides what is offered.
+  if (sup) sup.innerHTML = pro && pro.plan !== 'free' ? supporterBadgeHtml() : '';
 
   const state = emailState();
   const email = $('ac-sum-email');
