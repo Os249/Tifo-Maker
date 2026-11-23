@@ -9,7 +9,7 @@
    "format": "Video post, pinned",
    "title": "Pinned: what TifoMaker is",
    "text": "تيفو ناديك، بملعبه الحقيقي، كرسي كرسي.\nتختار النادي، ترسم، وتشوفه يرتفع بالمدرج بالـ3D قبل ما تطبع ولا كرت.\nمجاني، ومن جوالك.",
-   "reply": "جربه 👇\ntifomaker.org",
+   "reply": "جربه 👇\ntifomaker.org/ar/",
    "gloss": "Your club's tifo, in its real ground, seat by seat. Pick the club, draw, and watch it go up in the stand in 3D before you print a single card. Free, from your phone. (Reply: Try it, link.)",
    "asset": {
     "status": "have",
@@ -91,7 +91,7 @@
    "format": "Quote post with a render",
    "title": "Payoff: the winning reply, drawn",
    "text": "فاز رد @[اسم الحساب] 👏\n\"[نص الرد]\"\n\nهذا هو على مدرج الاتفاق. [عدد] كرت، [عدد الألوان] ألوان.",
-   "reply": "تبيه بملعب ناديك؟\ntifomaker.org",
+   "reply": "تبيه بملعب ناديك؟\ntifomaker.org/ar/",
    "gloss": "@[account]'s reply won. Here it is on the Ettifaq stand: [N] cards, [N] colours. (Reply: Want it in your club's ground? link)",
    "asset": {
     "status": "need",
@@ -109,7 +109,7 @@
    "format": "Image post (block plan)",
    "title": "Every Roshn League ground in its real blocks",
    "text": "ملاعب دوري روشن صارت مرسومة ببلوكاتها الحقيقية.\n\nالدرج بمكانه، الممرات، فتحات المداخل، وأسماء البلوكات نفس اللي على تذكرتك.\n\nيعني إذا قلت للقروب \"التيفو من C3 إلى C7\"، تشوف بالضبط وين بيطلع.",
-   "reply": "اختار ملعبك 👇\ntifomaker.org",
+   "reply": "اختار ملعبك 👇\ntifomaker.org/ar/",
    "gloss": "The Roshn League grounds are now drawn in their real blocks: the stairs where they are, the walkways, the tunnels, and block names as printed on your ticket. So if you tell the group 'the tifo runs from C3 to C7', you see exactly where it goes up.",
    "asset": {
     "status": "need",
@@ -160,7 +160,7 @@
    "format": "Video post",
    "title": "Asian Cup: one month to the opener",
    "text": "بعد شهر بالضبط، الأخضر يفتتح كأس آسيا بالرياض 🇸🇦\n\nنبي نشوف تيفو الأخضر منكم.\nصمّموه، وأحسن 3 تصاميم ننزلها هنا وبتيك توك يوم الافتتاح.",
-   "reply": "صمّم على استاد الملك فهد 👇\ntifomaker.org",
+   "reply": "صمّم على استاد الملك فهد 👇\ntifomaker.org/ar/",
    "gloss": "Exactly one month from now, Saudi Arabia open the Asian Cup in Riyadh. We want to see your Al-Akhdar tifo. Design it, and we post the best 3 here and on TikTok on opening day.",
    "asset": {
     "status": "need",
@@ -453,7 +453,7 @@
    "pillar": "Setup",
    "format": "Channel setup",
    "title": "Set the channel up before the first upload",
-   "text": "Channel name: TifoMaker | تيفو ميكر\n\nDescription:\nصمّم تيفو ناديك في ملعبه الحقيقي، كرسي كرسي، وشوفه بالـ3D. شروحات، ملاعب دوري روشن من الداخل، وتيفوهات الجمهور.\nDesign your club's tifo in its real ground, seat by seat. Tutorials, stadium flyovers and fans' tifos.\ntifomaker.org",
+   "text": "Channel name: TifoMaker | تيفو ميكر\n\nDescription (Arabic, the main one):\nصمّم تيفو ناديك في ملعبه الحقيقي، كرسي كرسي، وشوفه بالـ3D. شروحات، ملاعب دوري روشن من الداخل، وتيفوهات الجمهور.\ntifomaker.org/ar/\n\nEnglish description (add it under Settings → Channel → Basic info → Add language, not in the Arabic one):\nDesign your club's tifo in its real ground, seat by seat, and see it in 3D. Tutorials, stadium flyovers and fans' tifos.\ntifomaker.org",
    "reply": "",
    "gloss": "",
    "script": [
@@ -465,7 +465,7 @@
     "status": "have",
     "file": "marketing/video/x-promo/tifomaker-x-promo-1080p-clean.mp4, media-kit/img/hero.jpg"
    },
-   "why": "YouTube is a search engine. A clear name and description in both languages is how 'تيفو' searches find the channel.",
+   "why": "YouTube is a search engine. An Arabic description, plus an English one added in YouTube's language settings, means each viewer sees their own language and 'تيفو' searches find the channel.",
    "measure": "Search impressions in YouTube Studio after 30 days.",
    "media": [
     {
@@ -551,9 +551,9 @@
  "decisions": [
   {
    "id": "D-01",
-   "q": "Which language leads on each platform?",
-   "rec": "TikTok and YouTube: Arabic first, always. X: Arabic for everything Saudi, separate English posts for Premier League, LaLiga and big announcements.",
-   "why": "70% of the TikTok audience is Saudi, and up to 63% of site visits are in Arabic. Video 1 was in English and lost most viewers in the first second."
+   "q": "One language or two, and one account or two?",
+   "rec": "One account on each platform, and every post in one language, never both stacked in the same post. TikTok: Arabic only (English hashtags like #tifo at the end are fine). X: mostly Arabic, with separate English posts for Premier League, LaLiga and big announcements, not a translation of every post. YouTube: make each video in Arabic, then add an English title and description in YouTube's translation settings so each viewer sees their own language. Arabic posts link to tifomaker.org/ar/, English posts to tifomaker.org/, with a different link in each bio. Reserve @tifomaker_en on all three platforms and leave it empty.",
+   "why": "Two accounts would split a small following and double the work for one person. Two languages in one post wastes the first second on TikTok and makes X posts harder to read. 70% of the TikTok audience is in Saudi Arabia, and video 1 lost most viewers in its first second partly because it was in English. Sending Arabic speakers to the Arabic site saves them hunting for the language switch. Start the English account only if, for a couple of months, English posts on X match the Arabic ones on engagement, or English-speaking visitors are more than about a third of social traffic to the site. Compare the two every Monday."
   },
   {
    "id": "D-02",
