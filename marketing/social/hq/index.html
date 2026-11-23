@@ -113,6 +113,41 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
 .do-dont div{border-radius:12px;padding:14px;background:var(--bg);border:1px solid var(--line)}
 .do-dont .bad li{text-decoration:line-through;text-decoration-color:var(--warn)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:600;font-size:14px;z-index:20}
+
+/* media: attachments shown the way each platform frames them */
+.media{display:grid;gap:10px}
+.media:empty{display:none}
+.m-grid{display:grid;gap:6px;border-radius:12px;overflow:hidden}
+.m-grid.x.n1,.m-grid.youtube.n1{grid-template-columns:1fr}
+.m-grid.x.n2,.m-grid.x.n3,.m-grid.x.n4,.m-grid.youtube.n2,.m-grid.youtube.n3,.m-grid.youtube.n4{grid-template-columns:1fr 1fr}
+.m-grid.x.n3 .m-tile:first-child{grid-row:span 2}
+.m-grid.tiktok{display:flex;gap:10px;overflow-x:auto;border-radius:0;padding-bottom:4px;scroll-snap-type:x mandatory}
+.m-tile{margin:0;position:relative;background:#000;border-radius:10px;overflow:hidden;min-width:0;display:grid}
+.m-grid.x .m-tile,.m-grid.youtube .m-tile{aspect-ratio:16/9}
+.m-grid.x.n3 .m-tile:first-child{aspect-ratio:auto}
+.m-grid.tiktok .m-tile{flex:0 0 min(220px,62vw);aspect-ratio:9/16;scroll-snap-align:start}
+.m-tile video,.m-tile img{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+.m-grid.x .m-tile img{object-fit:cover}
+.m-open{appearance:none;border:0;padding:0;margin:0;background:#000;cursor:zoom-in;width:100%;height:100%;display:block}
+.m-tile figcaption{position:absolute;left:0;right:0;top:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px;font:500 11px/1.3 var(--f-mono);color:#fff;background:linear-gradient(rgba(0,0,0,.72),transparent);pointer-events:none}
+.m-tile figcaption>*{pointer-events:auto}
+.yours{background:var(--flare);color:var(--on-flare);padding:2px 6px;border-radius:4px;font-weight:600}
+.m-rm{appearance:none;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.5);color:#fff;border-radius:6px;padding:4px 8px;font:600 11px/1 var(--f-body);cursor:pointer;margin-inline-start:auto;min-height:28px}
+.m-empty{font-size:13px;color:var(--muted);border:1px dashed var(--line);border-radius:10px;padding:14px;text-align:center}
+.up-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.up-btn{display:inline-flex;align-items:center;cursor:pointer}
+.up-btn.busy{opacity:.6;pointer-events:none}
+.sr{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.up-row input:focus-visible+label{outline:2px solid var(--blue);outline-offset:2px}
+.lightbox{position:fixed;inset:0;z-index:30;background:rgba(3,6,12,.94);display:grid;grid-template-rows:auto 1fr auto;padding:calc(12px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+.lightbox[hidden]{display:none}
+.lb-bar{display:flex;justify-content:flex-end}
+.lb-stage{display:grid;place-items:center;min-height:0;position:relative}
+.lb-stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.lb-btn{appearance:none;border:1px solid rgba(255,255,255,.25);background:rgba(15,23,42,.8);color:#fff;border-radius:999px;min-width:44px;min-height:44px;font:600 15px/1 var(--f-body);cursor:pointer;padding:0 14px}
+.lb-nav{position:absolute;top:50%;transform:translateY(-50%)}
+#lb-prev{left:0}#lb-next{right:0}
+.lb-cap{color:#E8EEF8;text-align:center;font:500 13px/1.4 var(--f-mono);padding-top:10px}
 @media (max-width:720px){
   .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid3{grid-template-columns:1fr}
@@ -124,7 +159,7 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
 
 <header class="wrap top">
   <h1>TIFO<b>MAKER</b> Social HQ</h1>
-  <p>Every post for X, TikTok and YouTube waits here until you approve it. Nothing goes out before that. Approve, or say what to change, and I'll read your answers back and revise.</p>
+  <p>Every post for X, TikTok and YouTube waits here until you approve it. Nothing goes out before that. Watch the videos, open the photos, then approve or say what to change, and I'll read your answers back and revise.</p>
 </header>
 
 <nav class="tabs" aria-label="Sections">
@@ -305,23 +340,50 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
 </main>
 
 <div class="toast" id="toast" hidden></div>
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo" hidden>
+  <div class="lb-bar"><button class="lb-btn" id="lb-close" type="button">Close</button></div>
+  <div class="lb-stage"><img id="lb-img" alt=""><button class="lb-btn lb-nav" id="lb-prev" type="button" aria-label="Previous photo">‹</button><button class="lb-btn lb-nav" id="lb-next" type="button" aria-label="Next photo">›</button></div>
+  <p class="lb-cap" id="lb-cap"></p>
+</div>
+
 
 <script>
 (function(){
-  var DATA=null, reviews={}, decisions={}, db=null, canWrite=false, filter='all';
+  var DATA=null, reviews={}, decisions={}, uploads={}, db=null, assets=null, canWrite=false, filter='all';
+  var cards={};
   var $=function(s,r){return (r||document).querySelector(s)};
   function el(tag,attrs,kids){var e=document.createElement(tag);if(attrs)for(var k in attrs){if(k==='text')e.textContent=attrs[k];else if(k==='class')e.className=attrs[k];else e.setAttribute(k,attrs[k]);}(kids||[]).forEach(function(c){if(c)e.appendChild(typeof c==='string'?document.createTextNode(c):c)});return e}
   function isAr(s){return /[\u0600-\u06FF]/.test(s||'')}
-  function toast(msg){var t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(function(){t.hidden=true},1800)}
+  function toast(msg){var t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(function(){t.hidden=true},2200)}
+  function safeUrl(u){return typeof u==='string'&&(/^media\//.test(u)||/^\/_blob\//.test(u)||/^https:\/\//.test(u))?u:''}
 
   // tabs
   var TABS=['queue','decisions','plan','trends','calendar','voice'];
   function show(){var h=(location.hash||'#queue').slice(1);if(TABS.indexOf(h)<0)h='queue';
     document.querySelectorAll('[data-view]').forEach(function(v){v.hidden=v.getAttribute('data-view')!==h});
-    document.querySelectorAll('[data-tab]').forEach(function(a){if(a.getAttribute('data-tab')===h)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});}
+    document.querySelectorAll('[data-tab]').forEach(function(a){if(a.getAttribute('data-tab')===h)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+    if(h!=='queue')pauseAll();}
   addEventListener('hashchange',show);show();
 
-  document.querySelectorAll('[data-f]').forEach(function(b){b.addEventListener('click',function(){filter=b.getAttribute('data-f');document.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});renderPosts()})});
+  document.querySelectorAll('[data-f]').forEach(function(b){b.addEventListener('click',function(){filter=b.getAttribute('data-f');document.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});applyFilter()})});
+
+  // one video plays at a time
+  function pauseAll(except){document.querySelectorAll('video').forEach(function(v){if(v!==except&&!v.paused)v.pause()})}
+  document.addEventListener('play',function(e){if(e.target.tagName==='VIDEO')pauseAll(e.target)},true);
+
+  // photo viewer
+  var lb=$('#lightbox'),lbImg=$('#lb-img'),lbCap=$('#lb-cap'),lbList=[],lbIdx=0,lbReturn=null;
+  function lbShow(){var it=lbList[lbIdx];lbImg.src=it.src;lbImg.alt=it.caption||'';lbCap.textContent=(it.caption||'')+(lbList.length>1?'  ·  '+(lbIdx+1)+' of '+lbList.length:'');$('#lb-prev').hidden=$('#lb-next').hidden=lbList.length<2}
+  function openLb(list,i,from){lbList=list;lbIdx=i;lbReturn=from;lbShow();lb.hidden=false;document.body.style.overflow='hidden';$('#lb-close').focus()}
+  function closeLb(){lb.hidden=true;lbImg.removeAttribute('src');document.body.style.overflow='';if(lbReturn)lbReturn.focus()}
+  function step(d){lbIdx=(lbIdx+d+lbList.length)%lbList.length;lbShow()}
+  $('#lb-close').addEventListener('click',closeLb);
+  $('#lb-prev').addEventListener('click',function(){step(-1)});
+  $('#lb-next').addEventListener('click',function(){step(1)});
+  lb.addEventListener('click',function(e){if(e.target===lb)closeLb()});
+  addEventListener('keydown',function(e){if(lb.hidden)return;if(e.key==='Escape')closeLb();else if(e.key==='ArrowRight')step(1);else if(e.key==='ArrowLeft')step(-1)});
+  var touchX=null;lb.addEventListener('touchstart',function(e){touchX=e.touches[0].clientX},{passive:true});
+  lb.addEventListener('touchend',function(e){if(touchX===null)return;var dx=e.changedTouches[0].clientX-touchX;if(Math.abs(dx)>50)step(dx<0?1:-1);touchX=null});
 
   function copyBlock(label,text){
     var box=el('div',{class:'copy-block'});if(isAr(text))box.setAttribute('dir','rtl');
@@ -335,54 +397,130 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
   function row(k,v){if(!v)return null;var dd=el('dd');if(Array.isArray(v)){var ul=el('ul');v.forEach(function(x){var li=el('li',{text:x});if(isAr(x))li.setAttribute('dir','auto');ul.appendChild(li)});dd.appendChild(ul)}else if(v.nodeType)dd.appendChild(v);else dd.textContent=v;return el('div',{class:'row'},[el('dt',{text:k}),dd])}
   var LABEL={approved:'Approved',changes:'Needs changes',skip:'Skipped'};
 
-  function save(coll,id,obj,done){
-    if(!db||!canWrite){toast('Saving is not available in this view');return}
+  function save(coll,id,obj){
+    if(!db||!canWrite){toast('Saving is not available in this view');return Promise.reject()}
     obj.at=new Date().toISOString();
-    db.collection(coll).doc(id).set(obj).then(function(){toast('Saved');done&&done()},function(e){toast(e&&e.code==='not_granted'?'You can view but not save here':'Could not save, try again')});
+    return db.collection(coll).doc(id).set(obj).then(function(){toast('Saved')},function(e){toast(e&&e.code==='not_granted'?'You can view but not save here':'Could not save, try again');throw e});
   }
 
-  function renderPosts(){
-    if(!DATA)return;var box=$('#posts');box.textContent='';
-    var wait=0,ok=0,ch=0,need=0;
-    DATA.posts.forEach(function(p){var r=reviews[p.id];var st=r&&r.status;if(!st)wait++;if(st==='approved')ok++;if(st==='changes')ch++;if(p.asset&&p.asset.status==='need'&&st!=='skip')need++;});
-    $('#s-wait').textContent=wait;$('#s-ok').textContent=ok;$('#s-ch').textContent=ch;$('#s-need').textContent=need;$('#c-queue').textContent=wait;
-    DATA.posts.forEach(function(p){
-      var r=reviews[p.id]||{};var st=r.status||'';
-      if(filter==='waiting'&&st)return; if(['x','tiktok','youtube'].indexOf(filter)>=0&&p.platform!==filter)return;
-      var plat={x:'X',tiktok:'TikTok',youtube:'YouTube'}[p.platform];
-      var head=el('div',{class:'post-head'},[el('span',{class:'plat '+p.platform,text:plat}),el('h3',{text:p.title}),el('span',{class:'status '+st,text:LABEL[st]||'Waiting'})]);
-      var body=el('div',{class:'post-body'});
-      body.appendChild(el('div',{class:'meta',text:p.when+' · '+p.format+' · '+p.pillar}));
-      body.appendChild(copyBlock(p.platform==='youtube'?'Text':'Post',p.text));
-      if(p.reply)body.appendChild(copyBlock(p.platform==='x'?'First reply':'Comment',p.reply));
-      if(p.gloss)body.appendChild(el('p',{class:'gloss',text:'In English: '+p.gloss}));
-      var rows=el('dl',{class:'rows'});
-      [row('On screen',p.onscreen),row('Shots',p.script),row('Hashtags',p.hashtags)].forEach(function(x){if(x)rows.appendChild(x)});
-      if(p.asset){var a=el('span',{class:'asset '+p.asset.status},[el('i'),p.asset.status==='have'?'Ready':'To make']);a.appendChild(el('small',{text:p.asset.file}));var w=el('div');w.appendChild(a);rows.appendChild(row('Video / image',w))}
-      body.appendChild(rows);
-      if(p.depends)body.appendChild(el('p',{class:'dep',text:'Before posting: '+p.depends}));
-      var det=el('details',{},[el('summary',{text:'Why this post, and how we judge it'}),el('dl',{class:'rows',style:'margin-top:8px'},[row('Why',p.why),row('Measure',p.measure)])]);
-      body.appendChild(det);
-      var act=el('div',{class:'actions'});
-      if(r.note)act.appendChild(el('p',{class:'saved-note'},[el('b',{text:'Your note: '}),r.note]));
-      var bOk=el('button',{class:'btn primary',type:'button',text:st==='approved'?'Approved ✓':'Approve'});
-      var bCh=el('button',{class:'btn',type:'button',text:'Needs changes'});
-      var bSk=el('button',{class:'btn',type:'button',text:'Skip this one'});
-      if(!canWrite){[bOk,bCh,bSk].forEach(function(b){b.disabled=true})}
-      bOk.addEventListener('click',function(){save('reviews',p.id,{status:'approved',note:r.note||''})});
-      bSk.addEventListener('click',function(){save('reviews',p.id,{status:'skip',note:r.note||''})});
-      bCh.addEventListener('click',function(){
-        if(act.querySelector('.note-wrap'))return;
-        var id='note-'+p.id,ta=el('textarea',{class:'note',id:id,placeholder:'What should change? For example: make the hook about Al-Nassr instead'});ta.value=r.note||'';
-        var send=el('button',{class:'btn primary',type:'button',text:'Save note'});
-        send.addEventListener('click',function(){var v=ta.value.trim();if(!v){ta.focus();return}save('reviews',p.id,{status:'changes',note:v})});
-        var lab=el('label',{for:id,class:'meta',text:'What to change'});
-        act.appendChild(el('div',{class:'note-wrap'},[lab,ta,send]));ta.focus();
-      });
-      [bOk,bCh,bSk].forEach(function(b){act.appendChild(b)});
-      box.appendChild(el('article',{class:'post',id:'post-'+p.id},[head,body,act]));
+  // media
+  function mediaTile(p,it,list,idx,mine){
+    var src=safeUrl(it.src);if(!src)return null;
+    var tile=el('figure',{class:'m-tile'+(it.type==='video'?' is-video':'')});
+    if(it.type==='video'){
+      var v=el('video',{controls:'',playsinline:'',preload:'metadata'});
+      if(safeUrl(it.poster))v.setAttribute('poster',safeUrl(it.poster));
+      v.src=src;tile.appendChild(v);
+    }else{
+      var b=el('button',{class:'m-open',type:'button','aria-label':'Open photo: '+(it.caption||'photo')});
+      b.appendChild(el('img',{src:src,alt:it.caption||'',loading:'lazy'}));
+      b.addEventListener('click',function(){var imgs=list.filter(function(x){return x.type==='image'&&safeUrl(x.src)});openLb(imgs,imgs.indexOf(it),b)});
+      tile.appendChild(b);
+    }
+    var cap=el('figcaption');
+    if(mine)cap.appendChild(el('span',{class:'yours',text:'Yours'}));
+    if(it.caption){var c=el('span',{text:it.caption});c.setAttribute('dir',/^[\u0600-\u06FF]/.test(it.caption)?'rtl':'ltr');cap.appendChild(c)}
+    if(mine&&assets){var rm=el('button',{class:'m-rm',type:'button',text:'Remove'});rm.addEventListener('click',function(){removeUpload(p,it,rm)});cap.appendChild(rm)}
+    if(cap.childNodes.length)tile.appendChild(cap);
+    return tile;
+  }
+  function renderMedia(p){
+    var c=cards[p.id];if(!c)return;var box=c.media;
+    // keep a playing video alive: only rebuild when the set of files changed
+    var mine=(uploads[p.id]&&uploads[p.id].items)||[];
+    var key=JSON.stringify([p.media||[],mine.map(function(m){return m.id})]);
+    if(box.getAttribute('data-key')===key)return;box.setAttribute('data-key',key);
+    box.querySelectorAll('video').forEach(function(v){v.pause()});
+    box.textContent='';
+    var all=(p.media||[]).map(function(m){return {type:m.type,src:m.src,poster:m.poster,caption:m.caption}})
+      .concat(mine.map(function(m){return {type:m.type,src:m.url,caption:m.name,id:m.id,mine:true}}));
+    if(all.length){
+      var g=el('div',{class:'m-grid '+p.platform+' n'+Math.min(all.length,4)});
+      all.forEach(function(it,i){var t=mediaTile(p,it,all,i,!!it.mine);if(t)g.appendChild(t)});
+      box.appendChild(g);
+    }
+    if(assets){
+      var id='up-'+p.id,inp=el('input',{type:'file',id:id,accept:'image/*,video/*',class:'sr'});
+      var lab=el('label',{for:id,class:'btn up-btn'},[all.length?'Add another video or photo':'Add your video or photo']);
+      inp.addEventListener('change',function(){if(inp.files&&inp.files[0])upload(p,inp.files[0],lab);inp.value=''});
+      box.appendChild(el('div',{class:'up-row'},[inp,lab,el('span',{class:'meta',text:'Up to 20 MB. It shows here so you can review it before posting.'})]));
+    }else if(!all.length){
+      box.appendChild(el('p',{class:'m-empty',text:'No video or photo yet. Once it is made, it will show here.'}));
+    }
+  }
+  function upload(p,file,lab){
+    var isV=/^video\//.test(file.type),isI=/^image\//.test(file.type);
+    if(!isV&&!isI){toast('Choose a video or a photo');return}
+    if(file.size>20*1024*1024){toast('That file is over 20 MB. Export a smaller copy and try again.');return}
+    lab.classList.add('busy');lab.textContent='Uploading…';
+    assets.upload(file).then(function(r){
+      var items=((uploads[p.id]&&uploads[p.id].items)||[]).slice();
+      items.push({id:r.id,url:r.url,type:isV?'video':'image',name:file.name.slice(0,120)});
+      return db.collection('media').doc(p.id).set({items:items,at:new Date().toISOString()}).then(function(){toast('Added')});
+    }).catch(function(e){toast(e&&e.code==='quota_exceeded'?'Storage is full. Remove an old upload first.':e&&e.code==='unsupported_type'?'That file type is not supported':'Upload failed, try again');renderMedia(p)});
+  }
+  function removeUpload(p,m,btn){
+    btn.disabled=true;
+    var items=((uploads[p.id]&&uploads[p.id].items)||[]).filter(function(x){return x.id!==m.id});
+    db.collection('media').doc(p.id).set({items:items,at:new Date().toISOString()}).then(function(){toast('Removed');return assets.delete(m.id)}).catch(function(){btn.disabled=false;toast('Could not remove, try again')});
+  }
+
+  function buildCard(p){
+    var plat={x:'X',tiktok:'TikTok',youtube:'YouTube'}[p.platform];
+    var status=el('span',{class:'status'});
+    var head=el('div',{class:'post-head'},[el('span',{class:'plat '+p.platform,text:plat}),el('h3',{text:p.title}),status]);
+    var body=el('div',{class:'post-body'});
+    body.appendChild(el('div',{class:'meta',text:p.when+' · '+p.format+' · '+p.pillar}));
+    body.appendChild(copyBlock(p.platform==='youtube'?'Text':'Post',p.text));
+    var media=el('div',{class:'media'});body.appendChild(media);
+    if(p.reply)body.appendChild(copyBlock(p.replyLabel||(p.platform==='x'?'First reply':'Comment'),p.reply));
+    if(p.gloss)body.appendChild(el('p',{class:'gloss',text:'In English: '+p.gloss}));
+    var rows=el('dl',{class:'rows'});
+    [row('On screen',p.onscreen),row('Shots',p.script),row('Hashtags',p.hashtags)].forEach(function(x){if(x)rows.appendChild(x)});
+    if(p.asset){var a=el('span',{class:'asset '+p.asset.status},[el('i'),p.asset.status==='have'?'Ready':'To make']);a.appendChild(el('small',{text:p.asset.file}));var w=el('div');w.appendChild(a);rows.appendChild(row('Video / image',w))}
+    body.appendChild(rows);
+    if(p.depends)body.appendChild(el('p',{class:'dep',text:'Before posting: '+p.depends}));
+    body.appendChild(el('details',{},[el('summary',{text:'Why this post, and how we judge it'}),el('dl',{class:'rows',style:'margin-top:8px'},[row('Why',p.why),row('Measure',p.measure)])]));
+    var act=el('div',{class:'actions'});
+    var noteP=el('p',{class:'saved-note',hidden:''});
+    var bOk=el('button',{class:'btn primary',type:'button',text:'Approve'});
+    var bCh=el('button',{class:'btn',type:'button',text:'Needs changes'});
+    var bSk=el('button',{class:'btn',type:'button',text:'Skip this one'});
+    var noteWrap=null;
+    bOk.addEventListener('click',function(){save('reviews',p.id,{status:'approved',note:(reviews[p.id]||{}).note||''})});
+    bSk.addEventListener('click',function(){save('reviews',p.id,{status:'skip',note:(reviews[p.id]||{}).note||''})});
+    bCh.addEventListener('click',function(){
+      if(noteWrap){noteWrap.querySelector('textarea').focus();return}
+      var id='note-'+p.id,ta=el('textarea',{class:'note',id:id,placeholder:'What should change? For example: make the hook about Al-Nassr instead'});ta.value=(reviews[p.id]||{}).note||'';
+      var send=el('button',{class:'btn primary',type:'button',text:'Save note'});
+      send.addEventListener('click',function(){var v=ta.value.trim();if(!v){ta.focus();return}save('reviews',p.id,{status:'changes',note:v}).then(function(){noteWrap.remove();noteWrap=null},function(){})});
+      noteWrap=el('div',{class:'note-wrap'},[el('label',{for:id,class:'meta',text:'What to change'}),ta,send]);
+      act.appendChild(noteWrap);ta.focus();
     });
-    if(!box.children.length)box.appendChild(el('p',{class:'notice',text:'Nothing here with this filter.'}));
+    [noteP,bOk,bCh,bSk].forEach(function(b){act.appendChild(b)});
+    var art=el('article',{class:'post',id:'post-'+p.id},[head,body,act]);
+    cards[p.id]={el:art,status:status,note:noteP,ok:bOk,btns:[bOk,bCh,bSk],media:media};
+    return art;
+  }
+  function updateCard(p){
+    var c=cards[p.id],r=reviews[p.id]||{},st=r.status||'';
+    c.status.className='status '+st;c.status.textContent=LABEL[st]||'Waiting';
+    c.ok.textContent=st==='approved'?'Approved ✓':'Approve';
+    c.btns.forEach(function(b){b.disabled=!canWrite});
+    if(r.note){c.note.hidden=false;c.note.textContent='';c.note.appendChild(el('b',{text:'Your note: '}));c.note.appendChild(document.createTextNode(r.note))}else c.note.hidden=true;
+    renderMedia(p);
+  }
+  function applyFilter(){
+    if(!DATA)return;var shown=0;
+    DATA.posts.forEach(function(p){var st=(reviews[p.id]||{}).status;var vis=!(filter==='waiting'&&st)&&!(['x','tiktok','youtube'].indexOf(filter)>=0&&p.platform!==filter);cards[p.id].el.hidden=!vis;if(!vis)cards[p.id].el.querySelectorAll('video').forEach(function(v){v.pause()});if(vis)shown++});
+    $('#none').hidden=shown>0;
+  }
+  function refresh(){
+    if(!DATA)return;
+    var wait=0,ok=0,ch=0,need=0;
+    DATA.posts.forEach(function(p){var st=(reviews[p.id]||{}).status;if(!st)wait++;if(st==='approved')ok++;if(st==='changes')ch++;var has=(p.media&&p.media.length)||(uploads[p.id]&&uploads[p.id].items&&uploads[p.id].items.length);if(p.asset&&p.asset.status==='need'&&!has&&st!=='skip')need++;updateCard(p)});
+    $('#s-wait').textContent=wait;$('#s-ok').textContent=ok;$('#s-ch').textContent=ch;$('#s-need').textContent=need;$('#c-queue').textContent=wait;
+    applyFilter();
   }
 
   function renderDecs(){
@@ -407,17 +545,23 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
     $('#c-dec').textContent=open;
   }
 
-  fetch('data.json').then(function(r){return r.json()}).then(function(d){DATA=d;renderPosts();renderDecs()}).catch(function(){$('#posts').appendChild(el('p',{class:'notice',text:'The posts could not load. Reload the page.'}))});
+  fetch('data.json').then(function(r){return r.json()}).then(function(d){
+    DATA=d;var box=$('#posts');d.posts.forEach(function(p){box.appendChild(buildCard(p))});
+    box.appendChild(el('p',{class:'notice',id:'none',text:'Nothing here with this filter.',hidden:''}));
+    refresh();renderDecs();
+  }).catch(function(){$('#posts').appendChild(el('p',{class:'notice',text:'The posts could not load. Reload the page.'}))});
 
   var note=$('#store-note');
   var timer=setTimeout(function(){note.textContent='Saved answers could not load, so the buttons are off. Reload to try again.'},10000);
-  (window.claude&&window.claude.use?window.claude.use('db'):Promise.resolve(null)).then(function(d){
-    if(!d){clearTimeout(timer);note.textContent='Sign in to claude.ai to approve posts. You can still read and copy everything.';return}
+  var use=window.claude&&window.claude.use?function(n){return window.claude.use(n)}:function(){return Promise.resolve(null)};
+  use('db').then(function(d){
+    if(!d){clearTimeout(timer);note.textContent='Sign in to claude.ai to approve posts. You can still watch, read and copy everything.';return}
     db=d;
-    var user=window.claude.use('user');
-    Promise.resolve(user).then(function(u){return u&&u.can?u.can('data.write'):null}).then(function(c){canWrite=c!==false;renderPosts();renderDecs()},function(){canWrite=true;renderPosts();renderDecs()});
-    db.collection('reviews').onSnapshot(function(s){clearTimeout(timer);reviews={};s.docs.forEach(function(x){reviews[x.id]=x.data()||{}});note.textContent='Your answers save as you click, and I read them back before revising.';renderPosts()},function(){clearTimeout(timer);note.textContent='Saved answers could not load. Reload to try again.'});
+    use('assets').then(function(a){assets=a;if(DATA)DATA.posts.forEach(function(p){var c=cards[p.id];if(c){c.media.removeAttribute('data-key');renderMedia(p)}})},function(){});
+    use('user').then(function(u){return u&&u.can?u.can('data.write'):null}).then(function(c){canWrite=c!==false;refresh();renderDecs()},function(){canWrite=true;refresh();renderDecs()});
+    db.collection('reviews').onSnapshot(function(s){clearTimeout(timer);reviews={};s.docs.forEach(function(x){reviews[x.id]=x.data()||{}});note.textContent='Your answers save as you click, and I read them back before revising.';refresh()},function(){clearTimeout(timer);note.textContent='Saved answers could not load. Reload to try again.'});
     db.collection('decisions').onSnapshot(function(s){decisions={};s.docs.forEach(function(x){decisions[x.id]=x.data()||{}});renderDecs()});
+    db.collection('media').onSnapshot(function(s){uploads={};s.docs.forEach(function(x){var v=x.data()||{};if(Array.isArray(v.items))uploads[x.id]={items:v.items.filter(function(m){return m&&typeof m.id==='string'&&(m.type==='video'||m.type==='image')}).map(function(m){return {id:m.id,url:safeUrl(m.url)||('/_blob/'+m.id),type:m.type,name:String(m.name||'')}})}});refresh()});
   });
 })();
 </script>

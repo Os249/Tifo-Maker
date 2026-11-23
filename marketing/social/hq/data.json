@@ -1,250 +1,613 @@
 {
-  "updated": "2026-11-23",
-  "posts": [
+ "updated": "2026-11-23",
+ "posts": [
+  {
+   "id": "x-01",
+   "platform": "x",
+   "when": "Tue 24 Nov · 21:00",
+   "pillar": "Announcement",
+   "format": "Video post, pinned",
+   "title": "Pinned: what TifoMaker is",
+   "text": "تيفو ناديك، بملعبه الحقيقي، كرسي كرسي.\nتختار النادي، ترسم، وتشوفه يرتفع بالمدرج بالـ3D قبل ما تطبع ولا كرت.\nمجاني، ومن جوالك.",
+   "reply": "جربه 👇\ntifomaker.org",
+   "gloss": "Your club's tifo, in its real ground, seat by seat. Pick the club, draw, and watch it go up in the stand in 3D before you print a single card. Free, from your phone. (Reply: Try it, link.)",
+   "asset": {
+    "status": "have",
+    "file": "marketing/video/x-promo/tifomaker-x-promo-1080p-clean.mp4"
+   },
+   "why": "The pinned post is what every new visitor reads first, so it says the one thing in plain Gulf Arabic. The link goes in the first reply because posts with links in the main text are reported to get less reach on X.",
+   "measure": "Profile visits and link clicks over the week. Pin it and leave it.",
+   "media": [
     {
-      "id": "x-01", "platform": "x", "when": "Tue 24 Nov · 21:00", "pillar": "Announcement", "format": "Video post, pinned",
-      "title": "Pinned: what TifoMaker is",
-      "text": "تيفو ناديك، بملعبه الحقيقي، كرسي كرسي.\nتختار النادي، ترسم، وتشوفه يرتفع بالمدرج بالـ3D قبل ما تطبع ولا كرت.\nمجاني، ومن جوالك.",
-      "reply": "جربه 👇\ntifomaker.org",
-      "gloss": "Your club's tifo, in its real ground, seat by seat. Pick the club, draw, and watch it go up in the stand in 3D before you print a single card. Free, from your phone. (Reply: Try it, link.)",
-      "asset": {"status": "have", "file": "marketing/video/x-promo/tifomaker-x-promo-1080p-clean.mp4"},
-      "why": "The pinned post is what every new visitor reads first, so it says the one thing in plain Gulf Arabic. The link goes in the first reply because posts with links in the main text are reported to get less reach on X.",
-      "measure": "Profile visits and link clicks over the week. Pin it and leave it."
-    },
-    {
-      "id": "x-02", "platform": "x", "when": "Wed 25 Nov · 20:00", "pillar": "Announcement", "format": "Image post (4 renders)",
-      "title": "English intro for Premier League and LaLiga fans",
-      "text": "Your club's tifo, in its real ground, one seat at a time.\n\n147 real stadiums. Anfield, the Bernabéu, Kingdom Arena. Draw it, then watch it go up on match night in 3D.\n\nFree, in your browser.",
-      "reply": "tifomaker.org",
-      "gloss": "",
-      "asset": {"status": "have", "file": "marketing/social/media-kit/img/liverpool.jpg, real-madrid.jpg, ittihad.jpg, hero.jpg"},
-      "why": "About a third of visits are in English. Naming the grounds people know does the selling without adjectives.",
-      "measure": "Link clicks from the reply, bookmarks."
-    },
-    {
-      "id": "x-03", "platform": "x", "when": "Thu 26 Nov · 20:30", "pillar": "Your club", "format": "Text post with one image of the Ettifaq ground",
-      "title": "Matchday 13: you write the Ettifaq tifo",
-      "text": "السبت الاتفاق يستقبل الهلال.\n\nلو جمهور الاتفاق بيرفع تيفو… وش تكتبون فيه؟\n\nأحسن رد نرسمه على مدرج ملعب الاتفاق الحقيقي، وننزله الجمعة.",
-      "reply": "",
-      "gloss": "Saturday Ettifaq host Al-Hilal. If the Ettifaq fans were raising a tifo, what would you write on it? We draw the best reply on the real Ettifaq stand and post it Friday.",
-      "asset": {"status": "need", "file": "Screenshot of Ettifaq's ground in the Stadium view, empty stand"},
-      "why": "Replies are the strongest signal on X. This gives fans a job they enjoy, and the winner has a reason to share Friday's post. Rotate which club gets it each round so the account stays every club's.",
-      "measure": "Number of replies, and how many are real ideas rather than one-word answers.",
-      "depends": "Ettifaq v Al-Hilal is listed for Sat 28 Nov in third-party fixture lists. Check the SPL site before posting."
-    },
-    {
-      "id": "x-04", "platform": "x", "when": "Fri 27 Nov · 21:00", "pillar": "Your club", "format": "Quote post with a render",
-      "title": "Payoff: the winning reply, drawn",
-      "text": "فاز رد @[اسم الحساب] 👏\n\"[نص الرد]\"\n\nهذا هو على مدرج الاتفاق. [عدد] كرت، [عدد الألوان] ألوان.",
-      "reply": "تبيه بملعب ناديك؟\ntifomaker.org",
-      "gloss": "@[account]'s reply won. Here it is on the Ettifaq stand: [N] cards, [N] colours. (Reply: Want it in your club's ground? link)",
-      "asset": {"status": "need", "file": "Render of the winning tifo in Match Day, plus the card count from the bill of materials"},
-      "why": "Closing the loop is what makes people reply to the next one. The card count is something only we can say.",
-      "measure": "Reposts and quotes, and whether the winner shares it.",
-      "depends": "Fill in after x-03 gets replies."
-    },
-    {
-      "id": "x-05", "platform": "x", "when": "Sun 29 Nov · 20:00", "pillar": "Announcement", "format": "Image post (block plan)",
-      "title": "Every Roshn League ground in its real blocks",
-      "text": "ملاعب دوري روشن صارت مرسومة ببلوكاتها الحقيقية.\n\nالدرج بمكانه، الممرات، فتحات المداخل، وأسماء البلوكات نفس اللي على تذكرتك.\n\nيعني إذا قلت للقروب \"التيفو من C3 إلى C7\"، تشوف بالضبط وين بيطلع.",
-      "reply": "اختار ملعبك 👇\ntifomaker.org",
-      "gloss": "The Roshn League grounds are now drawn in their real blocks: the stairs where they are, the walkways, the tunnels, and block names as printed on your ticket. So if you tell the group 'the tifo runs from C3 to C7', you see exactly where it goes up.",
-      "asset": {"status": "need", "file": "Screenshot of a ground from above with its block names (scripts/block-plan.mts draws this)"},
-      "why": "An announcement written as what it lets a fan do, with a real block name, reads like a fan talking. 'We are proud to announce' would read like a company.",
-      "measure": "Bookmarks and replies asking for a ground that isn't there yet (that list is the build queue)."
-    },
-    {
-      "id": "x-06", "platform": "x", "when": "Every Friday · 21:00", "pillar": "Fans' tifos", "format": "Repost with a short note",
-      "title": "Tifo of the Week (template)",
-      "text": "تيفو الأسبوع 🏟️\n@[المصمم] رسمه لـ[النادي] على [الملعب].\n[جملة وحدة عن شيء محدد عجبنا فيه]",
-      "reply": "شوفه بالـ3D 👇\n[رابط التصميم]",
-      "gloss": "Tifo of the week: @[designer] drew it for [club] at [ground]. [One line on something specific we liked.] (Reply: see it in 3D, design link.)",
-      "asset": {"status": "need", "file": "You pick one community design each week; I write the line"},
-      "why": "Fans share posts about themselves. It also shows new visitors what ordinary fans make, which converts better than our own renders.",
-      "measure": "Shares by the featured designer, new sign-ups that weekend."
-    },
-    {
-      "id": "x-07", "platform": "x", "when": "Within 3 hours of any real tifo reveal", "pillar": "Reveal", "format": "Quote post of the fan group's video, plus our render",
-      "title": "Match-night reveal (template)",
-      "text": "تيفو [اسم الرابطة] الليلة 👏\nالفكرة: [المعنى بسطر واحد]\n\nرسمناه على نفس المدرج عشان نعرف كم تعبوا: تقريباً [عدد] كرت. الشغل الحقيقي لهم.",
-      "reply": "",
-      "gloss": "[Group]'s tifo tonight. The idea: [meaning in one line]. We drew it on the same stand to see how much work it was: about [N] cards. The real work is theirs.",
-      "asset": {"status": "need", "file": "Quick redraw in TifoMaker on the same ground, and the card count"},
-      "why": "Saudi media already writes whole articles about tifos (Al-Hilal's 3PTS tifo reached Marca and The Athletic). The card count adds something nobody else has, and the credit keeps the ultras groups on side.",
-      "measure": "Impressions compared with our usual posts; whether the group reposts it."
-    },
-    {
-      "id": "x-08", "platform": "x", "when": "Mon 7 Dec · 20:00", "pillar": "Big moment", "format": "Video post",
-      "title": "Asian Cup: one month to the opener",
-      "text": "بعد شهر بالضبط، الأخضر يفتتح كأس آسيا بالرياض 🇸🇦\n\nنبي نشوف تيفو الأخضر منكم.\nصمّموه، وأحسن 3 تصاميم ننزلها هنا وبتيك توك يوم الافتتاح.",
-      "reply": "صمّم على استاد الملك فهد 👇\ntifomaker.org",
-      "gloss": "Exactly one month from now, Saudi Arabia open the Asian Cup in Riyadh. We want to see your Al-Akhdar tifo. Design it, and we post the best 3 here and on TikTok on opening day.",
-      "asset": {"status": "need", "file": "King Fahd Sports City in the app (not built yet), and a 10s render"},
-      "why": "The biggest football moment in the country this winter, at home. A fan contest keeps the account national rather than one club's.",
-      "measure": "Designs made on the King Fahd ground between 7 Dec and 7 Jan.",
-      "depends": "Needs decision D-08 (build King Fahd Sports City) and D-07 (prizes). Opener: 7 Jan 2027, King Fahd Sports City, per AFC schedule."
-    },
-    {
-      "id": "tt-01", "platform": "tiktok", "when": "Tue 24 Nov · 21:30", "pillar": "Your club", "format": "10s video, ready-made",
-      "title": "Post the three ready hooks first",
-      "text": "صمّم تيفو ناديك بموقع مجاني 🔥 وش ناديك؟ 👇",
-      "reply": "Pinned comment: وش ناديك؟ 💬",
-      "gloss": "Design your club's tifo on a free site. What's your club?",
-      "script": ["Three cuts are already made in marketing/video: tiktok_v2_hookA, hookB, hookC. Same video, different first second.", "If they haven't gone out, post one a day, starting with hook C (لو ناديك يطلع بتيفو كذا؟).", "Mute the file's music in TikTok and add a trending sound in the app."],
-      "hashtags": "#تيفو #دوري_روشن #كورة #الهلال #الاتحاد #الاهلي #النصر",
-      "asset": {"status": "have", "file": "marketing/video/tiktok_v2_hookC.mp4 (then A, then B)"},
-      "why": "These were made to fix what went wrong with video 1 (English, slow hook, read like an ad). Testing them costs nothing and tells us which first second works for this audience.",
-      "measure": "Viewers still watching at 1s and 3s, for each hook. The winner becomes the template."
-    },
-    {
-      "id": "tt-02", "platform": "tiktok", "when": "Wed 25 Nov · 21:30", "pillar": "Your club", "format": "9–12s video, new series",
-      "title": "\"Comment your club\" series, episode 1",
-      "text": "أول 3 أندية بالتعليقات أرسم لهم تيفو بملعبهم 👇",
-      "reply": "Pinned comment: اكتب ناديك وملعبه 👇",
-      "gloss": "The first 3 clubs in the comments, I draw their tifo in their ground.",
-      "onscreen": ["0.0s  علّق باسم ناديك", "0.6s  وأرسم تيفوه بملعبه الحقيقي", "end   التعليقات مفتوحة 👇"],
-      "script": ["0.0–0.6s: open mid-flare on the AHLAWI stand, no intro.", "0.6–6s: fast cuts, blue stand, gold stand, green stand (the three reels in marketing/assets).", "6–9s: slow push across the full bowl.", "Last frame matches the first so it loops."],
-      "hashtags": "#تيفو #دوري_روشن #كورة #جمهور #السعودية",
-      "asset": {"status": "have", "file": "marketing/assets/reel_blue.mp4, reel_gold.mp4, reel_green.mp4, bowl-wide frame"},
-      "why": "Asking for the club name is the cheapest comment there is, and club loyalty does the rest. Every comment becomes the next video, so the series feeds itself.",
-      "measure": "Comments per 1,000 views. Over 15 means the series is working."
-    },
-    {
-      "id": "tt-03", "platform": "tiktok", "when": "Thu 26 Nov · 21:30, then as comments come in", "pillar": "Your club", "format": "15–20s reply-with-video",
-      "title": "Reply to a comment: build it on screen",
-      "text": "طلبتوا [النادي]… هذا هو بملعبه 🔥 مين بعده؟",
-      "reply": "",
-      "gloss": "You asked for [club]... here it is in its ground. Who's next?",
-      "onscreen": ["Comment sticker from TikTok's reply feature", "0.0s  [النادي] بملعبه الحقيقي", "end   مين بعده؟ 👇"],
-      "script": ["Use TikTok's 'Reply with video' on a real comment, so the comment shows on screen.", "0–1s: the finished tifo first, at full size.", "1–14s: screen recording of the build at 8x speed, seat colours filling in.", "14–18s: Match Day camera rising over the stand."],
-      "hashtags": "#تيفو #[النادي] #دوري_روشن #كورة",
-      "asset": {"status": "need", "file": "Screen recording of the build plus a Match Day capture (about 20 minutes per club)"},
-      "why": "A reply video carries the fan's own comment, so it reads as a conversation, not an ad, and that fan shares it.",
-      "measure": "Shares, and whether the commenter reposts."
-    },
-    {
-      "id": "tt-04", "platform": "tiktok", "when": "Fri 27 Nov · 22:00", "pillar": "Derby duel", "format": "12s video, two tifos",
-      "title": "Ettifaq or Hilal: one ground, two ends",
-      "text": "مدرج الاتفاق ولا مدرج الهلال؟ اكتب 1 أو 2 👇",
-      "reply": "",
-      "gloss": "Ettifaq's end or Al-Hilal's end? Write 1 or 2.",
-      "onscreen": ["0.0s  1️⃣ الاتفاق", "4.0s  2️⃣ الهلال", "8.0s  نفس الملعب… مين كسب؟"],
-      "script": ["Both tifos drawn on Ettifaq's ground, home end and away end.", "0–4s: home end goes up.", "4–8s: camera swings to the away end, it goes up.", "8–12s: wide shot of both together."],
-      "hashtags": "#الاتفاق #الهلال #تيفو #دوري_روشن #كورة",
-      "asset": {"status": "need", "file": "Two designs on Ettifaq's ground, one Match Day capture"},
-      "why": "A 1-or-2 vote is the easiest comment to leave, and both sets of fans share it to win. Post it the night before the match.",
-      "measure": "Comment count, and the split between 1 and 2 (the next post can announce the result)."
-    },
-    {
-      "id": "tt-05", "platform": "tiktok", "when": "Sun 29 Nov · 21:30", "pillar": "How it's made", "format": "15s video with a number reveal",
-      "title": "How many cards does a full-stand tifo take?",
-      "text": "تيفو مدرج كامل يحتاج كم كرت؟ خمّن قبل نهاية الفيديو 👇",
-      "reply": "",
-      "gloss": "How many cards does a full-stand tifo need? Guess before the end of the video.",
-      "onscreen": ["0.0s  كم كرت يحتاج هذا التيفو؟", "3.0s  خمّن بالتعليقات", "11s  [العدد] كرت", "13s  [ألوان]: أخضر [عدد] · أبيض [عدد] · ذهبي [عدد]"],
-      "script": ["0–3s: the AHLAWI stand, still.", "3–10s: slow zoom from the whole stand down to single seats.", "11s: the total from the app's card count, large.", "13s: the split by colour."],
-      "hashtags": "#تيفو #الاهلي #الالتراس #كورة",
-      "asset": {"status": "need", "file": "The real card total for the AHLAWI design from the app's bill of materials"},
-      "why": "A question with an answer at the end keeps people to the last second, and supporter groups save it because the number is useful to them.",
-      "measure": "Completion rate and saves."
-    },
-    {
-      "id": "tt-06", "platform": "tiktok", "when": "Tue 1 Dec · 21:30", "pillar": "Behind it", "format": "25–35s, voice-over",
-      "title": "One person, every ground",
-      "text": "شخص واحد يرسم كل ملاعب الدوري… كرسي كرسي",
-      "reply": "",
-      "gloss": "One person drawing every ground in the league, seat by seat.",
-      "onscreen": ["0.0s  صورة الملعب الحقيقي ← النسخة اللي رسمتها", "end   وش الملعب اللي تبيه بعده؟"],
-      "script": ["0–2s: split screen, real photo of Al-Awwal Park on the left, the app's model on the right (Claude outputs/al-awwal-before-after.png).", "2–20s, your voice: how you measure a ground from photos, count the stairs, and name the blocks the way the tickets do.", "20–30s: the finished ground with a tifo going up.", "End on a question about which ground to build next."],
-      "hashtags": "#تيفو #ملاعب #دوري_روشن #مطور",
-      "asset": {"status": "need", "file": "Your voice-over (about 25 seconds). Visuals already exist."},
-      "why": "A real person doing slow, careful work is the opposite of AI slop, and people root for a solo builder. It's also the post most likely to get you press.",
-      "measure": "Average watch time and follows from the video.",
-      "depends": "Needs decision D-02 (whether you appear, and how)."
-    },
-    {
-      "id": "tt-07", "platform": "tiktok", "when": "Thu 3 Dec · 20:00 (Al-Hilal v Al-Diriyah day)", "pillar": "How it's made", "format": "20s build timelapse",
-      "title": "Kingdom Arena, from empty to full tifo",
-      "text": "المملكة أرينا… من كراسي فاضية لتيفو كامل 💙",
-      "reply": "",
-      "gloss": "Kingdom Arena, from empty seats to a full tifo.",
-      "onscreen": ["0.0s  [عدد] كرسي", "end   (no text, loop)"],
-      "script": ["0–1s: the finished tifo flashes for half a second, then cut to the empty stand.", "1–16s: build timelapse at 12x.", "16–20s: Match Day camera; the last frame cuts back to the first."],
-      "hashtags": "#الهلال #المملكة_أرينا #تيفو #دوري_روشن",
-      "asset": {"status": "need", "file": "Screen recording of the build at Kingdom Arena"},
-      "why": "Satisfying timelapses are watched twice, and a loop counts as a rewatch. Posting on match day catches people already searching for the club.",
-      "measure": "Rewatches (average watch time over 100%) and shares.",
-      "depends": "Al-Hilal v Al-Diriyah is listed for 3 Dec; check before posting."
-    },
-    {
-      "id": "tt-08", "platform": "tiktok", "when": "Mon 7 Dec · 21:30", "pillar": "Big moment", "format": "12s video",
-      "title": "Al-Akhdar's tifo for the Asian Cup",
-      "text": "لو أنت مصمم تيفو الأخضر بافتتاح كأس آسيا… وش تكتب؟ 🇸🇦",
-      "reply": "Pinned comment: أحسن 3 تصاميم ننزلها يوم الافتتاح",
-      "gloss": "If you were designing Al-Akhdar's tifo for the Asian Cup opener, what would you write?",
-      "onscreen": ["0.0s  باقي شهر 🇸🇦", "1.0s  تيفو الأخضر… من تصميمك", "end   الرابط بالبايو"],
-      "script": ["0–1s: green stand at King Fahd going up.", "1–9s: three quick example designs.", "9–12s: wide shot of the full bowl."],
-      "hashtags": "#الأخضر #كأس_آسيا #تيفو #السعودية",
-      "asset": {"status": "need", "file": "King Fahd Sports City in the app, plus 3 example designs"},
-      "why": "Same contest as x-08, cut for TikTok. National-team posts reach fans of every club at once.",
-      "measure": "Contest entries.",
-      "depends": "Same as x-08: decisions D-07 and D-08."
-    },
-    {
-      "id": "yt-01", "platform": "youtube", "when": "This week", "pillar": "Setup", "format": "Channel setup",
-      "title": "Set the channel up before the first upload",
-      "text": "Channel name: TifoMaker | تيفو ميكر\n\nDescription:\nصمّم تيفو ناديك في ملعبه الحقيقي، كرسي كرسي، وشوفه بالـ3D. شروحات، ملاعب دوري روشن من الداخل، وتيفوهات الجمهور.\nDesign your club's tifo in its real ground, seat by seat. Tutorials, stadium flyovers and fans' tifos.\ntifomaker.org",
-      "reply": "",
-      "gloss": "",
-      "script": ["Banner: the hero image with the wordmark (I can export it from the media kit).", "Trailer for non-subscribers: the 35s X promo video.", "Playlists: تيفو ناديك (Shorts) · شروحات (tutorials) · الملاعب (grounds)."],
-      "asset": {"status": "have", "file": "marketing/video/x-promo/tifomaker-x-promo-1080p-clean.mp4, media-kit/img/hero.jpg"},
-      "why": "YouTube is a search engine. A clear name and description in both languages is how 'تيفو' searches find the channel.",
-      "measure": "Search impressions in YouTube Studio after 30 days."
-    },
-    {
-      "id": "yt-02", "platform": "youtube", "when": "A day after each TikTok", "pillar": "Repurpose", "format": "Shorts",
-      "title": "Every TikTok, re-uploaded as a Short",
-      "text": "Title pattern: [ما يصير بالفيديو] | [النادي] [الملعب] #shorts\nExample: تيفو الهلال يرتفع في المملكة أرينا | الهلال #shorts",
-      "reply": "",
-      "gloss": "",
-      "script": ["Upload the clean export, never the TikTok download (YouTube pushes watermarked clips down).", "Write the title as what someone would search for, club and ground by name.", "Link the related long video from each Short."],
-      "asset": {"status": "have", "file": "Clean exports of tt-02, tt-04, tt-05, tt-07"},
-      "why": "Same work, a second audience. Shorts can point to the long tutorial, which TikTok can't do.",
-      "measure": "Shorts views to channel subscribers."
-    },
-    {
-      "id": "yt-03", "platform": "youtube", "when": "Sat 5 Dec · 19:00", "pillar": "Tutorial", "format": "7–9 min video",
-      "title": "How to design a full-stand tifo, step by step",
-      "text": "Title: طريقة تصميم تيفو لمدرج كامل خطوة بخطوة (مجاناً)\n\nChapters:\n0:00 النتيجة أول شيء\n0:30 اختار النادي والملعب\n1:30 الألوان والخلفية\n3:00 الكتابة والشعار\n4:30 الرسم بالذكاء الاصطناعي\n5:30 يوم المباراة بالـ3D\n6:30 كم كرت تحتاج وورقة كل بلوك\n7:30 شارك التصميم مع القروب",
-      "reply": "",
-      "gloss": "Title: How to design a full-stand tifo, step by step (free). Chapters: the result first · club and ground · colours · lettering and crest · AI draft · Match Day in 3D · card count and block sheets · sharing with the group.",
-      "script": ["Screen recording with your voice. No face needed.", "Show the finished tifo in the first 30 seconds, then build it.", "Thumbnail: the stand mid-reveal, 3 words max: تيفو بدقايق."],
-      "asset": {"status": "need", "file": "Screen recording plus voice-over"},
-      "why": "People search 'كيف اسوي تيفو'. A tutorial keeps getting found for years, long after a TikTok stops.",
-      "measure": "Views from search, and clicks on the description link."
-    },
-    {
-      "id": "yt-04", "platform": "youtube", "when": "Sat 19 Dec · 19:00", "pillar": "Grounds", "format": "10–12 min flyover",
-      "title": "Every Roshn League ground, inside, in 3D",
-      "text": "Title: ملاعب دوري روشن من الداخل بالـ3D | كل البلوكات\n\nChapters: one per ground, with its name, so each one shows up in search.",
-      "reply": "",
-      "gloss": "Title: The Roshn League grounds from the inside in 3D, every block.",
-      "script": ["Flyover of each ground for 30–40 seconds, with block names on screen.", "Calm music, no voice needed.", "End card: design your tifo in any of them."],
-      "asset": {"status": "need", "file": "Flyover captures of the 18 grounds (the app has a flyover camera)"},
-      "why": "Every chapter is a search result ('ملعب الإنماء من الداخل'). It's useful to fans planning which seats to buy, not only to tifo makers.",
-      "measure": "Watch time, and which chapters people jump to."
+     "type": "video",
+     "src": "media/x-promo.mp4",
+     "poster": "media/x-promo.jpg",
+     "caption": "The 35-second promo, attached to the pinned post"
     }
-  ],
-  "decisions": [
-    {"id": "D-01", "q": "Which language leads on each platform?", "rec": "TikTok and YouTube: Arabic first, always. X: Arabic for everything Saudi, separate English posts for Premier League, LaLiga and big announcements.", "why": "70% of the TikTok audience is Saudi, and up to 63% of site visits are in Arabic. Video 1 was in English and lost most viewers in the first second."},
-    {"id": "D-02", "q": "Who is the face and voice of the account?", "rec": "Start with your voice over screen recordings, no face. Do one founder video (tt-06) and see how it lands.", "why": "A real person's voice is the clearest sign this isn't AI content, and a voice is easier to keep up every week than filming yourself."},
-    {"id": "D-03", "q": "Can we use club crests and fan groups' photos?", "rec": "No official crests in our own posts: club colours and words only. Fan designs made in the app are fine. Always credit fan groups by handle, and ask before reusing their photos or videos.", "why": "Crests are trademarks. The groups are the people we most want on our side."},
-    {"id": "D-04", "q": "Pay for X Premium on @tifomaker?", "rec": "Yes, the basic tier, for one quarter, then judge it on reach.", "why": "Several 2026 analyses say paid accounts get noticeably more reach, though nobody has measured it independently. It also adds the badge, edits and longer videos."},
-    {"id": "D-05", "q": "How often do we post?", "rec": "X: 1–2 posts a day plus 15 minutes of replies. TikTok: 4 a week. YouTube: 3 Shorts a week and 1 long video every 2 weeks.", "why": "That's what one person can keep up without the quality dropping. Consistency matters more than volume."},
-    {"id": "D-06", "q": "How often do we mention Pro?", "rec": "At most 1 post in 8, and none on TikTok in the first month.", "why": "People follow for tifos. With 1 sale from 496 accounts, more sign-ups will help more than more sales pitches right now."},
-    {"id": "D-07", "q": "Prizes for the Asian Cup tifo contest?", "rec": "A year of Pro for each of the top 3, plus being shown on all three accounts on opening day.", "why": "It costs nothing to give and fans want it. Free entry, no purchase needed. Check whether a Saudi commerce licence is needed for a prize contest before announcing."},
-    {"id": "D-08", "q": "Build King Fahd Sports City before 7 January?", "rec": "Yes, ready by 20 December.", "why": "It hosts the Asian Cup opener and final. Without it, the biggest moment of the winter has no ground to design in."},
-    {"id": "D-09", "q": "Spend on ads?", "rec": "Nothing until a post beats our own average without help. Then SAR 50–100 of TikTok Promote behind that one post.", "why": "Paying to push a post that people don't watch only buys bad numbers."},
-    {"id": "D-10", "q": "How do posts go out?", "rec": "You post them yourself, in each app, after approving them here. TikTok sounds must be added in the app. X posts can be scheduled in X's own scheduler.", "why": "I can't post to X, TikTok or YouTube from here, so nothing goes out without you. Approvals on this page are the go-ahead I read back."}
-  ]
+   ]
+  },
+  {
+   "id": "x-02",
+   "platform": "x",
+   "when": "Wed 25 Nov · 20:00",
+   "pillar": "Announcement",
+   "format": "Image post (4 renders)",
+   "title": "English intro for Premier League and LaLiga fans",
+   "text": "Your club's tifo, in its real ground, one seat at a time.\n\n147 real stadiums. Anfield, the Bernabéu, Kingdom Arena. Draw it, then watch it go up on match night in 3D.\n\nFree, in your browser.",
+   "reply": "tifomaker.org",
+   "gloss": "",
+   "asset": {
+    "status": "have",
+    "file": "marketing/social/media-kit/img/liverpool.jpg, real-madrid.jpg, ittihad.jpg, hero.jpg"
+   },
+   "why": "About a third of visits are in English. Naming the grounds people know does the selling without adjectives.",
+   "measure": "Link clicks from the reply, bookmarks.",
+   "media": [
+    {
+     "type": "image",
+     "src": "media/liverpool.jpg",
+     "caption": "Anfield"
+    },
+    {
+     "type": "image",
+     "src": "media/real-madrid.jpg",
+     "caption": "Bernabéu"
+    },
+    {
+     "type": "image",
+     "src": "media/ittihad.jpg",
+     "caption": "Al-Ittihad's ground"
+    },
+    {
+     "type": "image",
+     "src": "media/hero.jpg",
+     "caption": "Match Day stand"
+    }
+   ]
+  },
+  {
+   "id": "x-03",
+   "platform": "x",
+   "when": "Thu 26 Nov · 20:30",
+   "pillar": "Your club",
+   "format": "Text post with one image of the Ettifaq ground",
+   "title": "Matchday 13: you write the Ettifaq tifo",
+   "text": "السبت الاتفاق يستقبل الهلال.\n\nلو جمهور الاتفاق بيرفع تيفو… وش تكتبون فيه؟\n\nأحسن رد نرسمه على مدرج ملعب الاتفاق الحقيقي، وننزله الجمعة.",
+   "reply": "",
+   "gloss": "Saturday Ettifaq host Al-Hilal. If the Ettifaq fans were raising a tifo, what would you write on it? We draw the best reply on the real Ettifaq stand and post it Friday.",
+   "asset": {
+    "status": "need",
+    "file": "Screenshot of Ettifaq's ground in the Stadium view, empty stand"
+   },
+   "why": "Replies are the strongest signal on X. This gives fans a job they enjoy, and the winner has a reason to share Friday's post. Rotate which club gets it each round so the account stays every club's.",
+   "measure": "Number of replies, and how many are real ideas rather than one-word answers.",
+   "depends": "Ettifaq v Al-Hilal is listed for Sat 28 Nov in third-party fixture lists. Check the SPL site before posting."
+  },
+  {
+   "id": "x-04",
+   "platform": "x",
+   "when": "Fri 27 Nov · 21:00",
+   "pillar": "Your club",
+   "format": "Quote post with a render",
+   "title": "Payoff: the winning reply, drawn",
+   "text": "فاز رد @[اسم الحساب] 👏\n\"[نص الرد]\"\n\nهذا هو على مدرج الاتفاق. [عدد] كرت، [عدد الألوان] ألوان.",
+   "reply": "تبيه بملعب ناديك؟\ntifomaker.org",
+   "gloss": "@[account]'s reply won. Here it is on the Ettifaq stand: [N] cards, [N] colours. (Reply: Want it in your club's ground? link)",
+   "asset": {
+    "status": "need",
+    "file": "Render of the winning tifo in Match Day, plus the card count from the bill of materials"
+   },
+   "why": "Closing the loop is what makes people reply to the next one. The card count is something only we can say.",
+   "measure": "Reposts and quotes, and whether the winner shares it.",
+   "depends": "Fill in after x-03 gets replies."
+  },
+  {
+   "id": "x-05",
+   "platform": "x",
+   "when": "Sun 29 Nov · 20:00",
+   "pillar": "Announcement",
+   "format": "Image post (block plan)",
+   "title": "Every Roshn League ground in its real blocks",
+   "text": "ملاعب دوري روشن صارت مرسومة ببلوكاتها الحقيقية.\n\nالدرج بمكانه، الممرات، فتحات المداخل، وأسماء البلوكات نفس اللي على تذكرتك.\n\nيعني إذا قلت للقروب \"التيفو من C3 إلى C7\"، تشوف بالضبط وين بيطلع.",
+   "reply": "اختار ملعبك 👇\ntifomaker.org",
+   "gloss": "The Roshn League grounds are now drawn in their real blocks: the stairs where they are, the walkways, the tunnels, and block names as printed on your ticket. So if you tell the group 'the tifo runs from C3 to C7', you see exactly where it goes up.",
+   "asset": {
+    "status": "need",
+    "file": "Screenshot of a ground from above with its block names (scripts/block-plan.mts draws this)"
+   },
+   "why": "An announcement written as what it lets a fan do, with a real block name, reads like a fan talking. 'We are proud to announce' would read like a company.",
+   "measure": "Bookmarks and replies asking for a ground that isn't there yet (that list is the build queue)."
+  },
+  {
+   "id": "x-06",
+   "platform": "x",
+   "when": "Every Friday · 21:00",
+   "pillar": "Fans' tifos",
+   "format": "Repost with a short note",
+   "title": "Tifo of the Week (template)",
+   "text": "تيفو الأسبوع 🏟️\n@[المصمم] رسمه لـ[النادي] على [الملعب].\n[جملة وحدة عن شيء محدد عجبنا فيه]",
+   "reply": "شوفه بالـ3D 👇\n[رابط التصميم]",
+   "gloss": "Tifo of the week: @[designer] drew it for [club] at [ground]. [One line on something specific we liked.] (Reply: see it in 3D, design link.)",
+   "asset": {
+    "status": "need",
+    "file": "You pick one community design each week; I write the line"
+   },
+   "why": "Fans share posts about themselves. It also shows new visitors what ordinary fans make, which converts better than our own renders.",
+   "measure": "Shares by the featured designer, new sign-ups that weekend."
+  },
+  {
+   "id": "x-07",
+   "platform": "x",
+   "when": "Within 3 hours of any real tifo reveal",
+   "pillar": "Reveal",
+   "format": "Quote post of the fan group's video, plus our render",
+   "title": "Match-night reveal (template)",
+   "text": "تيفو [اسم الرابطة] الليلة 👏\nالفكرة: [المعنى بسطر واحد]\n\nرسمناه على نفس المدرج عشان نعرف كم تعبوا: تقريباً [عدد] كرت. الشغل الحقيقي لهم.",
+   "reply": "",
+   "gloss": "[Group]'s tifo tonight. The idea: [meaning in one line]. We drew it on the same stand to see how much work it was: about [N] cards. The real work is theirs.",
+   "asset": {
+    "status": "need",
+    "file": "Quick redraw in TifoMaker on the same ground, and the card count"
+   },
+   "why": "Saudi media already writes whole articles about tifos (Al-Hilal's 3PTS tifo reached Marca and The Athletic). The card count adds something nobody else has, and the credit keeps the ultras groups on side.",
+   "measure": "Impressions compared with our usual posts; whether the group reposts it."
+  },
+  {
+   "id": "x-08",
+   "platform": "x",
+   "when": "Mon 7 Dec · 20:00",
+   "pillar": "Big moment",
+   "format": "Video post",
+   "title": "Asian Cup: one month to the opener",
+   "text": "بعد شهر بالضبط، الأخضر يفتتح كأس آسيا بالرياض 🇸🇦\n\nنبي نشوف تيفو الأخضر منكم.\nصمّموه، وأحسن 3 تصاميم ننزلها هنا وبتيك توك يوم الافتتاح.",
+   "reply": "صمّم على استاد الملك فهد 👇\ntifomaker.org",
+   "gloss": "Exactly one month from now, Saudi Arabia open the Asian Cup in Riyadh. We want to see your Al-Akhdar tifo. Design it, and we post the best 3 here and on TikTok on opening day.",
+   "asset": {
+    "status": "need",
+    "file": "King Fahd Sports City in the app (not built yet), and a 10s render"
+   },
+   "why": "The biggest football moment in the country this winter, at home. A fan contest keeps the account national rather than one club's.",
+   "measure": "Designs made on the King Fahd ground between 7 Dec and 7 Jan.",
+   "depends": "Needs decision D-08 (build King Fahd Sports City) and D-07 (prizes). Opener: 7 Jan 2027, King Fahd Sports City, per AFC schedule."
+  },
+  {
+   "id": "tt-01",
+   "platform": "tiktok",
+   "when": "Tue 24 Nov · 21:30",
+   "pillar": "Your club",
+   "format": "10s video, ready-made",
+   "title": "Post the three ready hooks first",
+   "text": "صمّم تيفو ناديك بموقع مجاني 🔥 وش ناديك؟ 👇",
+   "reply": "وش ناديك؟ 💬",
+   "gloss": "Design your club's tifo on a free site. What's your club?",
+   "script": [
+    "Three cuts are already made in marketing/video: tiktok_v2_hookA, hookB, hookC. Same video, different first second.",
+    "If they haven't gone out, post one a day, starting with hook C (لو ناديك يطلع بتيفو كذا؟).",
+    "Mute the file's music in TikTok and add a trending sound in the app."
+   ],
+   "hashtags": "#تيفو #دوري_روشن #كورة #الهلال #الاتحاد #الاهلي #النصر",
+   "asset": {
+    "status": "have",
+    "file": "marketing/video/tiktok_v2_hookC.mp4 (then A, then B)"
+   },
+   "why": "These were made to fix what went wrong with video 1 (English, slow hook, read like an ad). Testing them costs nothing and tells us which first second works for this audience.",
+   "measure": "Viewers still watching at 1s and 3s, for each hook. The winner becomes the template.",
+   "media": [
+    {
+     "type": "video",
+     "src": "media/tiktok-hookC.mp4",
+     "poster": "media/tiktok-hookC.jpg",
+     "caption": "Hook C · لو ناديك يطلع بتيفو كذا؟ (post first)"
+    },
+    {
+     "type": "video",
+     "src": "media/tiktok-hookA.mp4",
+     "poster": "media/tiktok-hookA.jpg",
+     "caption": "Hook A · هذا مو ستاد حقيقي"
+    },
+    {
+     "type": "video",
+     "src": "media/tiktok-hookB.mp4",
+     "poster": "media/tiktok-hookB.jpg",
+     "caption": "Hook B · سويت تيفو ناديك من جوّالي"
+    }
+   ],
+   "replyLabel": "Pinned comment"
+  },
+  {
+   "id": "tt-02",
+   "platform": "tiktok",
+   "when": "Wed 25 Nov · 21:30",
+   "pillar": "Your club",
+   "format": "9–12s video, new series",
+   "title": "\"Comment your club\" series, episode 1",
+   "text": "أول 3 أندية بالتعليقات أرسم لهم تيفو بملعبهم 👇",
+   "reply": "اكتب ناديك وملعبه 👇",
+   "gloss": "The first 3 clubs in the comments, I draw their tifo in their ground.",
+   "onscreen": [
+    "0.0s  علّق باسم ناديك",
+    "0.6s  وأرسم تيفوه بملعبه الحقيقي",
+    "end   التعليقات مفتوحة 👇"
+   ],
+   "script": [
+    "0.0–0.6s: open mid-flare on the AHLAWI stand, no intro.",
+    "0.6–6s: fast cuts, blue stand, gold stand, green stand (the three reels in marketing/assets).",
+    "6–9s: slow push across the full bowl.",
+    "Last frame matches the first so it loops."
+   ],
+   "hashtags": "#تيفو #دوري_روشن #كورة #جمهور #السعودية",
+   "asset": {
+    "status": "have",
+    "file": "marketing/assets/reel_blue.mp4, reel_gold.mp4, reel_green.mp4, bowl-wide frame"
+   },
+   "why": "Asking for the club name is the cheapest comment there is, and club loyalty does the rest. Every comment becomes the next video, so the series feeds itself.",
+   "measure": "Comments per 1,000 views. Over 15 means the series is working.",
+   "media": [
+    {
+     "type": "video",
+     "src": "media/reel-blue.mp4",
+     "poster": "media/reel-blue.jpg",
+     "caption": "Blue stand clip"
+    },
+    {
+     "type": "video",
+     "src": "media/reel-gold.mp4",
+     "poster": "media/reel-gold.jpg",
+     "caption": "Gold stand clip"
+    },
+    {
+     "type": "video",
+     "src": "media/reel-green.mp4",
+     "poster": "media/reel-green.jpg",
+     "caption": "Green stand clip"
+    }
+   ],
+   "replyLabel": "Pinned comment"
+  },
+  {
+   "id": "tt-03",
+   "platform": "tiktok",
+   "when": "Thu 26 Nov · 21:30, then as comments come in",
+   "pillar": "Your club",
+   "format": "15–20s reply-with-video",
+   "title": "Reply to a comment: build it on screen",
+   "text": "طلبتوا [النادي]… هذا هو بملعبه 🔥 مين بعده؟",
+   "reply": "",
+   "gloss": "You asked for [club]... here it is in its ground. Who's next?",
+   "onscreen": [
+    "Comment sticker from TikTok's reply feature",
+    "0.0s  [النادي] بملعبه الحقيقي",
+    "end   مين بعده؟ 👇"
+   ],
+   "script": [
+    "Use TikTok's 'Reply with video' on a real comment, so the comment shows on screen.",
+    "0–1s: the finished tifo first, at full size.",
+    "1–14s: screen recording of the build at 8x speed, seat colours filling in.",
+    "14–18s: Match Day camera rising over the stand."
+   ],
+   "hashtags": "#تيفو #[النادي] #دوري_روشن #كورة",
+   "asset": {
+    "status": "need",
+    "file": "Screen recording of the build plus a Match Day capture (about 20 minutes per club)"
+   },
+   "why": "A reply video carries the fan's own comment, so it reads as a conversation, not an ad, and that fan shares it.",
+   "measure": "Shares, and whether the commenter reposts."
+  },
+  {
+   "id": "tt-04",
+   "platform": "tiktok",
+   "when": "Fri 27 Nov · 22:00",
+   "pillar": "Derby duel",
+   "format": "12s video, two tifos",
+   "title": "Ettifaq or Hilal: one ground, two ends",
+   "text": "مدرج الاتفاق ولا مدرج الهلال؟ اكتب 1 أو 2 👇",
+   "reply": "",
+   "gloss": "Ettifaq's end or Al-Hilal's end? Write 1 or 2.",
+   "onscreen": [
+    "0.0s  1️⃣ الاتفاق",
+    "4.0s  2️⃣ الهلال",
+    "8.0s  نفس الملعب… مين كسب؟"
+   ],
+   "script": [
+    "Both tifos drawn on Ettifaq's ground, home end and away end.",
+    "0–4s: home end goes up.",
+    "4–8s: camera swings to the away end, it goes up.",
+    "8–12s: wide shot of both together."
+   ],
+   "hashtags": "#الاتفاق #الهلال #تيفو #دوري_روشن #كورة",
+   "asset": {
+    "status": "need",
+    "file": "Two designs on Ettifaq's ground, one Match Day capture"
+   },
+   "why": "A 1-or-2 vote is the easiest comment to leave, and both sets of fans share it to win. Post it the night before the match.",
+   "measure": "Comment count, and the split between 1 and 2 (the next post can announce the result)."
+  },
+  {
+   "id": "tt-05",
+   "platform": "tiktok",
+   "when": "Sun 29 Nov · 21:30",
+   "pillar": "How it's made",
+   "format": "15s video with a number reveal",
+   "title": "How many cards does a full-stand tifo take?",
+   "text": "تيفو مدرج كامل يحتاج كم كرت؟ خمّن قبل نهاية الفيديو 👇",
+   "reply": "",
+   "gloss": "How many cards does a full-stand tifo need? Guess before the end of the video.",
+   "onscreen": [
+    "0.0s  كم كرت يحتاج هذا التيفو؟",
+    "3.0s  خمّن بالتعليقات",
+    "11s  [العدد] كرت",
+    "13s  [ألوان]: أخضر [عدد] · أبيض [عدد] · ذهبي [عدد]"
+   ],
+   "script": [
+    "0–3s: the AHLAWI stand, still.",
+    "3–10s: slow zoom from the whole stand down to single seats.",
+    "11s: the total from the app's card count, large.",
+    "13s: the split by colour."
+   ],
+   "hashtags": "#تيفو #الاهلي #الالتراس #كورة",
+   "asset": {
+    "status": "need",
+    "file": "The real card total for the AHLAWI design from the app's bill of materials"
+   },
+   "why": "A question with an answer at the end keeps people to the last second, and supporter groups save it because the number is useful to them.",
+   "measure": "Completion rate and saves."
+  },
+  {
+   "id": "tt-06",
+   "platform": "tiktok",
+   "when": "Tue 1 Dec · 21:30",
+   "pillar": "Behind it",
+   "format": "25–35s, voice-over",
+   "title": "One person, every ground",
+   "text": "شخص واحد يرسم كل ملاعب الدوري… كرسي كرسي",
+   "reply": "",
+   "gloss": "One person drawing every ground in the league, seat by seat.",
+   "onscreen": [
+    "0.0s  صورة الملعب الحقيقي ← النسخة اللي رسمتها",
+    "end   وش الملعب اللي تبيه بعده؟"
+   ],
+   "script": [
+    "0–2s: split screen, real photo of Al-Awwal Park on the left, the app's model on the right (Claude outputs/al-awwal-before-after.png).",
+    "2–20s, your voice: how you measure a ground from photos, count the stairs, and name the blocks the way the tickets do.",
+    "20–30s: the finished ground with a tifo going up.",
+    "End on a question about which ground to build next."
+   ],
+   "hashtags": "#تيفو #ملاعب #دوري_روشن #مطور",
+   "asset": {
+    "status": "need",
+    "file": "Your voice-over (about 25 seconds). Visuals already exist."
+   },
+   "why": "A real person doing slow, careful work is the opposite of AI slop, and people root for a solo builder. It's also the post most likely to get you press.",
+   "measure": "Average watch time and follows from the video.",
+   "depends": "Needs decision D-02 (whether you appear, and how).",
+   "media": [
+    {
+     "type": "image",
+     "src": "media/al-awwal-before-after.jpg",
+     "caption": "Al-Awwal Park: real photo against the app's model"
+    }
+   ]
+  },
+  {
+   "id": "tt-07",
+   "platform": "tiktok",
+   "when": "Thu 3 Dec · 20:00 (Al-Hilal v Al-Diriyah day)",
+   "pillar": "How it's made",
+   "format": "20s build timelapse",
+   "title": "Kingdom Arena, from empty to full tifo",
+   "text": "المملكة أرينا… من كراسي فاضية لتيفو كامل 💙",
+   "reply": "",
+   "gloss": "Kingdom Arena, from empty seats to a full tifo.",
+   "onscreen": [
+    "0.0s  [عدد] كرسي",
+    "end   (no text, loop)"
+   ],
+   "script": [
+    "0–1s: the finished tifo flashes for half a second, then cut to the empty stand.",
+    "1–16s: build timelapse at 12x.",
+    "16–20s: Match Day camera; the last frame cuts back to the first."
+   ],
+   "hashtags": "#الهلال #المملكة_أرينا #تيفو #دوري_روشن",
+   "asset": {
+    "status": "need",
+    "file": "Screen recording of the build at Kingdom Arena"
+   },
+   "why": "Satisfying timelapses are watched twice, and a loop counts as a rewatch. Posting on match day catches people already searching for the club.",
+   "measure": "Rewatches (average watch time over 100%) and shares.",
+   "depends": "Al-Hilal v Al-Diriyah is listed for 3 Dec; check before posting."
+  },
+  {
+   "id": "tt-08",
+   "platform": "tiktok",
+   "when": "Mon 7 Dec · 21:30",
+   "pillar": "Big moment",
+   "format": "12s video",
+   "title": "Al-Akhdar's tifo for the Asian Cup",
+   "text": "لو أنت مصمم تيفو الأخضر بافتتاح كأس آسيا… وش تكتب؟ 🇸🇦",
+   "reply": "أحسن 3 تصاميم ننزلها يوم الافتتاح",
+   "gloss": "If you were designing Al-Akhdar's tifo for the Asian Cup opener, what would you write?",
+   "onscreen": [
+    "0.0s  باقي شهر 🇸🇦",
+    "1.0s  تيفو الأخضر… من تصميمك",
+    "end   الرابط بالبايو"
+   ],
+   "script": [
+    "0–1s: green stand at King Fahd going up.",
+    "1–9s: three quick example designs.",
+    "9–12s: wide shot of the full bowl."
+   ],
+   "hashtags": "#الأخضر #كأس_آسيا #تيفو #السعودية",
+   "asset": {
+    "status": "need",
+    "file": "King Fahd Sports City in the app, plus 3 example designs"
+   },
+   "why": "Same contest as x-08, cut for TikTok. National-team posts reach fans of every club at once.",
+   "measure": "Contest entries.",
+   "depends": "Same as x-08: decisions D-07 and D-08.",
+   "replyLabel": "Pinned comment"
+  },
+  {
+   "id": "yt-01",
+   "platform": "youtube",
+   "when": "This week",
+   "pillar": "Setup",
+   "format": "Channel setup",
+   "title": "Set the channel up before the first upload",
+   "text": "Channel name: TifoMaker | تيفو ميكر\n\nDescription:\nصمّم تيفو ناديك في ملعبه الحقيقي، كرسي كرسي، وشوفه بالـ3D. شروحات، ملاعب دوري روشن من الداخل، وتيفوهات الجمهور.\nDesign your club's tifo in its real ground, seat by seat. Tutorials, stadium flyovers and fans' tifos.\ntifomaker.org",
+   "reply": "",
+   "gloss": "",
+   "script": [
+    "Banner: the hero image with the wordmark (I can export it from the media kit).",
+    "Trailer for non-subscribers: the 35s X promo video.",
+    "Playlists: تيفو ناديك (Shorts) · شروحات (tutorials) · الملاعب (grounds)."
+   ],
+   "asset": {
+    "status": "have",
+    "file": "marketing/video/x-promo/tifomaker-x-promo-1080p-clean.mp4, media-kit/img/hero.jpg"
+   },
+   "why": "YouTube is a search engine. A clear name and description in both languages is how 'تيفو' searches find the channel.",
+   "measure": "Search impressions in YouTube Studio after 30 days.",
+   "media": [
+    {
+     "type": "video",
+     "src": "media/x-promo.mp4",
+     "poster": "media/x-promo.jpg",
+     "caption": "Channel trailer"
+    },
+    {
+     "type": "image",
+     "src": "media/hero.jpg",
+     "caption": "Banner picture"
+    }
+   ]
+  },
+  {
+   "id": "yt-02",
+   "platform": "youtube",
+   "when": "A day after each TikTok",
+   "pillar": "Repurpose",
+   "format": "Shorts",
+   "title": "Every TikTok, re-uploaded as a Short",
+   "text": "Title pattern: [ما يصير بالفيديو] | [النادي] [الملعب] #shorts\nExample: تيفو الهلال يرتفع في المملكة أرينا | الهلال #shorts",
+   "reply": "",
+   "gloss": "",
+   "script": [
+    "Upload the clean export, never the TikTok download (YouTube pushes watermarked clips down).",
+    "Write the title as what someone would search for, club and ground by name.",
+    "Link the related long video from each Short."
+   ],
+   "asset": {
+    "status": "have",
+    "file": "Clean exports of tt-02, tt-04, tt-05, tt-07"
+   },
+   "why": "Same work, a second audience. Shorts can point to the long tutorial, which TikTok can't do.",
+   "measure": "Shorts views to channel subscribers."
+  },
+  {
+   "id": "yt-03",
+   "platform": "youtube",
+   "when": "Sat 5 Dec · 19:00",
+   "pillar": "Tutorial",
+   "format": "7–9 min video",
+   "title": "How to design a full-stand tifo, step by step",
+   "text": "Title: طريقة تصميم تيفو لمدرج كامل خطوة بخطوة (مجاناً)\n\nChapters:\n0:00 النتيجة أول شيء\n0:30 اختار النادي والملعب\n1:30 الألوان والخلفية\n3:00 الكتابة والشعار\n4:30 الرسم بالذكاء الاصطناعي\n5:30 يوم المباراة بالـ3D\n6:30 كم كرت تحتاج وورقة كل بلوك\n7:30 شارك التصميم مع القروب",
+   "reply": "",
+   "gloss": "Title: How to design a full-stand tifo, step by step (free). Chapters: the result first · club and ground · colours · lettering and crest · AI draft · Match Day in 3D · card count and block sheets · sharing with the group.",
+   "script": [
+    "Screen recording with your voice. No face needed.",
+    "Show the finished tifo in the first 30 seconds, then build it.",
+    "Thumbnail: the stand mid-reveal, 3 words max: تيفو بدقايق."
+   ],
+   "asset": {
+    "status": "need",
+    "file": "Screen recording plus voice-over"
+   },
+   "why": "People search 'كيف اسوي تيفو'. A tutorial keeps getting found for years, long after a TikTok stops.",
+   "measure": "Views from search, and clicks on the description link."
+  },
+  {
+   "id": "yt-04",
+   "platform": "youtube",
+   "when": "Sat 19 Dec · 19:00",
+   "pillar": "Grounds",
+   "format": "10–12 min flyover",
+   "title": "Every Roshn League ground, inside, in 3D",
+   "text": "Title: ملاعب دوري روشن من الداخل بالـ3D | كل البلوكات\n\nChapters: one per ground, with its name, so each one shows up in search.",
+   "reply": "",
+   "gloss": "Title: The Roshn League grounds from the inside in 3D, every block.",
+   "script": [
+    "Flyover of each ground for 30–40 seconds, with block names on screen.",
+    "Calm music, no voice needed.",
+    "End card: design your tifo in any of them."
+   ],
+   "asset": {
+    "status": "need",
+    "file": "Flyover captures of the 18 grounds (the app has a flyover camera)"
+   },
+   "why": "Every chapter is a search result ('ملعب الإنماء من الداخل'). It's useful to fans planning which seats to buy, not only to tifo makers.",
+   "measure": "Watch time, and which chapters people jump to."
+  }
+ ],
+ "decisions": [
+  {
+   "id": "D-01",
+   "q": "Which language leads on each platform?",
+   "rec": "TikTok and YouTube: Arabic first, always. X: Arabic for everything Saudi, separate English posts for Premier League, LaLiga and big announcements.",
+   "why": "70% of the TikTok audience is Saudi, and up to 63% of site visits are in Arabic. Video 1 was in English and lost most viewers in the first second."
+  },
+  {
+   "id": "D-02",
+   "q": "Who is the face and voice of the account?",
+   "rec": "Start with your voice over screen recordings, no face. Do one founder video (tt-06) and see how it lands.",
+   "why": "A real person's voice is the clearest sign this isn't AI content, and a voice is easier to keep up every week than filming yourself."
+  },
+  {
+   "id": "D-03",
+   "q": "Can we use club crests and fan groups' photos?",
+   "rec": "No official crests in our own posts: club colours and words only. Fan designs made in the app are fine. Always credit fan groups by handle, and ask before reusing their photos or videos.",
+   "why": "Crests are trademarks. The groups are the people we most want on our side."
+  },
+  {
+   "id": "D-04",
+   "q": "Pay for X Premium on @tifomaker?",
+   "rec": "Yes, the basic tier, for one quarter, then judge it on reach.",
+   "why": "Several 2026 analyses say paid accounts get noticeably more reach, though nobody has measured it independently. It also adds the badge, edits and longer videos."
+  },
+  {
+   "id": "D-05",
+   "q": "How often do we post?",
+   "rec": "X: 1–2 posts a day plus 15 minutes of replies. TikTok: 4 a week. YouTube: 3 Shorts a week and 1 long video every 2 weeks.",
+   "why": "That's what one person can keep up without the quality dropping. Consistency matters more than volume."
+  },
+  {
+   "id": "D-06",
+   "q": "How often do we mention Pro?",
+   "rec": "At most 1 post in 8, and none on TikTok in the first month.",
+   "why": "People follow for tifos. With 1 sale from 496 accounts, more sign-ups will help more than more sales pitches right now."
+  },
+  {
+   "id": "D-07",
+   "q": "Prizes for the Asian Cup tifo contest?",
+   "rec": "A year of Pro for each of the top 3, plus being shown on all three accounts on opening day.",
+   "why": "It costs nothing to give and fans want it. Free entry, no purchase needed. Check whether a Saudi commerce licence is needed for a prize contest before announcing."
+  },
+  {
+   "id": "D-08",
+   "q": "Build King Fahd Sports City before 7 January?",
+   "rec": "Yes, ready by 20 December.",
+   "why": "It hosts the Asian Cup opener and final. Without it, the biggest moment of the winter has no ground to design in."
+  },
+  {
+   "id": "D-09",
+   "q": "Spend on ads?",
+   "rec": "Nothing until a post beats our own average without help. Then SAR 50–100 of TikTok Promote behind that one post.",
+   "why": "Paying to push a post that people don't watch only buys bad numbers."
+  },
+  {
+   "id": "D-10",
+   "q": "How do posts go out?",
+   "rec": "You post them yourself, in each app, after approving them here. TikTok sounds must be added in the app. X posts can be scheduled in X's own scheduler.",
+   "why": "I can't post to X, TikTok or YouTube from here, so nothing goes out without you. Approvals on this page are the go-ahead I read back."
+  }
+ ]
 }
