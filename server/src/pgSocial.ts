@@ -5,6 +5,7 @@ import type {
   PublicProfile,
   CommentItem,
   NotificationItem,
+  PublishMetaPatch,
 } from './repo';
 
 /** Postgres social layer: remix lineage, follow graph, comments, notifications. */
@@ -16,13 +17,17 @@ export class PgSocialRepository implements SocialRepository {
   async setPublishMeta(
     designId: string,
     ownerId: string,
-    description: string | null,
-    allowRemix: boolean,
+    patch: PublishMetaPatch,
   ): Promise<boolean> {
+    // A field left out of the patch keeps its stored value ($4 says whether a
+    // description was sent at all, because null is a real description: none).
     const res = await this.pool.query(
-      `UPDATE designs SET description = $3, allow_remix = $4
+      `UPDATE designs SET description = CASE WHEN $4 THEN $3 ELSE description END,
+                          allow_remix = coalesce($5, allow_remix),
+                          social_feature = coalesce($6, social_feature)
        WHERE id = $1 AND owner_id = $2`,
-      [designId, ownerId, description?.slice(0, 2000) ?? null, allowRemix],
+      [designId, ownerId, patch.description?.slice(0, 2000) ?? null, patch.description !== undefined,
+       patch.allowRemix ?? null, patch.socialFeature ?? null],
     );
     return (res.rowCount ?? 0) > 0;
   }
@@ -368,6 +373,8 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     updatedAt: new Date(r.updated_at as string).toISOString(),
     description: (r.description as string) ?? null,
     allowRemix: r.allow_remix !== false,
+    // A remix is a new design: its own designer has not been asked yet.
+    socialFeature: typeof r.social_feature === 'boolean' ? r.social_feature : null,
     remixedFrom: r.remixed_from ? String(r.remixed_from) : null,
   };
 }

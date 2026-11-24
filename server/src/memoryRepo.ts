@@ -36,6 +36,7 @@ import type {
   FunnelStep,
   SceneMeta,
   ThumbnailMeta,
+  PublishMetaPatch,
 } from './repo';
 import { aiPeriod, contentHash, REVISIONS_KEPT } from './repo';
 import type { FeedPosition } from './feedCursor';
@@ -286,7 +287,7 @@ export class MemoryDesignRepository implements DesignRepository {
 
   private meta(r: Row): DesignMeta {
     const { id, title, titleAr, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
-    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views, pinned: r.pinned === true, deletedAt: r.deletedAt ?? null, origin: r.origin ?? null, takenDown: r.takenDown === true };
+    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, socialFeature: typeof r.socialFeature === 'boolean' ? r.socialFeature : null, remixedFrom: remixedFrom ?? null, viewCount: r.views, pinned: r.pinned === true, deletedAt: r.deletedAt ?? null, origin: r.origin ?? null, takenDown: r.takenDown === true };
   }
 
   async create(d: NewDesign): Promise<DesignMeta> {
@@ -686,11 +687,12 @@ export class MemoryDesignRepository implements DesignRepository {
     const r = this.rows.get(id);
     return r ? this.meta(r) : null;
   }
-  setPublishMetaMem(designId: string, ownerId: string, description: string | null, allowRemix: boolean): boolean {
+  setPublishMetaMem(designId: string, ownerId: string, patch: PublishMetaPatch): boolean {
     const r = this.rows.get(designId);
     if (!r || r.ownerId !== ownerId) return false;
-    r.description = description?.slice(0, 2000) ?? null;
-    r.allowRemix = allowRemix;
+    if (patch.description !== undefined) r.description = patch.description?.slice(0, 2000) ?? null;
+    if (patch.allowRemix !== undefined) r.allowRemix = patch.allowRemix;
+    if (patch.socialFeature !== undefined) r.socialFeature = patch.socialFeature;
     return true;
   }
   async remixMem(sourceId: string, newOwnerId: string, title: string): Promise<DesignMeta | null> {

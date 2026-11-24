@@ -195,6 +195,12 @@ ALTER TABLE designs ADD COLUMN IF NOT EXISTS allow_remix  BOOLEAN NOT NULL DEFAU
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS remixed_from UUID REFERENCES designs(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS designs_remixed_from_idx ON designs (remixed_from) WHERE remixed_from IS NOT NULL;
 
+-- Whether TifoMaker may show the design, credited to its designer, on its own
+-- social media accounts (terms section 4, from 24 November 2026). true: agreed
+-- when publishing; false: opted out; NULL: not yet agreed. Designs published
+-- before the clause stay NULL and still need the designer's permission each time.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS social_feature BOOLEAN;
+
 -- Username handle for the social graph (the @handle). Unique, case-insensitive.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS handle TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS users_handle_idx ON users (lower(handle)) WHERE handle IS NOT NULL;

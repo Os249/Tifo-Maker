@@ -44,7 +44,7 @@ import { costStats, LIMIT_REASONS, modeOutcomes, type AiGroup } from './aiStats'
 import { designFacets } from '../../src/core/facets';
 
 const META_COLS =
-  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count, pinned, deleted_at, origin, taken_down_at';
+  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, social_feature, remixed_from, view_count, pinned, deleted_at, origin, taken_down_at';
 
 /**
  * The sha-256 of a bytea, as hex: what contentHash() gives for the same bytes
@@ -67,6 +67,7 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     updatedAt: new Date(r.updated_at as string).toISOString(),
     description: (r.description as string) ?? null,
     allowRemix: r.allow_remix === undefined ? true : r.allow_remix !== false,
+    socialFeature: typeof r.social_feature === 'boolean' ? r.social_feature : null,
     remixedFrom: r.remixed_from ? String(r.remixed_from) : null,
     viewCount: r.view_count == null ? 0 : Number(r.view_count),
     pinned: r.pinned === true,
@@ -100,7 +101,7 @@ const COMMENT_COUNT =
 const GALLERY_COLS =
   `d.id, d.title, d.title_ar, d.template_id, d.template_version, d.palette, d.revision_count,
    d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
-   d.description, d.allow_remix, d.remixed_from, d.view_count,
+   d.description, d.allow_remix, d.social_feature, d.remixed_from, d.view_count,
    coalesce(u.username, 'unknown') AS owner_name,
    ru.username AS remixed_from_name, rd.title AS remixed_from_title,
    (d.thumbnail IS NOT NULL) AS has_thumbnail,

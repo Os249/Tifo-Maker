@@ -111,6 +111,12 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'publish.descPh': { en: 'The match, the moment, what the display means…', ar: 'المباراة، اللحظة، وش يعني الاستعراض…' },
   'publish.allowRemix': { en: 'Let others remix this tifo', ar: 'اسمح للآخرين يعيدون تصميمه' },
   'publish.asTemplate': { en: 'Offer it as a starting template', ar: 'قدّمه كقالب للبداية' },
+  'publish.socialFeature': { en: 'Let TifoMaker feature this on its social accounts', ar: 'خلّ تيفو ميكر يعرضه في حساباته على السوشال ميديا' },
+  'publish.socialFeatureHint': {
+    en: 'Always credited to you by your handle. Untick it any time you update.',
+    ar: 'دايمًا ينذكر اسمك معه. وتقدر تشيل العلامة متى ما حدّثته.',
+  },
+  'publish.socialFeatureTerms': { en: 'Terms, section 4', ar: 'الشروط، البند 4' },
   'publish.cta': { en: 'Publish', ar: 'انشر' },
   'publish.updateCta': { en: 'Update', ar: 'حدّث' },
   'publish.done': { en: 'Published to the community feed', ar: 'اننشر في مجتمع التصاميم' },

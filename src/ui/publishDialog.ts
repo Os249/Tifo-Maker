@@ -15,7 +15,7 @@
  */
 
 import { escapeHtml } from '../core/escape';
-import { t } from './i18n';
+import { getLang, localPath, t } from './i18n';
 import { containDialog } from './dialogFocus';
 
 export interface PublishChoice {
@@ -30,11 +30,18 @@ export interface PublishChoice {
   isTemplate: boolean;
   description: string | null;
   allowRemix: boolean;
+  /** "Let TifoMaker feature this on its social accounts" (terms section 4). */
+  socialFeature: boolean;
 }
 
 export function openPublishDialog(opts: {
   title: string;
   currentlyPublic: boolean;
+  /**
+   * The stored answer to the social-feature box. Only an earlier opt-out
+   * (false) starts it unticked; it is on by default, as the terms say.
+   */
+  socialFeature?: boolean | null;
 }): Promise<PublishChoice | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
@@ -66,6 +73,8 @@ export function openPublishDialog(opts: {
 
           <label class="save-template-row"><input type="checkbox" id="pub-remix" checked /> ${t('publish.allowRemix')}</label>
           <label class="save-template-row"><input type="checkbox" id="pub-template" /> ${t('publish.asTemplate')}</label>
+          <label class="save-template-row"><input type="checkbox" id="pub-social" aria-describedby="pub-social-hint"${opts.socialFeature === false ? '' : ' checked'} /> ${t('publish.socialFeature')}</label>
+          <div class="save-tags-hint" id="pub-social-hint">${t('publish.socialFeatureHint')} <a href="${localPath('/legal')}#${getLang() === 'ar' ? 'terms-content-ar' : 'terms-content'}" target="_blank" rel="noopener">${t('publish.socialFeatureTerms')}</a></div>
         </div>
 
         <div class="pub-actions">
@@ -105,6 +114,7 @@ export function openPublishDialog(opts: {
         isTemplate: (backdrop.querySelector('#pub-template') as HTMLInputElement | null)?.checked ?? false,
         description: desc ? desc.slice(0, 2000) : null,
         allowRemix: (backdrop.querySelector('#pub-remix') as HTMLInputElement | null)?.checked ?? true,
+        socialFeature: (backdrop.querySelector('#pub-social') as HTMLInputElement | null)?.checked ?? true,
       });
     });
 
