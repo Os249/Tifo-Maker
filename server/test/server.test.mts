@@ -978,6 +978,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   await app.inject({ method: 'PUT', url: `/api/designs/${lockedId}/publish-meta`, headers: bearer(aliceTok), payload: { description: null, allowRemix: false } });
   await app.inject({ method: 'PATCH', url: `/api/designs/${lockedId}`, headers: bearer(aliceTok), payload: { isPublic: true } });
   assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${lockedId}/remix`, headers: bearer(bobTok) })).statusCode, 403, 'remix blocked when not allowed');
+  await checkSocialFeature(app, aliceTok, bobTok, lockedId, 'social feature (memory)');
 
   // Comments: Bob comments on Alice's design; Alice is notified; thread lists it.
   const c = await app.inject({ method: 'POST', url: `/api/designs/${designId}/comments`, headers: bearer(bobTok), payload: { body: 'This is class!' } });
@@ -1892,6 +1893,37 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   console.log('discoverability: all assertions passed (feed links designs, canonical /t/ only, unique descriptions, private stays hidden)');
 }
 
+/**
+ * The social-feature answer (terms section 4): stored with the design, shown on
+ * both public design routes, null until the designer answers, and a body with
+ * only socialFeature leaves the description and remix setting alone.
+ */
+async function checkSocialFeature(app: FastifyInstance, tok: string, otherTok: string, designId: string, label: string): Promise<void> {
+  type Card = { id: string; socialFeature?: boolean | null; description?: string | null; allowRemix?: boolean };
+  const one = async (): Promise<Card> => (await app.inject({ method: 'GET', url: `/api/designs/${designId}` })).json() as Card;
+  const card = async (): Promise<Card> => (await app.inject({ method: 'GET', url: `/api/gallery/${designId}` })).json() as Card;
+  const put = async (payload: Record<string, unknown>, t = tok) => await app.inject({ method: 'PUT', url: `/api/designs/${designId}/publish-meta`, headers: bearer(t), payload });
+  assert.equal((await one()).socialFeature, null, `${label}: not yet agreed until the designer answers (design)`);
+  assert.equal((await card()).socialFeature, null, `${label}: not yet agreed until the designer answers (gallery card)`);
+  const before = await one();
+  assert.equal((await put({ socialFeature: true })).statusCode, 200);
+  const agreed = await one();
+  assert.equal(agreed.socialFeature, true, `${label}: agreed is stored and public`);
+  assert.equal((await card()).socialFeature, true, `${label}: the gallery card says so too`);
+  assert.equal(agreed.description, before.description, `${label}: answering alone keeps the description`);
+  assert.equal(agreed.allowRemix, before.allowRemix, `${label}: answering alone keeps the remix setting`);
+  const list = (await app.inject({ method: 'GET', url: '/api/gallery?limit=60' })).json() as Card[] | { items: Card[] };
+  const items = Array.isArray(list) ? list : list.items;
+  const inList = items.find((x) => x.id === designId);
+  if (inList) assert.equal(inList.socialFeature, true, `${label}: /api/gallery carries it`);
+  assert.equal((await put({ socialFeature: 'yes' })).statusCode, 400, `${label}: only a boolean`);
+  assert.equal((await put({ socialFeature: false }, otherTok)).statusCode, 404, `${label}: only the owner answers`);
+  assert.equal((await put({ socialFeature: false })).statusCode, 200);
+  assert.equal((await one()).socialFeature, false, `${label}: an opt-out is stored`);
+  await put({ description: 'changed', allowRemix: true });
+  assert.equal((await one()).socialFeature, false, `${label}: editing the description keeps the opt-out`);
+}
+
 if (process.env.DATABASE_URL) {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
@@ -1921,6 +1953,8 @@ if (process.env.DATABASE_URL) {
     const remix = remixed.json() as { id: string; palette: string[]; remixedFrom: string };
     assert.deepEqual(remix.palette, PALETTE, 'palette survives the JSONB remix round-trip on Postgres');
     assert.equal(remix.remixedFrom, designId, 'remix lineage stamped on Postgres');
+    await checkSocialFeature(app, aliceTok, bobTok, designId, 'social feature (postgres)');
+    assert.equal((remix as { socialFeature?: boolean | null }).socialFeature, null, 'a remix starts not yet agreed');
     console.log('social (postgres): remix + palette round-trip passed');
   }
 

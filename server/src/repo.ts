@@ -23,6 +23,13 @@ export interface DesignMeta {
   description?: string | null;
   /** Whether others may remix this design. */
   allowRemix?: boolean;
+  /**
+   * Whether TifoMaker may feature it, credited to its designer, on its own
+   * social accounts (terms section 4). true: agreed when publishing; false:
+   * opted out; null: not yet agreed (published before the clause, or never
+   * through the publish dialog), so the designer's permission is still needed.
+   */
+  socialFeature?: boolean | null;
   /** Lineage: the design this was remixed from, if any. */
   remixedFrom?: string | null;
   /** Public view count (sharing system). */
@@ -410,10 +417,20 @@ export interface NotificationItem {
   createdAt: string;
 }
 
+/** What PUT /api/designs/:id/publish-meta changes; a missing field is left as stored. */
+export interface PublishMetaPatch {
+  description?: string | null;
+  allowRemix?: boolean;
+  socialFeature?: boolean;
+}
+
 export interface SocialRepository {
   // ---- creator explanation + remix ----
-  /** Set a design's description/explanation + remix permission (owner only). */
-  setPublishMeta(designId: string, ownerId: string, description: string | null, allowRemix: boolean): Promise<boolean>;
+  /**
+   * Set a design's description/explanation, remix permission and social-feature
+   * answer (owner only). A field left out of the patch keeps its stored value.
+   */
+  setPublishMeta(designId: string, ownerId: string, patch: PublishMetaPatch): Promise<boolean>;
   /**
    * Remix a public, remixable design into a new owner's account: duplicates the
    * data without mutating the original, stamping remixed_from for attribution.

@@ -20,7 +20,7 @@ import { shippedTemplates } from '../../src/core/stadiumCatalog';
 import { seatTable } from './seatTable';
 import { validateTifo, TIFO_SCHEMA_VERSION } from '../../src/core/tifoFormat';
 
-import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, FacetBase, FacetScope, LeadsRepository, SocialRepository, UserRow } from './repo';
+import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, FacetBase, FacetScope, LeadsRepository, PublishMetaPatch, SocialRepository, UserRow } from './repo';
 import { contentHash } from './repo';
 import { picturesStatus } from './imageAssets';
 import { textModelsStatus } from './aiProvider';
@@ -120,6 +120,11 @@ import {
  *   POST  /api/designs/:id/revisions       owner; SparseDiff append
  *   GET   /api/designs/:id/revisions       public OR owner
  *   POST  /api/designs/:id/fork            (bearer) source must be visible
+ *
+ * Every design answer (both gallery routes and GET /api/designs/:id) carries
+ * `socialFeature`: true when the designer agreed, when publishing, to TifoMaker
+ * featuring it (credited) on its own social accounts; false when they opted
+ * out; null when not yet agreed. Only true allows a post without asking.
  *
  * Visibility rule: a private design is a 404 to non-owners (existence is not
  * leaked); mutations on a visible-but-not-owned design are 403.
@@ -4968,10 +4973,22 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { description?: unknown; allowRemix?: unknown };
-    const description = typeof body.description === 'string' ? body.description : null;
-    const allowRemix = body.allowRemix !== false;
-    const ok = await social!.setPublishMeta(id, userId, description, allowRemix);
+    const body = (req.body ?? {}) as { description?: unknown; allowRemix?: unknown; socialFeature?: unknown };
+    // The "feature this on TifoMaker's social accounts" box (terms section 4).
+    // Only a real boolean changes it; left out, the stored answer stays.
+    if (body.socialFeature !== undefined && typeof body.socialFeature !== 'boolean') {
+      return reply.code(400).send({ error: 'socialFeature must be boolean' });
+    }
+    const patch: PublishMetaPatch = {};
+    // Description and remix go together, as they always have: sending either
+    // sets both (a missing description is none, a missing allowRemix is yes).
+    // A body with neither, only socialFeature, leaves them as they are.
+    if (body.description !== undefined || body.allowRemix !== undefined) {
+      patch.description = typeof body.description === 'string' ? body.description : null;
+      patch.allowRemix = body.allowRemix !== false;
+    }
+    if (typeof body.socialFeature === 'boolean') patch.socialFeature = body.socialFeature;
+    const ok = await social!.setPublishMeta(id, userId, patch);
     if (!ok) return reply.code(404).send({ error: 'not found or not yours' });
     return { ok: true };
   });

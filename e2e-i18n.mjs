@@ -56,6 +56,7 @@ const ALLOW = new Set([
   'PNG', 'JPG', 'SVG', 'PDF', 'CSV', 'GIF', 'WebM', 'MP4', 'QR', 'AI', 'RTL',
   'CSV + PDF', 'PDF + CSV', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne', 'tifomaker', '@tifomaker',
   'Ctrl', // a key's own label, which an Arabic keyboard prints too
+  'YouTube', 'TikTok', // the footer's platform names, kept as the platforms write them (X passes as one letter)
 ]);
 const ALLOW_RE = [
   /^[^\p{L}]*$/u,                         // digits, punctuation, symbols only

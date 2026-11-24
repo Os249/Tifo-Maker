@@ -5,6 +5,7 @@ import type {
   PublicProfile,
   CommentItem,
   NotificationItem,
+  PublishMetaPatch,
 } from './repo';
 import type { MemoryDesignRepository } from './memoryRepo';
 import type { MemoryAuthRepository } from './memoryRepo';
@@ -43,8 +44,8 @@ export class MemorySocialRepository implements SocialRepository {
     return id ? this.auth.usernameOf(id) : null;
   }
 
-  async setPublishMeta(designId: string, ownerId: string, description: string | null, allowRemix: boolean): Promise<boolean> {
-    return this.designs.setPublishMetaMem(designId, ownerId, description, allowRemix);
+  async setPublishMeta(designId: string, ownerId: string, patch: PublishMetaPatch): Promise<boolean> {
+    return this.designs.setPublishMetaMem(designId, ownerId, patch);
   }
 
   async remix(sourceId: string, newOwnerId: string, title: string): Promise<DesignMeta | null> {

@@ -2459,9 +2459,13 @@ export function mountToolbar(
     if (!(await ensureSignedIn())) return;
     if (designId === null && !(await saveToAccount(false))) return;
     const { openPublishDialog } = await import('./publishDialog');
+    // An earlier "no" to the social-feature box stays "no" when updating.
+    const { fetchSocialFeature } = await import('../net/api');
+    const storedSocial = designId ? await fetchSocialFeature(designId).catch(() => null) : null;
     const choice = await openPublishDialog({
       title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'),
       currentlyPublic: publicChk.checked,
+      socialFeature: storedSocial,
     });
     if (!choice) return;
     publishBtn.disabled = true;
@@ -2477,7 +2481,10 @@ export function mountToolbar(
       }
       await setPublic(designId, true);
       publicChk.checked = true;
-      const { setDesignTags, setDesignTemplate, setPublishMeta } = await import('../net/api');
+      const { setDesignTags, setDesignTemplate, setPublishMeta, setSocialFeature } = await import('../net/api');
+      // Stored with the design, ticked or not: the posting tools read it from
+      // the public API. Before the description, so a failure there can't skip it.
+      await setSocialFeature(designId, choice.socialFeature).catch(() => {});
       if (choice.tags.length > 0) await setDesignTags(designId, choice.tags).catch(() => {});
       if (choice.isTemplate) await setDesignTemplate(designId, true).catch(() => {});
       if (choice.description !== null || !choice.allowRemix) {

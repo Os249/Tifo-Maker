@@ -807,6 +807,8 @@ interface DesignJson {
   templateVersion: number;
   createdAt?: string;
   viewCount?: number;
+  /** TifoMaker may feature it on its social accounts: true agreed, false opted out, null not yet agreed. */
+  socialFeature?: boolean | null;
 }
 
 const DESIGN_MEMO_MS = 30_000;
@@ -1160,6 +1162,12 @@ export interface GalleryItem {
   hasPhoto: boolean;
   description?: string | null;
   allowRemix?: boolean;
+  /**
+   * The designer's answer to "Let TifoMaker feature this on its social
+   * accounts": true agreed, false opted out, null not yet agreed (published
+   * before the terms said so). Only true allows a post without asking.
+   */
+  socialFeature?: boolean | null;
   remixedFrom?: string | null;
   remixedFromName?: string | null;
   remixedFromTitle?: string | null;
@@ -1594,6 +1602,26 @@ export async function setPublishMeta(id: string, description: string | null, all
     body: JSON.stringify({ description, allowRemix }),
   });
   if (!res.ok) throw new Error(`could not save publish details (${res.status})`);
+}
+
+/**
+ * Store the designer's answer to "Let TifoMaker feature this on its social
+ * accounts" (owner only). Leaves the description and remix setting as they are.
+ */
+export async function setSocialFeature(id: string, socialFeature: boolean): Promise<void> {
+  forgetDesign(id);
+  const res = await fetch(`${API}/designs/${id}/publish-meta`, {
+    method: 'PUT',
+    headers: authHeaders(true),
+    body: JSON.stringify({ socialFeature }),
+  });
+  if (!res.ok) throw new Error(`could not save the social feature answer (${res.status})`);
+}
+
+/** The stored answer to the social-feature box, or null when not yet agreed (or unknown). */
+export async function fetchSocialFeature(id: string): Promise<boolean | null> {
+  const data = await designJson(id);
+  return typeof data.socialFeature === 'boolean' ? data.socialFeature : null;
 }
 
 /** Remix a public design into the caller's account; returns the new design id. */
