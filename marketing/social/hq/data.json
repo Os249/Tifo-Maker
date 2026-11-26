@@ -204,9 +204,15 @@
    "media": [
     {
      "type": "video",
+     "src": "media/tiger-vertical-draft.mp4",
+     "poster": "media/tiger-vertical-draft.jpg",
+     "caption": "Raw vertical footage for TikTok, not the edit. The edit opens on the tiger already up."
+    },
+    {
+     "type": "video",
      "src": "media/tiger-hd-draft.mp4",
      "poster": "media/tiger-hd-draft.jpg",
-     "caption": "Raw footage, not the edit: fhdalblwy348's tiger tifo filmed in the app. Does the lettering read the right way round?"
+     "caption": "Raw wide footage for X. Does the lettering read the right way round?"
     }
    ]
   },
