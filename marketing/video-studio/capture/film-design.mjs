@@ -35,6 +35,7 @@ const mark = args.includes('--mark');
 const credit = opt('credit');
 const out = resolve(opt('out', `marketing/video-studio/footage/${id}-${shape}.mp4`));
 const still = opt('still');
+const debug = opt('debug');
 const PROD = 'https://tifomaker.org';
 const PORT = 8981;
 const B = `http://127.0.0.1:${PORT}`;
@@ -93,8 +94,10 @@ await p.goto(`${B}/app?project=${local}&e2e=1`, { waitUntil: 'domcontentloaded',
 await p.waitForFunction(() => !!window.__tifo, null, { timeout: 180000 });
 await p.waitForTimeout(1500);
 if (still) { await p.screenshot({ path: still, timeout: 300000 }); log('still saved', still); }
+log('app ready; opening the Animation panel');
 await p.click('#rail-anim');
 await p.waitForFunction(() => !document.getElementById('sx-size-row')?.hidden, null, { timeout: 60000 });
+log('export size row shown');
 await p.selectOption('#sx-size', shape === 'hd' ? 'hd' : 'vertical');
 if (mark) await p.uncheck('#sx-nomark'); else await p.check('#sx-nomark');
 if (credit) {
@@ -102,7 +105,14 @@ if (credit) {
   if (has) await has.fill(credit); else log('no credit field found; the credit goes on in the edit instead');
 }
 log('filming… (software graphics: expect a few seconds a frame)');
-const ticker = setInterval(async () => { const t = await p.textContent('.qv-count').catch(() => null); if (t) log(t.trim()); }, 30000);
+let tick = 0;
+const ticker = setInterval(async () => {
+  tick++;
+  const t = await p.textContent('.qv-count', { timeout: 5000 }).catch(() => null);
+  const sheet = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet, [role=dialog]')].filter((e) => e.offsetParent).map((e) => (e.textContent || '').trim().slice(0, 120))).catch(() => []);
+  log(t ? t.trim() : 'no film card yet', sheet.length ? 'dialogs: ' + JSON.stringify(sheet) : '');
+  if (debug) await p.screenshot({ path: `${debug}/tick-${String(tick).padStart(3, '0')}.png`, timeout: 120000 }).catch(() => {});
+}, 60000);
 const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 4 * 3600 * 1000 }), p.click('#sx-export')]);
 clearInterval(ticker);
 const buf = Buffer.concat(await (await dl.createReadStream()).toArray());
