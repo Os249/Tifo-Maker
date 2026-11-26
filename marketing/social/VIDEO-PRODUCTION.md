@@ -61,11 +61,19 @@ Decided: ElevenLabs, a male Saudi or Gulf voice from its Voice Library, on the
 plan). The API key is saved as a network secret on the tifo-maker environment for
 `api.elevenlabs.io`, so no script holds it; code that insists on a key variable gets
 a placeholder.
+Voice-overs are made with `voice/say.mjs`; Node's built-in fetch needs
+`NODE_USE_ENV_PROXY=1` to reach ElevenLabs through the environment's proxy:
+`NODE_USE_ENV_PROXY=1 node marketing/video-studio/voice/say.mjs <voice-id> out.mp3 "<line>"`.
 
 Rules for the voice:
 - One voice for the brand, used in every video, so people learn it.
-- Scripts in spoken Gulf Arabic, read in under 25 seconds, written with tashkeel only
-  where a word would otherwise be misread.
+- Scripts in spoken Gulf Arabic, read in under 25 seconds.
+- **Harakat on every Arabic word of every voice-over script.** Without them the voice
+  guesses the vowels, and a wrong guess changes what the sentence means. Mark the
+  Saudi pronunciation, not the formal one, with sukun where a fan would stop on a
+  word (`نَادِيكْ`, `بِمَلْعَبَهْ`, `كَيْفْ يِرْتِفِعْ`). `voice/say.mjs` refuses a line
+  with a bare word and lists it. On-screen text and post captions stay as fans write
+  them, without harakat.
 - Every line is listened to by a person before the video is approved. If a word comes
   out wrong, the line is rewritten, not just regenerated.
 - Never used to imitate a real person, player or commentator.

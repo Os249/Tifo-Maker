@@ -594,7 +594,7 @@
    "id": "D-11",
    "q": "Which voice is TifoMaker's?",
    "rec": "Listen with headphones and pick the one that sounds like a fan you'd trust in the stands, not a news reader. My lean is Jeddawi: young, from Jeddah, and the most used Saudi voice in the library. But your ear decides this one.",
-   "why": "Every voice reads the same two lines on ElevenLabs' newest model, so you are comparing voices, not scripts. The one you pick reads every video that needs a voice.",
+   "why": "Every voice reads the same two lines, with harakat on every word, on ElevenLabs' newest model, so you are comparing voices, not scripts. The one you pick reads every video that needs a voice. If a word still sounds wrong, tell me which one.",
    "options": [
     {
      "id": "jeddawi",
@@ -625,7 +625,7 @@
      "voice_id": "rpGHcNQJvO8dFNNFNj1v"
     }
    ],
-   "script": "تيفو ناديك، بملعبه الحقيقي، كرسي كرسي. نمور ما تهاب الموت! تيفو صمّمه واحد من جمهور الاتحاد… وشوفوه كيف يرتفع بالمدرج."
+   "script": "تِيفُو نَادِيكْ، بِمَلْعَبَهْ الْحَقِيقِي، كُرْسِي كُرْسِي. نُمُورْ مَا تَهَابْ الْمَوْتْ! تِيفُو صَمَّمَهْ وَاحِدْ مِنْ جُمْهُورْ الْاِتِّحَادْ… وِشُوفُوهْ كَيْفْ يِرْتِفِعْ بِالْمُدَرَّجْ."
   }
  ]
 }
