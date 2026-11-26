@@ -16,6 +16,10 @@
  *   --credit "text"         the credit line drawn on the film, e.g. "تصميم @handle"
  *   --out file.mp4          default: marketing/video-studio/footage/<id>-<shape>.mp4
  *   --still file.png        also save a screenshot of Match Day before filming
+ *   --part x0,y0,x1,y1      the part of the tifo the camera holds on, as fractions of the
+ *                           painted art (the export panel's "Part to show" box). Use it
+ *                           when a design paints the whole bowl, or the camera frames the pitch.
+ *   --debug dir             a screenshot each minute, and of the part box before filming
  *
  * Only public designs whose owner has agreed to be featured should be filmed
  * for posting (see marketing/social/VIDEO-PRODUCTION.md).
@@ -36,6 +40,8 @@ const credit = opt('credit');
 const out = resolve(opt('out', `marketing/video-studio/footage/${id}-${shape}.mp4`));
 const still = opt('still');
 const debug = opt('debug');
+const part = opt('part') ? opt('part').split(',').map(Number) : null;
+if (part && (part.length !== 4 || part.some((v) => !(v >= 0 && v <= 1)))) { console.error('--part needs four fractions 0..1: x0,y0,x1,y1'); process.exit(2); }
 const PROD = 'https://tifomaker.org';
 const PORT = 8981;
 const B = `http://127.0.0.1:${PORT}`;
@@ -103,6 +109,20 @@ await p.waitForFunction(() => !document.getElementById('sx-size-row')?.hidden, n
 log('export size row shown');
 await p.selectOption('#sx-size', shape === 'hd' ? 'hd' : 'vertical');
 if (mark) await p.uncheck('#sx-nomark'); else await p.check('#sx-nomark');
+if (part) {
+  const sel = '.pexp-part:not(.tf-off) .tf-art canvas';
+  await p.waitForSelector(sel, { timeout: 120000 });
+  const box = await (await p.$(sel)).boundingBox();
+  const at = (fx, fy) => [box.x + fx * box.width, box.y + fy * box.height];
+  await p.mouse.move(...at(part[0], part[1]));
+  await p.mouse.down();
+  await p.mouse.move(...at((part[0] + part[2]) / 2, (part[1] + part[3]) / 2), { steps: 6 });
+  await p.mouse.move(...at(part[2], part[3]), { steps: 6 });
+  await p.mouse.up();
+  await p.waitForTimeout(500);
+  log('part to show set:', part.join(','));
+  if (debug) await (await p.$('.pexp-part')).screenshot({ path: `${debug}/part.png` }).catch(() => {});
+}
 if (credit) {
   const has = await p.$('#credit-line, [data-k="credit"]');
   if (has) await has.fill(credit); else log('no credit field found; the credit goes on in the edit instead');
