@@ -56,10 +56,19 @@ Remotion's own agent skills first so the code follows their current API.
 
 ### 3. Voice
 
-Decided: a real male voice, only where needed. Still to choose (see the question in
-the chat): your own voice, a hired Saudi voice actor, or one of the newer
-human-sounding AI voices. Whichever it is, the script for each video is written to be
-read aloud in under 25 seconds.
+Decided: ElevenLabs, a male Saudi or Gulf voice from its Voice Library, on the
+`eleven_v3` model with `language_code: "ar"` (tested: Arabic works on this account's
+plan). The API key is saved as a network secret on the tifo-maker environment for
+`api.elevenlabs.io`, so no script holds it; code that insists on a key variable gets
+a placeholder.
+
+Rules for the voice:
+- One voice for the brand, used in every video, so people learn it.
+- Scripts in spoken Gulf Arabic, read in under 25 seconds, written with tashkeel only
+  where a word would otherwise be misread.
+- Every line is listened to by a person before the video is approved. If a word comes
+  out wrong, the line is rewritten, not just regenerated.
+- Never used to imitate a real person, player or commentator.
 
 ### 4. Sound
 

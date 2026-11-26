@@ -532,7 +532,7 @@
    "q": "Who is the face and voice of the account?",
    "rec": "Start with your voice over screen recordings, no face. Do one founder video (tt-06) and see how it lands.",
    "why": "A real person's voice is the clearest sign this isn't AI content, and a voice is easier to keep up every week than filming yourself.",
-   "final": "A real male voice, used only where a video needs one. Videos with no voice-over use on-screen text and a sound."
+   "final": "ElevenLabs, one male Saudi or Gulf voice from its Voice Library, used in every video that needs a voice, on the eleven_v3 model. Every line is listened to before approval. Videos without a voice-over use on-screen text and a sound."
   },
   {
    "id": "D-03",
