@@ -200,7 +200,15 @@
     "1.2s  تصميم @[المصمم]",
     "end   وش تيفو ناديك؟"
    ],
-   "depends": "Ask the designer first. Made in the new video pipeline (see marketing/social/VIDEO-PRODUCTION.md)."
+   "depends": "Ask the designer first. Made in the new video pipeline (see marketing/social/VIDEO-PRODUCTION.md).",
+   "media": [
+    {
+     "type": "video",
+     "src": "media/tiger-hd-draft.mp4",
+     "poster": "media/tiger-hd-draft.jpg",
+     "caption": "Raw footage, not the edit: fhdalblwy348's tiger tifo filmed in the app. Does the lettering read the right way round?"
+    }
+   ]
   },
   {
    "id": "tt-02",
