@@ -112,6 +112,8 @@ if (mark) await p.uncheck('#sx-nomark'); else await p.check('#sx-nomark');
 if (part) {
   const sel = '.pexp-part:not(.tf-off) .tf-art canvas';
   await p.waitForSelector(sel, { timeout: 120000 });
+  await (await p.$(sel)).scrollIntoViewIfNeeded();
+  await p.waitForTimeout(300);
   const box = await (await p.$(sel)).boundingBox();
   const at = (fx, fy) => [box.x + fx * box.width, box.y + fy * box.height];
   await p.mouse.move(...at(part[0], part[1]));
@@ -120,7 +122,9 @@ if (part) {
   await p.mouse.move(...at(part[2], part[3]), { steps: 6 });
   await p.mouse.up();
   await p.waitForTimeout(500);
-  log('part to show set:', part.join(','));
+  const chosen = await p.evaluate(() => { const b = document.querySelector('.pexp-part .tf-all'); return !!b && !b.hidden && b.offsetParent !== null; });
+  log('part to show:', part.join(','), chosen ? '(set)' : '(NOT set)');
+  if (!chosen) { console.error('the part box did not take; the film would frame the whole design'); process.exit(1); }
   if (debug) await (await p.$('.pexp-part')).screenshot({ path: `${debug}/part.png` }).catch(() => {});
 }
 if (credit) {
