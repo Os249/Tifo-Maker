@@ -74,11 +74,14 @@ for (let i = 0; i < 40 && !code; i++) {
   if (!code) await new Promise((r) => setTimeout(r, 250));
 }
 await api('/api/auth/verify/code', token, { method: 'POST', body: JSON.stringify({ code }) });
-await api('/api/pro/gift/accept', token, { method: 'POST', body: '{}' });
 const made = await api('/api/designs', token, { method: 'POST', body: JSON.stringify({ title: src.title, templateId: src.templateId, templateVersion: src.templateVersion, palette: src.palette, cellsGzB64: src.cellsGzB64 }) });
 const local = made.json?.id;
 if (!local) { console.error('could not copy the design', made.status, JSON.stringify(made.json)); console.error(logs.join('').slice(-1500)); process.exit(1); }
 log('copied locally as', local);
+// The 7-day Pro gift is offered once the account has a saved design.
+const gift = await api('/api/pro/gift/accept', token, { method: 'POST', body: '{}' });
+log('Pro gift:', gift.status, JSON.stringify(gift.json).slice(0, 120));
+if (gift.status !== 200) { console.error('Pro did not start; the film would stop at the Pro sheet'); process.exit(1); }
 
 // 3. The app, on software graphics, with the design open in Match Day's film maker.
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
