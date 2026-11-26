@@ -107,6 +107,12 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
 .rec{background:var(--tint);border-radius:10px;padding:10px 12px}
 .rec b{color:var(--blue-ink)}
 .dec .why{color:var(--muted);font-size:14px}
+.opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.opt{border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:8px;align-content:start;background:var(--bg)}
+.opt.chosen{border-color:var(--ok);background:var(--ok-bg)}
+.opt audio{width:100%}
+.opt-script{background:var(--sunk);border-radius:10px;padding:10px 12px;font-size:16px;line-height:1.7;margin-top:4px}
+@media (max-width:720px){.opts{grid-template-columns:1fr}}
 .final{background:var(--ok-bg);border-radius:10px;padding:10px 12px}
 .final b{color:var(--ok)}
 .trend{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}
@@ -370,8 +376,8 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
   document.querySelectorAll('[data-f]').forEach(function(b){b.addEventListener('click',function(){filter=b.getAttribute('data-f');document.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});applyFilter()})});
 
   // one video plays at a time
-  function pauseAll(except){document.querySelectorAll('video').forEach(function(v){if(v!==except&&!v.paused)v.pause()})}
-  document.addEventListener('play',function(e){if(e.target.tagName==='VIDEO')pauseAll(e.target)},true);
+  function pauseAll(except){document.querySelectorAll('video,audio').forEach(function(v){if(v!==except&&!v.paused)v.pause()})}
+  document.addEventListener('play',function(e){if(e.target.tagName==='VIDEO'||e.target.tagName==='AUDIO')pauseAll(e.target)},true);
 
   // photo viewer
   var lb=$('#lightbox'),lbImg=$('#lb-img'),lbCap=$('#lb-cap'),lbList=[],lbIdx=0,lbReturn=null;
@@ -536,6 +542,20 @@ td.d{font:500 13px/1.4 var(--f-mono);white-space:nowrap;font-variant-numeric:tab
         el('p',{class:'why',text:d.why})
       ]);
       if(d.final)card.appendChild(el('p',{class:'final'},[el('b',{text:'Where we landed: '}),d.final]));
+      if(d.options){
+        if(d.script){var sc=el('p',{class:'opt-script',dir:'rtl',text:d.script});card.appendChild(el('div',{},[el('span',{class:'meta',text:'What each voice reads'}),sc]))}
+        var og=el('div',{class:'opts'});
+        d.options.forEach(function(o){
+          var chosen=r.pick===o.id;
+          var au=el('audio',{controls:'',preload:'none'});au.src=safeUrl(o.src);
+          var b=el('button',{class:'btn'+(chosen?' primary':''),type:'button',text:chosen?'Chosen ✓':'Choose this voice'});
+          if(!canWrite)b.disabled=true;
+          b.addEventListener('click',function(){save('decisions',d.id,{choice:'agree',pick:o.id,note:'Voice: '+o.label})});
+          og.appendChild(el('div',{class:'opt'+(chosen?' chosen':'')},[el('b',{text:o.label}),el('span',{class:'meta',text:o.desc}),au,b]));
+        });
+        card.appendChild(og);
+        box.appendChild(card);return;
+      }
       if(r.note)card.appendChild(el('p',{class:'saved-note'},[el('b',{text:'Your answer: '}),r.note]));
       var acts=el('div',{class:'filters'});
       var a=el('button',{class:'btn primary',type:'button',text:r.choice==='agree'?'Agreed ✓':'Agree'});

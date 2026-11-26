@@ -589,6 +589,43 @@
    "rec": "You post them yourself, in each app, after approving them here. TikTok sounds must be added in the app. X posts can be scheduled in X's own scheduler.",
    "why": "I can't post to X, TikTok or YouTube from here, so nothing goes out without you. Approvals on this page are the go-ahead I read back.",
    "final": "Changed. Posting runs from a local session in your Chrome. It checks it is signed in to the right TifoMaker account on each platform, then posts or schedules only approved posts. The full prompt for that session is in marketing/social/POSTING-SESSION.md."
+  },
+  {
+   "id": "D-11",
+   "q": "Which voice is TifoMaker's?",
+   "rec": "Listen with headphones and pick the one that sounds like a fan you'd trust in the stands, not a news reader. My lean is Jeddawi: young, from Jeddah, and the most used Saudi voice in the library. But your ear decides this one.",
+   "why": "Every voice reads the same two lines on ElevenLabs' newest model, so you are comparing voices, not scripts. The one you pick reads every video that needs a voice.",
+   "options": [
+    {
+     "id": "jeddawi",
+     "label": "Jeddawi",
+     "desc": "Young, from Jeddah, calm and confident",
+     "src": "media/voices/jeddawi.mp3",
+     "voice_id": "yXEnnEln9armDCyhkXcA"
+    },
+    {
+     "id": "faisal-ali",
+     "label": "Faisal Ali",
+     "desc": "Young, sharp and energetic",
+     "src": "media/voices/faisal-ali.mp3",
+     "voice_id": "H48IdiQwyf50CXpP0dy0"
+    },
+    {
+     "id": "abdullah-saadoun",
+     "label": "Abdullah Saadoun",
+     "desc": "Saudi, made for social media",
+     "src": "media/voices/abdullah-saadoun.mp3",
+     "voice_id": "t9akNmCDhz230CEXOYmn"
+    },
+    {
+     "id": "fahad",
+     "label": "Fahad",
+     "desc": "White Saudi dialect, warm",
+     "src": "media/voices/fahad.mp3",
+     "voice_id": "rpGHcNQJvO8dFNNFNj1v"
+    }
+   ],
+   "script": "تيفو ناديك، بملعبه الحقيقي، كرسي كرسي. نمور ما تهاب الموت! تيفو صمّمه واحد من جمهور الاتحاد… وشوفوه كيف يرتفع بالمدرج."
   }
  ]
 }
