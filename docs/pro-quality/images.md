@@ -55,15 +55,23 @@ going to, puts the prepared picture (and its face) in the bar, and shows all
 six choices as tiles drawn on the fan's own stand, seat by seat over the
 design already there. A line says what the stand can carry ("North stand has
 14 rows; a face needs about 18. It will read as a silhouette. A banner shows
-it in full."). "Cut out and style" is one tap. On a banner the style is drawn
+it in full."). "Cut out and style" is one tap, offered beside a picked style
+only: it never picks a style itself (it used to pick Stencil, which turned a
+photo into two cards for anyone who only wanted the background gone). On
+Original the one cut-out button is the smart cut-out. On a banner the style is drawn
 at full size for print. In a layer's properties the face is found the first
 time a style is picked.
 
 **Smart cut-out** (`ui/smartCutout.ts`, `core/matte.ts`, `server/src/cutout.ts`):
-the model's matte is cleaned (islands dropped, pinholes filled, real gaps
-such as a trophy's handles kept, the edge smoothed then tightened so it never
-grows a halo, the old background's colour solved out of the edge pixels),
-cropped to the subject, and sized to fill the stand's rows. For tests,
+the model's answer is used for its shape only; the cut-out is the picked
+photo's own pixels at its own size, so its colours are exactly the photo's.
+The matte is cleaned (islands dropped, pinholes filled, real gaps
+such as a trophy's handles kept, the edge smoothed, pulled a pixel or two
+inside the model's and tightened so a pale wall leaves no rim, the old
+background's colour solved out of the edge pixels),
+cropped to the subject, and sized to fill the stand's rows. On the seats, a
+picture's contrast is stretched about its own middle, so a bright photo does
+not wash out to white. For tests,
 `AI_CUTOUT_LOCAL_URL` sends the same request to `scripts/cutout-local.py`
 (rembg); loopback only, ignored in production (and the boot report says so).
 
