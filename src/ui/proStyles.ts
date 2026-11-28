@@ -14,8 +14,9 @@
  *    shown on the fan's own stand, sampled at its real rows and seats over the
  *    design already there, before they pick; and a line says honestly what
  *    the stand can carry (a 14-row stand gets a silhouette, and is told so).
- *    "Cut out and style" does the smart cut-out (smartCutout.ts, counted by
- *    the server) and the style in one tap. On a banner, where a portrait is
+ *    "Cut out and style", shown beside a picked style, does the smart
+ *    cut-out (smartCutout.ts, counted by the server) and that style in one
+ *    tap; it never picks a style itself. On a banner, where a portrait is
  *    printed rather than held up, the style is drawn at full size;
  *  - a picture layer's properties: a change is one undo step; the face is
  *    looked for the first time a style is picked.
@@ -225,7 +226,7 @@ export function mountProStyles(ctx: ProToolsContext): void {
     const { select, chip } = picker('import-pstyle', importField);
     importSelect = select;
     crowns.push(chip);
-    // One tap: the smart cut-out, then the style (Stencil if none is picked yet).
+    // One tap: the smart cut-out, then the style that is picked.
     cutBtn = document.createElement('button');
     cutBtn.type = 'button';
     cutBtn.className = 'pro-btn qi-cutstyle';
@@ -259,12 +260,16 @@ export function mountProStyles(ctx: ProToolsContext): void {
       if (isPortraitStyle(v)) bar.dataset.proStyle = v;
       else delete bar.dataset.proStyle;
       extras.set(isPortraitStyle(v));
+      paintCut();
       void refresh();
     });
   }
   const paintCut = (): void => {
     if (!cutBtn) return;
-    cutBtn.hidden = !canCut || !host;
+    // Beside a picked style only. On Original it would be the smart cut-out
+    // button over again (beside the file's name), and that one keeps the
+    // photo's own colours.
+    cutBtn.hidden = !canCut || !host || !importSelect || !isPortraitStyle(importSelect.value);
     cutBtn.innerHTML = `${CROWN_SVG}<span></span>`;
     cutBtn.querySelector('span')!.textContent = t('qi.cutStyle');
     cutBtn.title = t('qi.cutStyleT');
@@ -622,11 +627,10 @@ export function mountProStyles(ctx: ProToolsContext): void {
   for (const id of ['import-place', 'import-tier']) document.getElementById(id)?.addEventListener('change', () => void refresh());
 
   cutBtn?.addEventListener('click', () => {
-    if (!importSelect) return;
-    if (!isPortraitStyle(importSelect.value)) {
-      importSelect.value = 'stencil';
-      importSelect.dispatchEvent(new Event('change'));
-    }
+    // Only with a style picked (paintCut). It used to pick Stencil when none
+    // was, which turned a photo into two cards of the design's colours for
+    // anyone who only wanted the background gone.
+    if (!importSelect || !isPortraitStyle(importSelect.value)) return;
     // smartCutout.ts runs it (asks first, the server counts it) and says when it is done.
     document.dispatchEvent(new CustomEvent('tifo:cutout-run'));
   });

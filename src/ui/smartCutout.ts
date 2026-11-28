@@ -3,9 +3,11 @@
  * armed picture for the same picture with its background lifted away, and a
  * second press that puts the original back.
  *
- * What comes back from the model is cleaned before it is used (core/matte.ts):
- * specks of background dropped, pinholes filled, the edge smoothed without a
- * halo and the old background's colour taken out of it; then the picture is
+ * The model's answer is used for its shape only: the cut-out is the picked
+ * photo's own pixels, so its colours are exactly the photo's. The shape is
+ * cleaned before it is used (core/matte.ts): specks of background dropped,
+ * pinholes filled, the edge smoothed without a halo and the old background's
+ * colour taken out of it; then the picture is
  * cropped to the subject, so it fills what it is placed on. proStyles.ts
  * hears about it ('tifo:cutout-done') and sizes it to the stand, or draws it
  * in the style picked ("Cut out and style" asks for a cut with 'tifo:cutout-run').
@@ -67,24 +69,38 @@ function encodeForSend(bmp: ImageBitmap): string | null {
 }
 
 /**
- * The model's PNG, cleaned and cropped: the matte refined (islands, holes, a
- * halo-free edge), the background's colour taken out of the edge, and the
- * picture cut down to the subject with a small margin.
+ * The cut-out: the armed picture's OWN pixels, at its own size, with the
+ * model's answer used only for its shape. What was sent is a smaller JPEG, and
+ * a model may shift colours in what it hands back; this way the subject keeps
+ * exactly the colours and the sharpness of the photo that was picked.
+ *
+ * The matte is refined (islands, holes, a halo-free edge pulled just inside
+ * the model's, so a pale wall leaves no rim), the background's colour is taken
+ * out of the edge, and the picture is cut down to the subject with a small margin.
  */
-async function cleanCutout(dataUrl: string): Promise<ImageBitmap> {
+async function cleanCutout(dataUrl: string, original: ImageBitmap): Promise<ImageBitmap> {
   const img = new Image();
   img.src = dataUrl;
   await img.decode();
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
+  const w = original.width;
+  const h = original.height;
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(img, 0, 0);
+  ctx.imageSmoothingQuality = 'high';
+  // The model's shape, stretched to the picture (it is the same picture, sent smaller).
+  ctx.drawImage(img, 0, 0, w, h);
+  const alpha = alphaOf(ctx.getImageData(0, 0, w, h).data, w, h);
+  // The picture itself. On white, as it was sent: a PNG that came with clear
+  // parts has no colour there, and the model was shown white.
+  ctx.globalCompositeOperation = 'copy';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(original, 0, 0);
   const data = ctx.getImageData(0, 0, w, h);
-  const alpha = alphaOf(data.data, w, h);
-  refineMatte(alpha, w, h);
+  refineMatte(alpha, w, h, { choke: Math.max(1.25, Math.min(2.5, Math.min(w, h) / 300)) });
   decontaminate(data.data, alpha, w, h);
   ctx.putImageData(data, 0, 0);
   const b = alphaBounds(alpha, w, h);
@@ -273,7 +289,9 @@ export function mountSmartCutout(host: CutoutHost): { armed: () => void } {
     const mine = ctl;
     try {
       const res = await smartCutout(image, mine.signal);
-      const out = await cleanCutout(res.image);
+      // Placed, cancelled or replaced while the server worked: the toolbar has closed the picture.
+      if (mine.signal.aborted || host.current() !== bmp) return;
+      const out = await cleanCutout(res.image, bmp);
       // Placed, cancelled or replaced while it ran: the result is not wanted.
       if (mine.signal.aborted || host.current() !== bmp) {
         out.close();
@@ -289,7 +307,8 @@ export function mountSmartCutout(host: CutoutHost): { armed: () => void } {
       host.say(t('cut.done'));
       document.dispatchEvent(new CustomEvent('tifo:cutout-done', { detail: { bitmap: out } }));
     } catch (e) {
-      if ((e as Error)?.name === 'AbortError') return;
+      // Let go of while it ran (the picture is closed by then): nothing to say.
+      if ((e as Error)?.name === 'AbortError' || mine.signal.aborted) return;
       fail(e as CutoutError, st);
     } finally {
       if (ctl === mine) ctl = null;

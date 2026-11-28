@@ -150,6 +150,13 @@ export interface MatteOptions {
   islandShare?: number;
   /** Enclosed holes smaller than this share of the subject are filled. */
   holeShare?: number;
+  /**
+   * Pull the edge this many pixels inside the model's own (0, the default,
+   * leaves it where it is). A cut-out model draws its edge a pixel or so
+   * outside the subject, and on a pale studio wall that pixel is a white rim
+   * no colour repair can find: it is wholly "subject" by the matte.
+   */
+  choke?: number;
 }
 
 export interface MatteReport {
@@ -204,18 +211,23 @@ export function refineMatte(alpha: Float32Array, w: number, h: number, opts: Mat
   // the cleaned shape where it does not (a dropped island, a filled hole). Then
   // a small blur and a tightening curve over the edge band only: stair steps
   // from an upscaled mask go, and the edge stays one or two pixels soft.
-  const r = Math.max(1, Math.round(Math.min(w, h) / 400));
+  const choke = Math.max(0, opts.choke ?? 0);
+  const r = Math.max(1, Math.round(Math.min(w, h) / 400)) + Math.ceil(choke);
   const base = new Float32Array(N);
   for (let k = 0; k < N; k++) {
     const soft = alpha[k];
     base[k] = fg[k] ? (soft >= 0.5 ? soft : 1) : soft < 0.5 ? soft : 0;
   }
   const blurred = boxMean(base, w, h, r);
+  // Across a straight edge the blurred value climbs by 1/(2r+1) a pixel, so
+  // the edge's middle sits `choke` pixels inside where the value is this.
+  const mid = 0.5 + choke / (2 * r + 1);
+  const half = Math.min(0.25, 0.97 - mid);
   let cover = 0;
   for (let k = 0; k < N; k++) {
     const b = blurred[k];
-    // smoothstep(0.25, 0.75): the edge's middle stays where it was; its tails go.
-    const t = Math.max(0, Math.min(1, (b - 0.25) / 0.5));
+    // smoothstep(0.25, 0.75) with no choke: the edge's middle stays where it was; its tails go.
+    const t = Math.max(0, Math.min(1, (b - (mid - half)) / (2 * half)));
     const v = b <= 0.02 ? 0 : b >= 0.98 ? 1 : t * t * (3 - 2 * t);
     alpha[k] = v;
     cover += v;

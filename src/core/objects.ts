@@ -600,7 +600,10 @@ export function ensureGrid(o: TifoObject, palette: string[]): boolean {
       // An AI picture: tone levels by brightness rank, cleaned at seat scale.
       data = posterizeByRank(pixels, cols, rows, palette, { alphaThreshold: o.alphaThreshold, aspect, under: seatDrawn(o) ? o.seat.under : undefined });
     } else {
-      data = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, palette, {
+      // The contrast is stretched about the picture's own middle: about a
+      // fixed mid-grey, a bright photo (a pale face, a light shirt, more so
+      // once its background is cut away) was pushed to white all over.
+      data = quantizePixels(enhanceForBake(pixels, cols, rows, 1.28, 0.55, true), cols, rows, palette, {
         dither: o.dither && affordable > 1,
         halftone: !!o.halftone && cell > 1,
         halftoneCell: cell,

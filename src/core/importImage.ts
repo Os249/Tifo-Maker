@@ -582,6 +582,11 @@ export function extractPhotoPalette(
  * push toward the palette's white/black anchors and survive quantization at seat
  * scale instead of averaging into the surrounding skin. Pure; returns a NEW RGBA
  * buffer, alpha untouched.
+ *
+ * `ownMiddle`: stretch the contrast about the picture's own mean brightness
+ * (its visible pixels) rather than mid-grey. About mid-grey, a picture that is
+ * bright all over is pushed brighter all over, and its pale tones clip to
+ * white: a fair face and a light shirt arrived as one white shape.
  */
 export function enhanceForBake(
   pixels: Uint8ClampedArray,
@@ -589,11 +594,23 @@ export function enhanceForBake(
   rows: number,
   contrast = 1.28,
   sharpen = 0.55,
+  ownMiddle = false,
 ): Uint8ClampedArray {
   const out = new Uint8ClampedArray(pixels.length);
   const at = (x: number, y: number, c: number): number =>
     pixels[(Math.min(rows - 1, Math.max(0, y)) * cols + Math.min(cols - 1, Math.max(0, x))) * 4 + c];
-  const curve = (v: number): number => 128 + (v - 128) * contrast;
+  let pivot = 128;
+  if (ownMiddle) {
+    let sum = 0;
+    let n = 0;
+    for (let p = 0; p < cols * rows; p++) {
+      if (pixels[p * 4 + 3] === 0) continue;
+      sum += luma(pixels[p * 4], pixels[p * 4 + 1], pixels[p * 4 + 2]);
+      n++;
+    }
+    if (n) pivot = sum / n;
+  }
+  const curve = (v: number): number => pivot + (v - pivot) * contrast;
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const p = (y * cols + x) * 4;

@@ -438,12 +438,16 @@ if (cutLocal) {
   const { ctx, p } = await editor(cutter.token, cutter.design);
   const buffer = process.env.E2E_FACE_PHOTO ? readFileSync(process.env.E2E_FACE_PHOTO) : FACE;
   await p.setInputFiles('#import-file', { name: 'player.jpg', mimeType: process.env.E2E_FACE_PHOTO ? 'image/jpeg' : 'image/png', buffer });
-  check('"Cut out and style" is in the bar, gold and crowned, not blue', await waitFor(p, () => { const b = document.querySelector('.qi-cutstyle'); return !!b && !b.hidden && b.classList.contains('pro-btn') && !b.classList.contains('primary') && !!b.querySelector('.pro-crown'); }, null, 20000));
+  // On Original the only cut-out button is the smart cut-out, which keeps the photo's colours.
+  await waitFor(p, () => { const b = document.querySelector('.cut-btn'); return !!b && b.getClientRects().length > 0; }, null, 20000);
+  check('on Original, "Cut out and style" is not offered (it never picks a style itself)', await p.evaluate(() => document.querySelector('.qi-cutstyle')?.hidden === true && document.getElementById('import-pstyle').value === '' && document.getElementById('real-colors').checked));
+  await p.selectOption('#import-pstyle', 'stencil');
+  check('with a style picked, "Cut out and style" is in the bar, gold and crowned, not blue', await waitFor(p, () => { const b = document.querySelector('.qi-cutstyle'); return !!b && !b.hidden && b.classList.contains('pro-btn') && !b.classList.contains('primary') && !!b.querySelector('.pro-crown'); }, null, 20000));
   await p.click('.qi-cutstyle');
   // The first cut-out asks first (what happens to the picture).
   if (await waitFor(p, () => !!document.querySelector('.pro-sheet [data-act="go"]'), null, 8000)) await p.click('.pro-sheet [data-act="go"]');
   check('…one tap: cut out on the server, then styled for the stand', await waitFor(p, () => window.__tifoProStyles.prepared()?.subject === 'cut-out', null, 120000), JSON.stringify(await p.evaluate(() => window.__tifoProStyles.prepared())));
-  check('…Stencil picked for it', (await p.evaluate(() => document.getElementById('import-pstyle').value)) === 'stencil');
+  check('…in the style that was picked', (await p.evaluate(() => document.getElementById('import-pstyle').value)) === 'stencil');
   const placed = await place(p);
   check('…and placed styled', placed?.style === 'stencil', JSON.stringify(placed));
   await p.screenshot({ path: '/home/claude/evidence/images/ui-cut-and-style.png' }).catch(() => {});
